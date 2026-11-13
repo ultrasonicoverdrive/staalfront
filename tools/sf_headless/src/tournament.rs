@@ -15,8 +15,8 @@
 //!   file when left out) and the game number through a fixed integer mixer, so a game number always has the
 //!   same seeds for the same `--seed`, and no two games share them. The AI seed feeds the random stream of
 //!   each AI (`AI_STREAM` plus the player number); no rule draws from it yet, so today it only shows in the
-//!   digest. How much the world seed alone separates the games is what the count of distinct final
-//!   checksums measures.
+//!   digest. How much the world seed alone separates the games is measured by the distinct coarse outcome
+//!   keys (a final checksum, and the exact outcome key, differ on tick-level noise from spawn facing alone).
 //!
 //! # When a game ends
 //!
@@ -359,7 +359,7 @@ impl GameRecord {
 
     /// [`outcome_key`](GameRecord::outcome_key) plus both AI digests. The digest hashes the AI's random
     /// stream, which the AI seed sets, so this key is different for every game by construction; it is
-    /// reported because it was asked for, and the key without digests is the one to judge divergence by.
+    /// reported because it was asked for and not to be judged by; judge divergence by the coarse keys.
     pub fn digest_key(&self) -> (Ending, u64, u64, Vec<u32>, Vec<u64>) {
         let (e, t, l, a) = self.outcome_key();
         (e, t, l, a, self.ais.iter().map(|x| x.digest).collect())

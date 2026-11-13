@@ -1004,9 +1004,11 @@ through `scenario::game`, speed 1.5 as in the game, pinned as `GAME_SPEED_RAW` =
   whole numbers (permille, printed with one decimal): wins per seat over all games, wins per faction over the games between **different** factions (a mirror
   says nothing about the factions), draws split into mutual defeat / stalemate / capped, min / median / max duration of the **decided** games (the median of
   an even count is the rounded-down average of the middle two), the number of **distinct final checksums**, and, since the fix round, the number of **distinct outcomes** (the keys `(ending, ticks, last loss, attacks per AI)`; and the
-  same with both AI digests), overall and per seating, and min / median / max of the last loss. A final checksum differs from the first spawn on (the world seed
-  draws spawn facing), so 100 of 100 checksums would hold even for 100 strategically identical games; the outcome key is what shows whether the games were played
-  differently. The digest key is different for every game by construction (the digest hashes the AI's random stream, which the AI seed sets), so it is printed because
+  same with both AI digests), since fix round 2 the number of **distinct coarse outcomes** `(ending, ticks, attacks per AI)` and the same plus the last loss
+  rounded down to 1,000 ticks, overall and per seating, and min / median / max of the last loss. A final checksum differs from the first spawn on (the world seed
+  draws spawn facing), so 100 of 100 checksums would hold even for 100 strategically identical games. The exact outcome key is nearly as weak: it holds the last loss
+  to the tick, and capped games all have the same `ticks`, so one death one tick earlier already makes it distinct. The coarse keys ignore that tick-level noise
+  and are the ones to judge divergence by. The digest key is different for every game by construction (the digest hashes the AI's random stream, which the AI seed sets), so it is printed because
   it was asked for and not to be judged by. The table and the JSON have no wall time; wall time goes
   to stderr and into the JSON's last key `host` (so `jq 'del(.host)'` leaves the part that must be equal between runs). The same arguments give the same table
   (`four_games_are_decided_or_labelled_and_the_table_is_the_same_on_a_second_run`; same machine, same build; a Linux/Windows comparison is not made and
@@ -1038,23 +1040,30 @@ load average of about 4 (other agents' cargo runs): **149.1 s for 100 games (fix
 | Draws | 93: 0 mutual defeat, **1 stalemate** (game 8, last loss at tick count 41,239), 92 capped |
 | Attacks launched | 1 to 9 per AI per game, mean 5.2 |
 | Distinct final checksums | **100 of 100 games** |
-| Distinct outcomes (ending, ticks, last loss, attacks) | **100 of 100 games, and 25 of 25 in each seating** (with digests: 100, by construction) |
+| Distinct outcomes, exact (ending, ticks, last loss, attacks) | 100 of 100 games, 25 of 25 in each seating (with digests: 100, by construction) |
+| Distinct coarse outcomes (ending, ticks, attacks) | **27 of 100**; per seating M v M 14, M v V 14, V v M 13, V v V 10 of 25 |
+| The same plus the last loss rounded down to 1,000 ticks | **51 of 100**; per seating M v M 22, M v V 17, V v M 20, V v V 16 of 25 |
 | Last loss | min 41,239 / median 59,031 / max 60,000 ticks |
 
 What it says: today's normal AI does not finish a game against itself. 96 of the 100 games had a unit or structure destroyed at or after tick 50,000: the armies keep trading,
 the bases keep being rebuilt (game 0, looked at every 5,000 ticks with a debug print that is not in the PR: 7 to 28 entities per side), and the construction centre
 falls in 7 games, always the north-east one. Whether the north-east site is easier to take or the south-west site's approach is worse is not measured here
-(seven decided games are too few to say; the seat table of a larger run, and 9.5b, will). The games are played differently, not only seeded differently: all 100 outcome keys are distinct
-(25 of 25 per seating), so the seating and the world seed alone separate the games and the jitter profile number of the design memo is **not needed** (its
-condition was fewer than about half distinct). That is the measure the decision rests on; the 100 distinct checksums alone would have proved nothing.
+(seven decided games are too few to say; the seat table of a larger run, and 9.5b, will). Divergence: the exact keys are all distinct (100 checksums, 100 outcome
+keys), but both are moved by tick-level noise from spawn facing. On the coarse keys only **27 of 100** games differ in (ending, ticks, attacks per AI) and **51 of 100**
+with the last loss rounded to 1,000 ticks, at or below the design memo's condition of "about half distinct". *13-11-2026 (orchestrator): the seeded jitter is therefore
+needed and goes into WP9.2a as the profile number `timing_jitter_permille` (default 0 for frozen profiles, set in the shipped normal profile); its effect is measured
+there on the coarse key.*
 `assets/ai/normal.ron` is being changed by WP9.1c-3 at the same time, so these numbers are a **baseline of main at 1586e1c plus this WP**, not a result for
 the final profile.
 
 ### Baseline causes (all [Gissing], from a read-only sweep; input for 9.2a, none measured here)
 
 * Waves are too small to kill a base: the trigger is `attack_value` 3,000 or `max_wait` 6,000 with `min_units` 4 (`army.rs`, `attack_due`), against towers and a rebuilding
-  goal list; `attack_patience` 2,400 then sends survivors home, so the armies trade for ever. (Consistent with the fixture above: four tanks do not kill an
-  undefended centre, twelve do.)
+  goal list; `attack_patience` 2,400 then sends survivors home, so the armies trade for ever. (Consistent with the fixture above: four tanks do not kill a
+  repairing centre, twelve do.)
+* A free, fast centre repair likely out-heals small waves (by reading, not run): the construction centre has no `cost`, so its repair is free; `repair.ron` has
+  `hp_per_tick` 3, and the AI repairs below 70 %. Four light tanks deal about 2.1 hp/tick against the centre (about 100 shots × 21 damage per 1,000 ticks), twelve about
+  6.3. No rule is changed here; input for a separate diagnosis.
 * Veyran never wins as the attacker and is never beaten in a mirror: its list carries an extra `fortified_bunker`, which makes its base harder and its economy later.
   Meridian wins only from seat 1.
 * Seat 1 wins only: a site asymmetry (the approach or the `beside` target cell at (12, 68) against (72, 14), the distance to ore) or the think order (player 0 always
