@@ -563,3 +563,193 @@ fn ai_vs_passive_with_and_without_the_ai_and_the_tick_of_the_launch() {
         per_second(b[1])
     );
 }
+
+/// `ai_vs_passive` with the AI's army numbers those of the shipped profile (the numbers of WP9.2a on); the
+/// scenario's own frozen profile has them off.
+fn with_shipped_army(mut s: Scenario) -> Scenario {
+    let old = s.ais[0].state().clone();
+    let mut profile = old.profile.clone();
+    profile.army = sf_data::ai_profile::AiProfile::embedded().army;
+    s.ais[0] = sf_ai::Ai::new(old.player, profile, 0xA1_0001, old.start_sites);
+    s
+}
+
+/// The step times of `ticks` ticks of `s` (the AIs' thinks untimed): `(the step of the tick an attack was
+/// launched in, the step of the tick the strike left its staging cell in, the worst step, the mean step)`.
+fn launch_steps(s: &Scenario, ticks: u64) -> (Duration, Duration, Duration, Duration) {
+    let mut world = s.build_world().unwrap();
+    let mut ais = s.ais.clone();
+    let mut out = Vec::new();
+    let (mut launch, mut advance, mut worst, mut total) = (
+        Duration::ZERO,
+        Duration::ZERO,
+        Duration::ZERO,
+        Duration::ZERO,
+    );
+    for _ in 0..ticks {
+        let (mut launched, mut advanced) = (false, false);
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                let before = ai.state().attacks_launched;
+                let staging = |a: &sf_ai::Ai| {
+                    a.state()
+                        .groups
+                        .iter()
+                        .any(|g| g.stage == sf_ai::state::GroupStage::Staging)
+                };
+                let was_staging = staging(ai);
+                out.clear();
+                ai.think(&world, &mut out);
+                launched |= ai.state().attacks_launched > before;
+                advanced |= was_staging && !staging(ai);
+                for command in out.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        let started = Instant::now();
+        world.step();
+        let spent = started.elapsed();
+        total += spent;
+        worst = worst.max(spent);
+        if launched {
+            launch = launch.max(spent);
+        }
+        if advanced {
+            advance = advance.max(spent);
+        }
+    }
+    (launch, advance, worst, total / ticks as u32)
+}
+
+#[test]
+fn the_launch_step_and_the_think_cost_with_groups_out_before_and_after_wp9_2a() {
+    // WP9.2a: the single launch command of the whole wave cost an 882 us sim step (docs/rules/ai.md). Now a march
+    // command carries at most `gather_group` ids and the strike first goes to a staging cell. The same scenario,
+    // `ai_vs_passive` to the win, with the numbers off (before) and the shipped numbers (after), alternating, three
+    // runs each; the median of the launch step, the staging-exit step and the worst step are printed. Then the
+    // AI's think cost with groups out: the budget of the design memo (mean at most 20 us per AI per tick, worst
+    // think at most 1 ms) is asserted in release builds, on `ai_vs_passive` after the launch and on
+    // `ai_raid_guard` (a strike out and a raid answered by the guard).
+    let before = Scenario::load(&scenario_path("ai_vs_passive.ron")).unwrap();
+    let after = with_shipped_army(before.clone());
+    let ticks = if cfg!(debug_assertions) { 2000 } else { 16_000 };
+    let median = |mut v: Vec<Duration>| {
+        v.sort();
+        v[v.len() / 2]
+    };
+    let (mut b, mut a) = (Vec::new(), Vec::new());
+    for _ in 0..3 {
+        b.push(launch_steps(&before, ticks));
+        a.push(launch_steps(&after, ticks));
+    }
+    for (label, runs) in [
+        ("before (numbers off)", &b),
+        ("after (shipped numbers)", &a),
+    ] {
+        let col = |i: usize| {
+            median(
+                runs.iter()
+                    .map(|r| [r.0, r.1, r.2, r.3][i])
+                    .collect::<Vec<_>>(),
+            )
+            .as_secs_f64()
+                * 1e6
+        };
+        let each: Vec<String> = runs
+            .iter()
+            .map(|r| format!("{:.1}", r.0.as_secs_f64() * 1e6))
+            .collect();
+        println!(
+            "ai_vs_passive {label}: the launch step of each run {each:?} us; launch step {:.1} us, staging-exit step {:.1} us, worst step {:.1} us, mean step {:.1} us (medians of 3 alternating runs of {ticks} ticks)",
+            col(0),
+            col(1),
+            col(2),
+            col(3)
+        );
+    }
+    let cost = measure(&after, ticks);
+    report("ai_vs_passive, shipped numbers, groups out", &cost);
+    let guard = Scenario::load(&scenario_path("ai_raid_guard.ron")).unwrap();
+    let guard_cost = measure(&guard, 3000);
+    report(
+        "ai_raid_guard, strike out and the guard at home",
+        &guard_cost,
+    );
+    if !cfg!(debug_assertions) {
+        assert!(
+            a.iter().all(|r| r.0 > Duration::ZERO),
+            "an attack was launched"
+        );
+        for c in [&cost, &guard_cost] {
+            assert!(
+                c.mean_per_tick_micros() <= 20.0,
+                "{:.2}",
+                c.mean_per_tick_micros()
+            );
+            assert!(c.worst <= Duration::from_millis(1), "{:?}", c.worst);
+        }
+    }
+}
+
+/// `ai_raid_guard` with 48 more riflemen of player 0 around the gather cell (60 in all), and the AI's
+/// `gather_group` set to `group`: a launch of 45 units (with the guard held back).
+fn big_wave(group: u8) -> Scenario {
+    let mut s = Scenario::load(&scenario_path("ai_raid_guard.ron")).unwrap();
+    s.commands.clear();
+    for i in 0..48u32 {
+        s.commands.push(sf_headless::scenario::TimedCommand {
+            tick: 0,
+            player: 0,
+            command: sf_headless::scenario::Action::SpawnUnit {
+                kind: 12,
+                owner: 0,
+                cell: (24 + i % 8, 66 + i / 8),
+            },
+        });
+    }
+    let old = s.ais[0].state().clone();
+    let mut profile = old.profile.clone();
+    profile.army.gather_group = group;
+    s.ais[0] = sf_ai::Ai::new(old.player, profile, 0xA1_0001, old.start_sites);
+    s
+}
+
+#[test]
+fn the_launch_step_of_a_wave_of_45_units_in_one_command_and_in_chunks_of_19() {
+    // WP9.2a chunking: the same launch (60 riflemen at the gather cell, a guard of a quarter held back, 45 in the
+    // strike), once as one command (`gather_group` 64, as before the chunking: every id in one `AttackMove`) and
+    // once as the shipped three commands of at most 19. Alternating, five runs each; the step of the launch tick and
+    // the step of the tick the strike leaves its staging cell are printed (relative numbers on a loaded container).
+    let ticks = 1000;
+    let (mut one, mut chunks) = (Vec::new(), Vec::new());
+    for _ in 0..5 {
+        one.push(launch_steps(&big_wave(64), ticks));
+        chunks.push(launch_steps(&big_wave(19), ticks));
+    }
+    let show = |label: &str, runs: &[(Duration, Duration, Duration, Duration)]| {
+        let col = |i: usize| -> Vec<String> {
+            runs.iter()
+                .map(|r| format!("{:.0}", [r.0, r.1, r.2][i].as_secs_f64() * 1e6))
+                .collect()
+        };
+        println!(
+            "wave of 45, {label}: launch step {:?} us, staging-exit step {:?} us, worst step {:?} us",
+            col(0),
+            col(1),
+            col(2)
+        );
+    };
+    show("one command (gather_group 64)", &one);
+    show("commands of at most 19 (shipped)", &chunks);
+    let s = big_wave(19);
+    let f = sf_headless::run::run_full(
+        &s,
+        &sf_headless::run::RunOptions {
+            ticks: 400,
+            every: 100,
+        },
+    )
+    .unwrap();
+    assert_eq!(f.ais[0].state().groups[0].members.len(), 45);
+}

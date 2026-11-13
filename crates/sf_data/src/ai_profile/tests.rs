@@ -227,7 +227,11 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
         ("stage_distance: 14", "stage_distance", ["65", "65"]),
         ("stage_permille: 700", "stage_permille", ["0", "1001"]),
         ("stage_patience: 600", "stage_patience", ["0", "72001"]),
-        ("reinforce_value: 1000", "reinforce_value", ["1000001", "1000001"]),
+        (
+            "reinforce_value: 1000",
+            "reinforce_value",
+            ["1000001", "1000001"],
+        ),
         (
             "defend_ratio_permille: 1500",
             "defend_ratio_permille",
