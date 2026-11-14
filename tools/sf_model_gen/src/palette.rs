@@ -28,6 +28,9 @@ pub struct FactionColours {
 pub struct Palette {
     pub factions: BTreeMap<String, FactionColours>,
     pub team_base: [u8; 3],
+    /// Factions without a player colour (WP11.6c): their third slot is `trim` in this colour.
+    #[serde(default)]
+    pub trim: BTreeMap<String, [u8; 3]>,
 }
 
 impl Palette {
@@ -51,7 +54,8 @@ impl Palette {
     }
 
     /// The material slots of a faction's model, in this fixed order (see [`slot`]):
-    /// paint, paint2, team, metal, rubber, accent.
+    /// paint, paint2, team, metal, rubber, accent (a faction listed under `trim` gets `trim` in the
+    /// third slot instead of `team`).
     pub fn materials(&self, faction: &str) -> Vec<Material> {
         let f = &self.factions[faction];
         let m = |name: &str, srgb: [u8; 3]| Material {
@@ -61,7 +65,10 @@ impl Palette {
         vec![
             m("paint", f.paint),
             m("paint2", f.paint2),
-            m(TEAM, self.team_base),
+            match self.trim.get(faction) {
+                Some(&c) => m("trim", c),
+                None => m(TEAM, self.team_base),
+            },
             m("metal", f.metal),
             m("rubber", f.rubber),
             m("accent", f.accent),

@@ -24,6 +24,31 @@
             rubber: (20, 20, 20),
             accent: (160, 32, 48),
         ),
+        // WP11.6c: the mission objects and rubble of the world (no player colour: their third slot is
+        // the fixed `trim` below) and the automated Network defences (they do carry the player colour).
+        "neutral": (
+            paint: (176, 168, 150),
+            paint_light: (196, 188, 170),
+            paint2: (132, 92, 64),
+            paint2_shade: (96, 70, 52),
+            metal: (60, 60, 56),
+            rubber: (24, 24, 24),
+            accent: (70, 96, 110),
+        ),
+        "network": (
+            paint: (92, 100, 112),
+            paint_light: (118, 126, 138),
+            paint2: (54, 58, 66),
+            paint2_shade: (70, 74, 84),
+            metal: (36, 36, 40),
+            rubber: (20, 20, 20),
+            accent: (150, 100, 20),
+        ),
+    },
+    // WP11.6c: factions whose models carry no player colour. Their third material slot is named
+    // `trim` and has this fixed colour (hazard markings), so the slot order stays the same.
+    trim: {
+        "neutral": (190, 150, 40),
     },
     // The base colour stored in the team material (the engine replaces it with the player colour).
     team_base: (235, 235, 235),
