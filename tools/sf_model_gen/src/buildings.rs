@@ -10,7 +10,7 @@
 
 use crate::kit::{
     Lod, Mat, Mesh, Model, Node, P, RECESS, SEAM, bevel_box, bolt, chamfer_rect, closed_box,
-    cuboid, extrude_z1, hatch, lathe, lathe_x, lathe_z, loft, ngon, railing,
+    cuboid, extrude_z1, frame, hatch, lathe, lathe_x, lathe_z, loft, ngon, railing,
 };
 use crate::models::{anchors, insets, team_frame, team_rings, team_strip, wedge};
 use crate::palette::{Palette, slot::*};
@@ -623,12 +623,13 @@ pub fn dish(f: F, lod: Lod, x: i32, y: i32, z: i32, r: i32, mast: i32) -> Mesh {
         (r * 15 / 100, mast + 30),
     ];
     m.add(lathe(&inner, segs, &[PAINT2, PAINT2], Some(METAL), None));
-    m.add(lathe(
-        &[(r + 40, mast + d - 40), (r + 40, mast + d + 30)],
-        segs,
-        &[TEAM],
-        None,
-        None,
+    // Team: a narrow band round the rim (a flat ring, never the whole dish).
+    m.add(frame(
+        &ngon(r + 60, segs, true),
+        &ngon(r - 180, segs, true),
+        mast + d - 40,
+        mast + d + 30,
+        TEAM,
     ));
     if lod.has(1) {
         m.add(lathe(

@@ -1,8 +1,8 @@
 //! The mission objects, the Network defences and the rubble heaps in style G (WP11.6c,
 //! docs/art-style.md section 10).
 //!
-//! The world's objects are neutral: their third material slot is the fixed hazard `trim`
-//! (palette `neutral`), never the player colour. The two automated Network defences carry the
+//! The world's objects are neutral: their third material slot is the light paint `paint3`
+//! (palette `neutral`, as the neutral units of WP11.6b), never the player colour. The two automated Network defences carry the
 //! player colour like a faction's structures (palette `network`). The rubble of a destroyed
 //! structure is one heap per footprint, shared by all factions (`wrecks.ron`).
 
@@ -14,8 +14,8 @@ use crate::models::{anchors, team_frame, team_strip};
 use crate::palette::{Palette, slot::*};
 use crate::stages::{chunk, fallen_plate, fit_team, hash, pad_model};
 
-/// The trim slot of a neutral model (the same index as `team`).
-pub const TRIM: crate::kit::Mat = TEAM;
+/// The light marking paint of a neutral model (`paint3`, the slot of `team`).
+pub const TRIM: crate::kit::Mat = PAINT3;
 
 /// Build an object from `recipe` with the palette `pal_name`: the team share is fitted only when
 /// the palette has the player colour (Network); a neutral model keeps its candidates in paint.
@@ -27,7 +27,7 @@ pub fn object(
     recipe: impl Fn(Lod) -> Built,
 ) -> Model {
     let pal = Palette::shipped();
-    let teamed = !pal.trim.contains_key(pal_name);
+    let teamed = pal_name != "neutral";
     let pad = recipe(Lod(0)).pad;
     let mut m = Model::new(stem, pal.materials(pal_name), |lod| {
         let mut b = recipe(lod);
@@ -35,7 +35,7 @@ pub fn object(
         if teamed {
             fit_team(&mut b.body, &turret_world, b.cands, stem);
         } else {
-            // A neutral model's candidates are its hazard trim: all of them stay.
+            // A neutral model's candidates are its light markings (`paint3`): all of them stay.
             for c in b.cands {
                 b.body.add(c);
             }
@@ -75,7 +75,7 @@ fn built(
     }
 }
 
-/// A plain concrete base with hazard trim stripes along two edges (neutral) or team candidates.
+/// A plain concrete base with light marking stripes along two edges (neutral) or team candidates.
 fn base(lod: Lod, hx: i32, hz: i32, h: i32) -> (Mesh, Vec<Mesh>) {
     let m = bevel_box([-hx, 0, -hz], [hx, h, hz], lod.bevel(80), PAINT, PAINT);
     let mut c = Vec::new();

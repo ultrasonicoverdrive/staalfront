@@ -354,14 +354,10 @@ impl Loader<'_> {
 }
 
 /// The file of a structure state (a build stage or a damage stage) as it lies under `assets`: `file` if it
-/// exists; for a set v5 model, whose generator has made only the finished look so far (WP11.6a; the states
-/// are WP11.6c), the set v4 file of the same name; else none. Remove the fallback in WP11.6c.
+/// exists, else none. (WP11.6a took a set v5 structure's states from set v4 of the same name; WP11.6c
+/// made every set v5 structure its own state files and removed that fallback.)
 pub(crate) fn state_file(assets: &Path, file: &str) -> Option<String> {
-    if assets.join(file).is_file() {
-        return Some(file.to_owned());
-    }
-    let v4 = format!("set_v4/{}", file.strip_prefix("set_v5/")?);
-    assets.join(&v4).is_file().then_some(v4)
+    assets.join(file).is_file().then(|| file.to_owned())
 }
 
 impl Roster {
@@ -1552,8 +1548,9 @@ mod tests {
     /// different shapes (WP6.3).
     #[test]
     fn every_buildable_structure_has_stage_models_from_the_art_set() {
-        /// Buildable structures that have no art yet and are drawn as boxes.
-        const NO_ART_YET: [&str; 1] = ["ore_silo"];
+        /// Buildable structures that have no art yet and are drawn as boxes (WP11.6c gave the ore
+        /// silo its models, so none is left).
+        const NO_ART_YET: [&str; 0] = [];
         let (defs, roster) = built(true);
         let mut checked = 0;
         for def in defs.units() {
@@ -1716,10 +1713,12 @@ mod tests {
             .collect();
         from_disk.retain(|e| !generic_of_factioned.contains(e));
         assert_eq!(sorted, from_disk);
-        // And the pinned numbers: nine structures with a model per faction (damaged and heavy), the decoy
-        // and the bunker with one generic model (damaged and heavy), and four mission objects (the
-        // archive both stages, the relay transmitter, the fuel depot and the bridge segment damaged only).
-        assert_eq!(got.len(), 9 * 2 * 2 + 2 * 2 + 2 + 1 + 1 + 1);
+        // And the pinned numbers: ten structures with a model per faction (damaged and heavy; WP11.6c
+        // added the ore silo, 45 -> 49), the decoy and the bunker with one generic model (damaged and
+        // heavy), and four mission objects (the archive both stages, the relay transmitter, the fuel
+        // depot and the bridge segment damaged only).
+        assert_eq!(got.len(), 10 * 2 * 2 + 2 * 2 + 2 + 1 + 1 + 1);
+        assert!(has_silo(&got));
         let has = |id: &str, f: Option<Faction>, s: DamageStage| {
             got.iter().any(|g| g.0 == id && g.1 == f && g.2 == s)
         };
@@ -1740,6 +1739,16 @@ mod tests {
             "no such file"
         );
         assert!(roster.warnings.is_empty(), "{:?}", roster.warnings);
+    }
+
+    /// The ore silo of WP11.6c has its damaged looks for both factions.
+    fn has_silo(got: &[(String, Option<Faction>, DamageStage)]) -> bool {
+        [Faction::Meridian, Faction::Veyran].iter().all(|f| {
+            DamageStage::DAMAGED.iter().all(|s| {
+                got.iter()
+                    .any(|g| g.0 == "ore_silo" && g.1 == Some(*f) && g.2 == *s)
+            })
+        })
     }
 
     /// The three looks of a structure are three different shapes, and a faction's damaged look is its own,

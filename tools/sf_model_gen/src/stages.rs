@@ -178,7 +178,7 @@ pub fn fit_team(body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
 }
 
 /// [`fit_team`] for a model with the player colour; a neutral model (its third slot is the fixed
-/// trim) gets none of the candidates.
+/// `paint3`) gets none of the candidates.
 pub fn fit(teamed: bool, body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
     if teamed {
         fit_team(body, fixed, cands, stem);
@@ -234,7 +234,7 @@ pub fn pad_model(m: &mut Model, floor: usize, ceil: usize, pad: (i32, i32, i32))
             if have >= need {
                 break;
             }
-            let b = crate::kit::bolt([x, y, z], 45, 30, 4, METAL);
+            let b = crate::kit::bolt([x, y, z], 45, 30, 4, PAINT2);
             have += b.len();
             body.mesh.add(b);
         }
@@ -816,9 +816,9 @@ fn scaffolding(
         cuboid(
             [x0 + ix, cut - 160, z0 + iz],
             [x1 - ix, cut - 100, z1 - iz],
-            METAL,
+            PAINT,
         )
-        .toned(900),
+        .toned(820),
     );
     // Setting-out stripes on the deck (team candidates, added after the scaffold's own).
     let mut deck = Vec::new();
@@ -1223,10 +1223,13 @@ fn heavy(
     );
     for i in 0..grid {
         for k in 0..grid {
-            let x = mid[0] - ix + (2 * ix) * (2 * i + 1) / (2 * grid);
-            let z = mid[2] - iz + (2 * iz) * (2 * k + 1) / (2 * grid);
+            let cell = (i * grid + k) as u32;
+            let jx = (hash(seed ^ (cell * 17 + 1)) as i32 - 500) * ix / (3 * grid * 500);
+            let jz = (hash(seed ^ (cell * 17 + 2)) as i32 - 500) * iz / (3 * grid * 500);
+            let x = mid[0] - ix + (2 * ix) * (2 * i + 1) / (2 * grid) + jx;
+            let z = mid[2] - iz + (2 * iz) * (2 * k + 1) / (2 * grid) + jz;
             let hh = ((plane.height_at(x, z) - floor)
-                * (45 + hash(seed + (i * 7 + k) as u32) as i32 / 30)
+                * (25 + hash(seed + (i * 7 + k) as u32) as i32 / 30)
                 / 100)
                 .max(300);
             let rr = (ix.min(iz) * 3 / (2 * grid)).clamp(400, 2400);
