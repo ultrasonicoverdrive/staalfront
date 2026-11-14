@@ -260,9 +260,8 @@ fn the_control_without_the_switch_never_defends_and_the_harvester_keeps_losing_h
 fn the_frozen_duel_opponent_is_the_shipped_profile_after_wp9_2b_1_without_the_new_numbers() {
     let fixture =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/normal_9_2b1.ron");
-    let old =
-        sf_data::ai_profile::AiProfile::from_ron(&std::fs::read_to_string(fixture).unwrap())
-            .unwrap();
+    let old = sf_data::ai_profile::AiProfile::from_ron(&std::fs::read_to_string(fixture).unwrap())
+        .unwrap();
     let mut new = sf_data::ai_profile::AiProfile::embedded();
     new.name = "normal_9_2b1".to_string();
     // The shipped numbers of WP9.3a-1 are the ones a profile that does not write them has.

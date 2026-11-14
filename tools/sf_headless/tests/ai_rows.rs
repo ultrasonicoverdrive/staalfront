@@ -53,7 +53,7 @@ fn play_one_row() {
     let setup = load_setup(&assets, &match_path).unwrap();
     let mut out = std::fs::File::create(out_path).unwrap();
     for index in 0..games {
-        let factions = factions_for(setup.file_factions, index);
+        let factions = factions_for(setup.file_factions(), index);
         let swapped = sites_swapped(index);
         let (world_seed, ai_seed) = seeds_for(seed, index);
         let p = prepare_sited(&setup, factions, swapped, world_seed, ai_seed).unwrap();
@@ -89,10 +89,13 @@ fn play_one_row() {
                         .map(|o| (o.id, o.hp))
                         .collect();
                     if w.struct_hit.is_none() {
-                        let hit = w.structures.iter().any(|(id, hp)| match structures.get(id) {
-                            Some(now_hp) => now_hp < hp,
-                            None => true,
-                        });
+                        let hit = w
+                            .structures
+                            .iter()
+                            .any(|(id, hp)| match structures.get(id) {
+                                Some(now_hp) => now_hp < hp,
+                                None => true,
+                            });
                         if hit {
                             w.struct_hit = Some(now);
                         }
@@ -118,7 +121,8 @@ fn play_one_row() {
             if let Some(result) = world.match_result() {
                 decided = true;
                 winner = match result.verdict {
-                    Verdict::Won(player) => setup.seats.iter().position(|s| *s == player),
+                    // The seats are players 0 and 1 of the match file, ascending.
+                    Verdict::Won(player) => Some(usize::from(player.0)),
                     Verdict::Draw => None,
                 };
                 break;
