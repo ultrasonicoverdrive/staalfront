@@ -91,10 +91,10 @@
         // `ai_vs_passive`; the start value 1000 wins at 26,387, docs/rules/ai.md "The army floor".)
         army_floor_value: 2000,
         // WP9.2a (docs/rules/ai.md "Groups"; the numbers of the design memo of 12-11-2026, the jitter by measurement).
-        // G1, the home guard: a quarter of the gathered value stays home at a launch, the highest ids first.
+        // G1, the home guard: off in this frozen variant (the shipped profile keeps a share home at a launch).
         home_guard_permille: 0,
         // G2, staging: the strike first goes to a cell 14 cells short of the target, and leaves it when 70 percent of its
-        // living members stand idle within `arrive_radius` of it, or after 600 ticks.
+        // living members stand idle within `arrive_radius` of it, or after `stage_patience` (1800) ticks.
         stage_distance: 14,
         stage_permille: 700,
         stage_patience: 1800,

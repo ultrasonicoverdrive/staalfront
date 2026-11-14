@@ -1550,3 +1550,134 @@ fn gather_units(
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Profile;
+    use crate::observe::{Seen, open_world};
+    use crate::state::Known;
+    use sf_data::ai_profile::AiProfile;
+    use sf_data::units::{Faction, UnitDefs};
+    use sf_sim::{Footprint, PlayerId, Tick};
+
+    fn obs(tick: u64, member: EntityId, enemy: EntityId, at: Cell) -> Observation {
+        Observation {
+            tick: Tick(tick),
+            player: PlayerId(0),
+            map: (32, 32),
+            credits: 0,
+            ore_stored: 0,
+            storage_capacity: 0,
+            power: None,
+            own: vec![Own {
+                id: member,
+                kind: Kind(1),
+                cell: Cell::new(at.x, at.y + 2),
+                footprint: None,
+                hp: 100,
+                order: Order::Idle,
+                standing: true,
+                max_hp: 100,
+                building: None,
+                repairing: false,
+                factory: None,
+                selling: false,
+                armed: true,
+                mobile: true,
+            }],
+            // The victim keeps its hit points: the strike does no damage.
+            visible: vec![Seen {
+                id: enemy,
+                kind: Kind(2),
+                owner: PlayerId(1),
+                cell: at,
+                footprint: Some(Footprint {
+                    width: 2,
+                    height: 2,
+                }),
+                hp: 500,
+                armed: false,
+            }],
+            gone: Vec::new(),
+            out_of_play: false,
+        }
+    }
+
+    /// R2: a strike in reach of a victim it cannot hurt ends by `stuck` (the victim in sight keeps
+    /// `attack_started` moving, so the patience never runs out) and that is one bounce with its launch value.
+    #[test]
+    fn a_strike_that_ends_stuck_records_one_bounce() {
+        let profile = Profile::resolve(
+            &AiProfile::embedded(),
+            Faction::Meridian,
+            &UnitDefs::embedded(),
+        )
+        .unwrap();
+        let mut state = AiState::new(PlayerId(0), profile, 5, Vec::new());
+        state.profile.army.escalate_permille = 500;
+        state.profile.army.attack_value_max = 3000;
+        let patience = u64::from(state.profile.army.attack_patience);
+        let (member, enemy, at, gather) = (
+            EntityId::new(1, 0),
+            EntityId::new(2, 0),
+            Cell::new(20, 10),
+            Cell::new(5, 25),
+        );
+        state.known_structures.insert(
+            enemy,
+            Known {
+                kind: Kind(2),
+                owner: PlayerId(1),
+                anchor: at,
+                width: 2,
+                height: 2,
+                seen_tick: Tick(0),
+            },
+        );
+        let w = open_world(32, 32);
+        let lens = Lens::new(&w, PlayerId(0));
+        let goal = target(&state, &lens, gather).unwrap();
+        state.add_group(
+            vec![member],
+            goal,
+            GroupStage::Engaged,
+            Tick(10),
+            800,
+            None,
+            None,
+        );
+        state.attack_started = Tick(10);
+        assert!(decide(&mut state, &obs(10, member, enemy, at), &lens, gather).is_empty());
+        assert_eq!(state.bounces, 0);
+        // One tick short of the patience: still on.
+        let t = 10 + patience - 1;
+        assert!(decide(&mut state, &obs(t, member, enemy, at), &lens, gather).is_empty());
+        assert_eq!(state.bounces, 0);
+        assert!(
+            state.attack_started.0 + patience > t + 1,
+            "patience_out is not the cause"
+        );
+        assert!(
+            decide(
+                &mut state,
+                &obs(10 + patience, member, enemy, at),
+                &lens,
+                gather,
+            )
+            .is_empty()
+        );
+        // The groups are on: the survivor goes into a Returning group instead of the returned list.
+        assert!(
+            state
+                .groups
+                .iter()
+                .any(|g| g.stage == GroupStage::Returning && g.recalled == [member])
+        );
+        assert_eq!(
+            (state.bounces, state.bounce_value, state.bounce_tick),
+            (1, 800, Tick(10 + patience))
+        );
+        assert!(state.strike().is_none());
+    }
+}
