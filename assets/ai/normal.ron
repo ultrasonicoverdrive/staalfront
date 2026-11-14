@@ -127,8 +127,12 @@
             // refinery, before the barracks. One harvester earns about 0.27 credits per tick, so every 100 credits
             // spent before the second harvester costs it about 370 ticks. Cost: no barracks before about tick 2,900
             // and the first unit queued at 4,460, existing at 4,621 (docs/rules/ai.md "The opening").
-            // The second refinery comes before the first tower (WP9.1c-3: measured, the list completes earlier and the floor is
-            // reached sooner, docs/rules/ai.md "The opening").
+            // WP9.3c (docs/rules/ai.md "Defence lock (WP9.3c)"): the list ends at the second refinery. Before WP9.3c it went on
+            // with the first tower, the radar, the second tower and the advanced defences (Veyran: and the fortified bunker after the
+            // first tower). Against a defender with its two towers and the advanced defences a strike won 1 time in 1,325 and the
+            // mirror games stayed undecided; without them the duel against the old profile is won from both start sites
+            // (50.7 % site-balanced mean against 22.9 %). The computer therefore has no armed structure and no radar; what that
+            // means for the player is written in the document.
             build_order: [
                 ("power_plant", 1),
                 ("refinery", 1),
@@ -136,10 +140,6 @@
                 ("barracks", 1),
                 ("power_plant", 2),
                 ("refinery", 2),
-                ("defence_tower", 1),
-                ("radar", 1),
-                ("defence_tower", 2),
-                ("advanced_defences", 1),
             ],
             // (role, weight): the share of the army each role aims at.
             // WP9.2b-1: kept at 4 / 2 / 3. The milder static mixes 4:4:3, 4:3:3 and 5:3:3 win more against the profile of WP9.2a-2 but
@@ -156,11 +156,6 @@
                 ("barracks", 1),
                 ("power_plant", 2),
                 ("refinery", 2),
-                ("defence_tower", 1),
-                ("fortified_bunker", 1),
-                ("radar", 1),
-                ("defence_tower", 2),
-                ("advanced_defences", 1),
             ],
             unit_mix: [("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)],
             scout: Some("scout"),
