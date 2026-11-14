@@ -166,7 +166,7 @@ pub fn fit_team(body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
         }
         let Some(c) = cands.next() else {
             if std::env::var_os("SF_FIT_SOFT").is_some() {
-                eprintln!("SHORT {stem}: {share:.3} {count}");
+                eprintln!("SHORT {stem}: {share:.3} {count} body {}", body.len());
                 break;
             }
             panic!("{stem}: team share {share:.3} with {count} triangles after every candidate");
@@ -555,7 +555,8 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
     let seed = built
         .stem
         .bytes()
-        .fold(7u32, |h, b| h.wrapping_mul(31) ^ u32::from(b));
+        .fold(7u32, |h, b| h.wrapping_mul(31) ^ u32::from(b))
+        % 100_000; // small, so the recipes may multiply it without overflow
     let lods: Vec<Node> = Lod::ALL
         .iter()
         .map(|&lod| {
@@ -1005,7 +1006,7 @@ fn edge_cands(f: &Footprint, y: i32, lod: Lod) -> Vec<Mesh> {
     let mut c = Vec::new();
     for inset in (0..12).map(|k| 300 + k * 550) {
         let (ax, az) = (f.hx - inset, f.hz - inset);
-        if ax < 900 || az < 900 {
+        if ax < 600 || az < 600 {
             continue;
         }
         for s in [-1, 1] {
@@ -1119,15 +1120,35 @@ fn damaged(
     stem: &str,
     teamed: bool,
 ) -> Vec<Node> {
-    let c = hole_at(&parts, slab, seed, 1);
     let r = (f.hx.min(f.hz) * 22 / 100).clamp(500, 1800);
+    // Of four places on the roof, the one that takes the least team colour with it (a hole in a
+    // band would leave too little of it on a small structure).
+    let team_near = |c: P| {
+        let r2 = i64::from(r * 3 / 2).pow(2);
+        parts
+            .body
+            .tris
+            .iter()
+            .filter(|t| t.mat == TEAM)
+            .filter(|t| {
+                let d = sub(centroid(t), c);
+                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= r2
+            })
+            .count()
+    };
+    let c = (1..=4)
+        .map(|k| hole_at(&parts, slab, seed, k))
+        .min_by_key(|c| team_near(*c))
+        .expect("four places");
     let mut m = parts.body.clone();
     hole(&mut m, c, r);
     soot(&mut m, c, r * 2, SOOT, TEAM);
     soot(&mut m, c, r * 15 / 10, CHAR, TEAM);
     soot(&mut m, c, r * 11 / 10, CHAR, PAINT2);
     // The burnt rim: chunks round the hole on the roof.
-    let rim = if lod.has(0) {
+    let rim = if f.hx.min(f.hz) < 3000 {
+        0
+    } else if lod.has(0) {
         6
     } else if lod.has(1) {
         3
@@ -1205,7 +1226,7 @@ fn heavy(
         (hi[0] - lo[0]) / 2 * 70 / 100,
         (hi[2] - lo[2]) / 2 * 70 / 100,
     );
-    let grid = if lod.has(0) {
+    let grid = if lod.has(0) && ix.min(iz) >= 1500 {
         4
     } else if lod.has(1) {
         2
@@ -1247,7 +1268,7 @@ fn heavy(
             );
             // A piece of roof band fallen on the heap (a team candidate): two narrow planks.
             let planks = [(-rr / 3, 0u8), (0, 2u8), (rr / 3, 0u8)];
-            for &(dz, q) in &planks[..if lod.has(0) { 3 } else { 1 }] {
+            for &(dz, q) in &planks[..if lod.has(1) { 3 } else { 1 }] {
                 let len = rr * 8 / 10;
                 let start = if q == 0 { x - len / 2 } else { x + len / 2 };
                 tops.push(fallen_plate(
