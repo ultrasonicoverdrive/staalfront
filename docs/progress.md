@@ -3465,6 +3465,12 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Folded in.** The seating-level coarse-key assertion in `a_tick_level_last_loss_shares_a_coarse_key_...`; `a_slow_think_is_in_the_counters_...` no longer bounds another slow tick's think by 8 ms of wall clock.
 * **Gaps.** The 65 capped games at rate 1 on the merged tree are not explained; rate 2 was not run on the merged tree. `tournament_decided` re-pinned on the merged tree (1,224 / 2,885; rate 3 gives #130's 1,315 / 5,546). The stale `SMOKE_CAP` comment in `tests/tournament.rs` is corrected (0 attacks in the 4 smoke games).
 
+### WP10.1a notes: the mission format (14-11-2026)
+
+* **Built.** `sf_data::mission` (`MissionDef`, `from_ron`, `check`, `as_match_def`): a strict superset of `MatchDef` with per-player goals (`defeat` any, `victory` all; `NoStanding(function)`, `NoStandingRoles`, `NothingLeft`, `LastInMatch`; default = today's rule), zones, variables, teams (scripted groups) and triggers (provisional vocabulary), every reference and range validated with the field named. Rules: `docs/rules/mission.md`, PLAN note 14-11-2026.
+* **Tests.** `tests/mission_files.rs` (all 3 shipped and 11 frozen match files load as a mission and equal their `MatchDef` field by field; the example fixture parses and passes `check`), `tests/mission_rules.rs` (20 tests, one per rule). 20 mutations of the rules, each failing a named test (list in the PR).
+* **Not done / gaps.** Nothing reads a `MissionDef` yet (10.1b: goal model in `sf_sim::outcome`, bridge, pinned scenario; 10.1c: consumers). The trigger and team vocabulary has no runtime and is provisional. No checksum, scenario or `.expected` was touched.
+
 ### WP9.2b-1 notes: the AI's enemy tally and counter mix (14-11-2026)
 
 * **What changed.** `crates/sf_ai/src/counter.rs` (new): the tally of armed enemy units seen (peak count per kind, forgotten `intel_ticks` after its tick), the per-credit share per mix role, and the weights `pick_kind` reads; `Lens::counter_score` in `observe.rs`; profile numbers `counter_permille` (0 to 2000, **shipped 0, off**) and `intel_ticks` (100 to 60,000, default 3000), in the digests only with the rule on (tag `0x94`). Nothing in `crates/sf_sim`.
