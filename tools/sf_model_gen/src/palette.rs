@@ -87,6 +87,8 @@ pub mod slot {
     pub const PAINT: Mat = Mat(0);
     pub const PAINT2: Mat = Mat(1);
     pub const TEAM: Mat = Mat(2);
+    /// The third slot of a neutral model (no player colour): a second light paint.
+    pub const PAINT3: Mat = Mat(2);
     pub const METAL: Mat = Mat(3);
     pub const RUBBER: Mat = Mat(4);
     pub const ACCENT: Mat = Mat(5);

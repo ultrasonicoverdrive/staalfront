@@ -10,14 +10,11 @@ use crate::models::{both_sides, team_frame, team_strip};
 use crate::palette::{Palette, slot::*};
 use crate::units::{Style, ring};
 
-/// The third material slot of a neutral model: a second light paint instead of the team colour
-/// (`Palette::materials("neutral")`).
-const PAINT3: Mat = TEAM;
 
 /// Road wheels on both sides at `xs`: tyres with a rubber tread and a metal rim face, the outer
 /// face at `z_out`, `w` wide, radius `r`, sitting on the ground. LOD0 has a tread profile and
 /// hubs, LOD1 plain wheels with eight segments, LOD2 one block a side.
-fn wheels(lod: Lod, xs: &[i32], r: i32, w: i32, z_out: i32) -> Mesh {
+pub(crate) fn wheels(lod: Lod, xs: &[i32], r: i32, w: i32, z_out: i32) -> Mesh {
     let mut right = Mesh::new();
     if !lod.has(1) {
         let (a, b) = (xs[0], xs[xs.len() - 1]);
@@ -58,7 +55,7 @@ fn wheels(lod: Lod, xs: &[i32], r: i32, w: i32, z_out: i32) -> Mesh {
 }
 
 /// A bevelled box at full detail, a plain box (10 triangles instead of about 40) in the far levels.
-fn soft(lod: Lod, lo: P, hi: P, b: i32, side: Mat, top: Mat) -> Mesh {
+pub(crate) fn soft(lod: Lod, lo: P, hi: P, b: i32, side: Mat, top: Mat) -> Mesh {
     if lod.has(0) {
         bevel_box(lo, hi, b, side, top)
     } else {
@@ -67,7 +64,7 @@ fn soft(lod: Lod, lo: P, hi: P, b: i32, side: Mat, top: Mat) -> Mesh {
 }
 
 /// Mudguards over the wheels, in the second paint (not at LOD2).
-fn arches(lod: Lod, xs: &[i32], r: i32, w: i32, z_out: i32) -> Mesh {
+pub(crate) fn arches(lod: Lod, xs: &[i32], r: i32, w: i32, z_out: i32) -> Mesh {
     let mut m = Mesh::new();
     if lod.has(1) {
         for &x in xs {
@@ -85,7 +82,7 @@ fn arches(lod: Lod, xs: &[i32], r: i32, w: i32, z_out: i32) -> Mesh {
 
 /// Headlights on both sides of a front at `x`, `y`, `z`: glass on Meridian, a small crimson lamp
 /// on Veyran (the `accent` slot).
-fn lamps(x: i32, y: i32, z: i32) -> Mesh {
+pub(crate) fn lamps(x: i32, y: i32, z: i32) -> Mesh {
     both_sides(closed_box([x, y, z - 90], [x + 110, y + 110, z + 90], ACCENT))
 }
 

@@ -22,6 +22,12 @@ pub(crate) const SHOE: crate::kit::Tone = 820;
 /// The recipes of set v5, sorted by file name.
 pub const MODELS: &[fn() -> Model] = &[
     crate::units_wheeled::neutral_supply_truck,
+    crate::units_vessels::veyran_gunboat,
+    crate::units_vessels::neutral_ferry,
+    crate::units_vessels::veyran_heavy_gun_team,
+    crate::units_transport::meridian_light_transport,
+    crate::units_transport::meridian_amphibious_transport,
+    crate::units_transport::veyran_harvester,
     meridian_construction_center,
     meridian_harvester,
     crate::units::meridian_heavy_tank,

@@ -21,6 +21,8 @@ pub mod palette;
 pub mod shade;
 pub mod units;
 pub mod units_artillery;
+pub mod units_transport;
+pub mod units_vessels;
 pub mod units_wheeled;
 
 /// Every file of set v5: `(file name, bytes)`, in the order of [`models::MODELS`].
