@@ -2552,6 +2552,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sf_model_gen"
+version = "0.1.0"
+dependencies = [
+ "ron",
+ "serde",
+ "sf_asset_check",
+ "sf_cutscene",
+ "sf_render",
+]
+
+[[package]]
 name = "sf_net"
 version = "0.1.0"
 dependencies = [

@@ -729,8 +729,29 @@ impl Level {
                     "index out of range or not triangles".into(),
                 ));
             }
+            // COLOR_0 (glTF: linear, multiplies the base colour) carries baked shading such as
+            // ambient occlusion (WP11.6a). The team material ignores it: its weight must stay 1.
+            let shades: Option<Vec<[f32; 3]>> = if team {
+                None
+            } else {
+                reader.read_colors(0).map(|c| c.into_rgb_f32().collect())
+            };
+            if shades.as_ref().is_some_and(|s| s.len() != positions.len()) {
+                return Err(GlbError::Invalid(
+                    "COLOR_0 and POSITION counts differ".into(),
+                ));
+            }
             let base = out.vertices.len() as u32;
-            for (p, n) in positions.iter().zip(&normals) {
+            for (i, (p, n)) in positions.iter().zip(&normals).enumerate() {
+                let color = match &shades {
+                    Some(s) => [
+                        color[0] * s[i][0],
+                        color[1] * s[i][1],
+                        color[2] * s[i][2],
+                        0.0,
+                    ],
+                    None => color,
+                };
                 let p = m.transform_point3(Vec3::from(*p));
                 let n = (normal_m * Vec3::from(*n)).normalize_or_zero();
                 if !p.is_finite() {
@@ -901,6 +922,15 @@ pub mod writer {
         pub material: usize,
         /// glTF primitive mode; `None` = triangles (tests write others).
         pub mode: Option<u32>,
+        /// Written as `COLOR_0` when set (tests: baked shading).
+        pub colors: Option<Colors>,
+    }
+
+    /// A `COLOR_0` accessor: float `VEC3` or normalised unsigned byte `VEC4`.
+    #[derive(Clone, Debug)]
+    pub enum Colors {
+        F32(Vec<[f32; 3]>),
+        U8(Vec<[u8; 4]>),
     }
 
     /// A node: name, translation, optional mesh primitive, children.
@@ -999,6 +1029,37 @@ pub mod writer {
                         data.len()
                     ));
                     attr.push(format!("\"{kind}\":{}", accessors.len() - 1));
+                }
+                if let Some(colors) = &p.colors {
+                    let offset = bin.len();
+                    let (count, kind) = match colors {
+                        Colors::F32(c) => {
+                            for v in c {
+                                for x in v {
+                                    bin.extend_from_slice(&x.to_le_bytes());
+                                }
+                            }
+                            (c.len(), "\"componentType\":5126,\"type\":\"VEC3\"")
+                        }
+                        Colors::U8(c) => {
+                            for v in c {
+                                bin.extend_from_slice(v);
+                            }
+                            (
+                                c.len(),
+                                "\"componentType\":5121,\"normalized\":true,\"type\":\"VEC4\"",
+                            )
+                        }
+                    };
+                    views.push(format!(
+                        "{{\"buffer\":0,\"byteOffset\":{offset},\"byteLength\":{}}}",
+                        bin.len() - offset
+                    ));
+                    accessors.push(format!(
+                        "{{\"bufferView\":{},\"count\":{count},{kind}}}",
+                        views.len() - 1
+                    ));
+                    attr.push(format!("\"COLOR_0\":{}", accessors.len() - 1));
                 }
                 let offset = bin.len();
                 for i in &p.indices {
@@ -1255,6 +1316,7 @@ pub mod writer {
                 indices: vec![0, 1, 2, 0, 2, 3],
                 material,
                 mode: None,
+                colors: None,
             })
             .collect()
     }
