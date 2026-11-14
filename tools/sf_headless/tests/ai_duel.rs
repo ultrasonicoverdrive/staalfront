@@ -92,6 +92,8 @@ fn the_frozen_profile_is_the_shipped_one_with_the_numbers_of_wp9_2a_off() {
     a.reinforce_value = 0;
     a.defend_ratio_permille = 0;
     a.timing_jitter_permille = 0;
+    a.gather_refinery_gap = 0;
+    a.gather_everyone = false;
     a.stage_permille = old.army.stage_permille;
     a.stage_patience = old.army.stage_patience;
     assert_eq!(old, new);
@@ -163,6 +165,10 @@ fn the_commands_of_a_duel_game_stay_at_a_bounded_rate() {
 }
 
 /// The most commands per 1,000 ticks (in hundredths) an AI may send in the duel game above: the higher measured
-/// rate times 1.3, rounded up to one decimal (fix round 1 of WP9.2a, merged tree: 65 and 52 commands in 37,931
-/// ticks, 1.71 and 1.37 per 1,000; 1.71 x 1.3 = 2.22, so 2.3). A doubling of the orders fails it.
-const RATE_BOUND: u64 = 230;
+/// rate times 1.3, rounded up to one decimal (WP9.2a-2, shipped numbers: 93 and 58 commands in 40,000 ticks, 2.32 and
+/// 1.45 per 1,000; 2.32 x 1.3 = 3.02, so 3.1). It was 2.3 (fix round 1 of WP9.2a: 65 and 52 commands in 37,931
+/// ticks, 1.71 and 1.37). Cause of the move, measured: with `gather_everyone` off the game is the old one (65 and 52 in
+/// 37,931 ticks, won by seat 0); with it on, the game is not decided in 40,000 ticks and seat 0 sends 33 single-unit
+/// `Move` orders to the gather cell instead of 9 (the units made beside the cell are sent too): the extra 28 commands
+/// are those, not a spam. A doubling of the orders still fails it.
+const RATE_BOUND: u64 = 310;
