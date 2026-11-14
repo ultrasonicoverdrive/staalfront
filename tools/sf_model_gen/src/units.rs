@@ -23,7 +23,7 @@ pub enum Style {
 }
 
 impl Style {
-    fn faction(self) -> &'static str {
+    pub(crate) fn faction(self) -> &'static str {
         match self {
             Style::Round => "meridian",
             Style::Angular => "veyran",
@@ -34,7 +34,7 @@ impl Style {
 /// A convex hull outline from `-back` to `front` (nose included) and `+-hz` wide: a chamfered
 /// rectangle with corners cut by `c` for [`Style::Round`], a wedge with its nose a sixth of the
 /// length for [`Style::Angular`] (6 corners, `c` unused).
-fn ring(style: Style, back: i32, front: i32, hz: i32, c: i32) -> Vec<[i32; 2]> {
+pub(crate) fn ring(style: Style, back: i32, front: i32, hz: i32, c: i32) -> Vec<[i32; 2]> {
     match style {
         Style::Round => shifted(
             &chamfer_rect((front + back) / 2, hz, c),

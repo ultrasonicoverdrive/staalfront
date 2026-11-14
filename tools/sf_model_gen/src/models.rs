@@ -21,14 +21,20 @@ pub(crate) const SHOE: crate::kit::Tone = 820;
 
 /// The recipes of set v5, sorted by file name.
 pub const MODELS: &[fn() -> Model] = &[
+    crate::units_wheeled::neutral_supply_truck,
     meridian_construction_center,
     meridian_harvester,
     crate::units::meridian_heavy_tank,
     meridian_light_tank,
+    crate::units_wheeled::meridian_repair_truck,
+    crate::units_artillery::meridian_siege_artillery,
     veyran_defence_tower,
     crate::units::veyran_heavy_tank,
+    crate::units_artillery::veyran_siege_artillery,
     veyran_light_tank,
+    crate::units_wheeled::veyran_repair_truck,
     veyran_power_plant,
+    crate::units_wheeled::veyran_transport_truck,
 ];
 
 // ---- Shared parts ------------------------------------------------------------------------
