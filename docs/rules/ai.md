@@ -1227,8 +1227,10 @@ faction:
   `scout_patience`, `scout_retry`; WP9.2a: the numbers of "Groups"; WP9.2a-2: `gather_refinery_gap`, `gather_everyone`, see "The start-site advantage"; WP9.2b-1: `counter_permille`, `intel_ticks`, see "Counter mix (WP9.2b-1)"; WP9.3a-1: `escalate_permille`, `attack_value_max`, `harvester_threat`, see "Escalation and the harvester threat (WP9.3a-1)"). Every one is range-checked when the file is read; the values are placeholders of the memo.
   In WP9.1a only `think_interval` and `stagger` acted; which act since WP9.1b-1 is under "The base".
 
-The shipped Meridian list: power_plant 1, refinery 1, barracks 1, power_plant 2, vehicle_factory 1, defence_tower 1, refinery 2, radar 1,
-defence_tower 2, advanced_defences 1; Veyran adds fortified_bunker 1 after the first tower. The ore silo is a rule of the economy
+The shipped list, the same six entries for Meridian and Veyran since WP9.3c (see "Defence lock (WP9.3c)"): power_plant 1, refinery 1,
+vehicle_factory 1, barracks 1, power_plant 2, refinery 2. Until WP9.3c the Meridian list went on with defence_tower 1, radar 1,
+defence_tower 2 and advanced_defences 1, and Veyran had fortified_bunker 1 after the first tower (that list was pinned in the frozen
+fixtures `normal_9_2a2.ron` and `normal_9_2b1.ron`, which keep it). The ore silo is a rule of the economy
 (`silo_percent`), not a list entry. The shipyard and vessels are out of 9.1. All pinned by `the_shipped_profile_is_pinned` (literals) and,
 as kinds, by `the_roles_of_the_shipped_profile_become_the_kinds_of_the_shipped_definitions`.
 

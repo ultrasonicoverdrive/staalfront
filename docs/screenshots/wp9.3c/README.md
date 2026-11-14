@@ -9,7 +9,8 @@ scratch test (not committed; it copied the setup of `ai_screenshot.rs` and repla
 |---|---|
 | `before_m1_duel_t30000_north_east_base_all_views.png` | Tick 30,000, old list: the NE seat owns 13 structures, among them the towers and the radar. |
 | `after_m1_duel_t30000_north_east_base_all_views.png` | Tick 30,000, shipped list: 7 structures (centre, two power plants, two refineries, vehicle factory, barracks), no tower, no radar. |
-| `*_t15000_*` | Tick 15,000: both lists stand at 7 structures of the NE seat (the old list's first tower is not up yet). |
 | `*_south_west_base_*` | The same for the other site (the SW seat's structures are not counted in the numbers above, which are the NE seat's). |
+
+Tick 15,000 pictures were removed in fix round 1: before and after were byte-identical (both lists stand at 7 structures then, the old list's first tower is not up yet), so they showed no difference.
 
 Not shown: the tournament numbers (tables in `docs/rules/ai.md`, "Defence lock (WP9.3c)").

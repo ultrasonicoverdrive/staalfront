@@ -705,6 +705,11 @@ fn the_money_of_the_ai_in_the_game_seat_around_the_first_attack() {
 #[test]
 fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
     let (last_build, last_kind) = goal_list_run(false);
+    // Measured history of this pin: WP9.1c-3 19,777 (was 29,777 and not complete: the vehicle factory waited for the 4,000
+    // credits the floor spent on twelve units; the ore of the map is the limit, docs/rules/ai.md "The opening"). WP9.2a-2
+    // 20,297: the new gather cell moves where the later structures are placed, so the list's timing shifts: gap rule alone
+    // 20,297, gathering of every unit alone 20,537, both 20,297, both off 19,777 (docs/rules/ai.md "The start-site
+    // advantage"). WP9.3c 11,737 with the short list below.
     // WP9.3c: the shipped list ends at the second refinery (kind 2) and is complete at 11,737 (docs/rules/ai.md "Defence
     // lock (WP9.3c)"); it was 20,297 with the tower, radar, second tower and advanced defences behind it
     // (`the_old_goal_list_still_completes_at_20_297`).

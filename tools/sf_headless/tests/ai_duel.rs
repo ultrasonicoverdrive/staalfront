@@ -96,15 +96,46 @@ fn the_frozen_profile_is_the_shipped_one_with_the_numbers_of_wp9_2a_off() {
     a.gather_everyone = false;
     a.stage_permille = old.army.stage_permille;
     a.stage_patience = old.army.stage_patience;
-    // WP9.3c: the shipped goal lists now end at the second refinery; the frozen copy keeps the lists of before (pinned here:
-    // Meridian ten entries ending in the advanced defences, Veyran eleven with the bunker after the first tower).
-    assert_eq!(old.factions[0].build_order.len(), 10);
+    // WP9.3c: the shipped goal lists now end at the second refinery; the frozen copy keeps the lists of before (pinned here
+    // in full: Meridian ten entries, Veyran eleven with the bunker after the first tower).
+    let list = |i: usize| -> Vec<(&str, u16)> {
+        old.factions[i]
+            .build_order
+            .iter()
+            .map(|(k, n)| (k.as_str(), *n))
+            .collect()
+    };
     assert_eq!(
-        old.factions[0].build_order.last(),
-        Some(&("advanced_defences".to_string(), 1))
+        list(0),
+        [
+            ("power_plant", 1),
+            ("refinery", 1),
+            ("vehicle_factory", 1),
+            ("barracks", 1),
+            ("power_plant", 2),
+            ("refinery", 2),
+            ("defence_tower", 1),
+            ("radar", 1),
+            ("defence_tower", 2),
+            ("advanced_defences", 1),
+        ]
     );
-    assert_eq!(old.factions[1].build_order.len(), 11);
-    assert_eq!(old.factions[1].build_order[7].0, "fortified_bunker");
+    assert_eq!(
+        list(1),
+        [
+            ("power_plant", 1),
+            ("refinery", 1),
+            ("vehicle_factory", 1),
+            ("barracks", 1),
+            ("power_plant", 2),
+            ("refinery", 2),
+            ("defence_tower", 1),
+            ("fortified_bunker", 1),
+            ("radar", 1),
+            ("defence_tower", 2),
+            ("advanced_defences", 1),
+        ]
+    );
     new.factions[0].build_order = old.factions[0].build_order.clone();
     new.factions[1].build_order = old.factions[1].build_order.clone();
     assert_eq!(old, new);

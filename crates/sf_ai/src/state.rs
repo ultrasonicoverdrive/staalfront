@@ -725,7 +725,6 @@ mod tests {
         )
     }
 
-    /// A state with two entries in each map of WP9.1b-1 and the other new parts set.
     /// The Meridian goal list of the shipped profile before WP9.3c (kinds: power plant, refinery, vehicle factory, barracks,
     /// power plant 2, refinery 2, tower, radar, tower 2, advanced defences). `base_state` carries it so that every digest pin
     /// of the earlier phases stands as the proof that nothing but the list moved; `the_digest_of_the_shipped_profile_state_is_pinned`
@@ -748,6 +747,7 @@ mod tests {
         .collect()
     }
 
+    /// A state with two entries in each map of WP9.1b-1 and the other new parts set.
     fn base_state() -> AiState {
         let mut s = state();
         s.profile.build_order = list_before_wp9_3c();
