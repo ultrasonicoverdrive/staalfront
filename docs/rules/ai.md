@@ -1153,9 +1153,9 @@ Reading: **the gap shrinks, it does not close.** NE wins 10 to 13 of 100 games i
 
 **Where the wave starts** (the largest Chebyshev distance of a member of the first strike from the gather cell, at the tick it goes out, first 64 games): SW 7 in all 63 launches with the rules off, 1 to 4 (mean 1.7, 61 launches) with them on; NE 2 to 5 (mostly 4) off, 1 to 2 (mean 1.6, 64 launches) on. Pinned for games 0 and 4 in `tools/sf_headless/tests/ai_march.rs`. At the staging exit the spread is small with or without the rules (mean 2.0 SW and 1.8 NE off, 0.9 and 1.8 on, measured on the strikes that reach the exit: 24 of 32 SW and 8 of 32 NE strikes off, 14 and 18 on: with the rules on the NE strikes live to the staging cell). **So at the staging exit the rules do not improve NE** (mean 1.8 off, 1.8 on); the gain on NE is at launch and in that its strikes now reach the staging cell at all. Pinned exactly per game in `ai_march.rs` (`EXIT_SPREAD`, rules on and a rules-off control): only one seat of each game reaches the exit before tick 20,000, so game 0 (SW: 0 on, 3 off), game 4 (NE 1 on; off, its SW seat 4) and game 3 (NE: 1 on, 4 off) are used. These single games show a smaller spread with the rules on; the 64-game means above are the fair comparison.
 
-**What counts as "sent" for `gather_everyone`.** `send` (in `army.rs`) records every unit it orders in `sent`, whatever the order: the gather `Move`, but also a defence or a march order. So a unit that defended and was never moved to the gather cell counts as sent and is not sent again by `gather_everyone`; it is still re-sent by `ensure_gather` when it stands idle at home more than 8 cells from the cell (limited by `resend_ticks`). Left as it is: keying `sent` on the gather `Move` only would change the command stream of every game and all pins.
+**What counts as "sent" for `gather_everyone`.** `send` (in `army.rs`) records every unit it orders in `sent`, whatever the order: the gather `Move`, but also a defence or a march order. So a unit that defended and was never moved to the gather cell counts as sent and is not sent again by `gather_everyone`; it is still re-sent by `gather_units` (`ensure_gather` only picks the cell) when it stands idle at home more than 8 cells from the cell (limited by `resend_ticks`). Left as it is: keying `sent` on the gather `Move` only would change the command stream of every game and all pins.
 
-**The long duel is sensitive to profile changes.** `a_long_duel_keeps_every_unit_in_one_group` (`ai_groups.rs`, game 6) needs a reinforcement out; it also fails under the mutation that switches the ore check of the gather cell off, because game 6 then loses its reinforcement. A profile change that fails it should move the game, not drop the check.
+**The long duel is sensitive to profile changes.** `a_long_duel_with_the_shipped_numbers_loses_no_unit` (`ai_groups.rs`, game 6) needs a reinforcement out; it also fails under the mutation that switches the ore check of the gather cell off, because game 6 then loses its reinforcement. A profile change that fails it should move the game, not drop the check.
 
 **`ai_vs_passive`**: wins at tick **15,249** (was 15,908): the margin to the end of the 16,000-tick scenario is **751 ticks, was 92** (13,839 with the WP9.2a numbers off). The wave of six leaves later (11,550, was 11,150: it first has to stand together) and wins sooner after it (3,699 ticks from launch to the win, was 4,758). Cause measured: with `gather_everyone` off 15,908 returns (any gap), with it on 15,249 (any gap); why the arrival is faster was not traced. The scenario was not lengthened.
 
@@ -1224,7 +1224,7 @@ faction:
 * Numbers: `think_interval`, `stagger`; `economy` (`power_margin`, `harvesters_per_refinery`, `reserve`, `max_parallel_builds`,
   `silo_percent`, `repair_below_percent`, `blocked_ticks`, `placement_cap`, `lane`, the aprons, `max_queue`); `army` (`attack_value`, `max_wait`, `min_units`,
   `first_attack_tick`, `defend_ticks`, `gather_distance`, `gather_radius`, `gather_group`, `gather_tries`, `resend_ticks`, `scouts_max`, `scout_tick`,
-  `scout_patience`, `scout_retry`; WP9.2a: the numbers of "Groups"; WP9.2a-2: `gather_refinery_gap`, `gather_everyone`, see "The start-site advantage"). Every one is range-checked when the file is read; the values are placeholders of the memo.
+  `scout_patience`, `scout_retry`; WP9.2a: the numbers of "Groups"; WP9.2a-2: `gather_refinery_gap`, `gather_everyone`, see "The start-site advantage"; WP9.2b-1: `counter_permille`, `intel_ticks`, see "Counter mix (WP9.2b-1)"). Every one is range-checked when the file is read; the values are placeholders of the memo.
   In WP9.1a only `think_interval` and `stagger` acted; which act since WP9.1b-1 is under "The base".
 
 The shipped Meridian list: power_plant 1, refinery 1, barracks 1, power_plant 2, vehicle_factory 1, defence_tower 1, refinery 2, radar 1,
@@ -1271,8 +1271,98 @@ loose (ten times the
 budget, release only); the numbers are the evidence. The observation walks every entity once per think; a map with far more entities
 than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add to this.
 
+## Counter mix (WP9.2b-1, 14-11-2026)
+
+**What it is.** The AI tallies the armed enemy units it sees and leans its unit mix toward the roles that do best against them, per credit. It is **built, tested and off**: the shipped `counter_permille` is 0. The measurement below shows it does not beat a static mix with the rocket trooper doubled. That static mix (and the milder 4 : 3 : 3 and 5 : 3 : 3) wins more against the profile of WP9.2a-2 but decides fewer games against itself than the old mix, so **the shipped mix stays 4 : 2 : 3** (fix round 1, 14-11-2026). The code is in `crates/sf_ai/src/counter.rs`; the one question that reads the public tables is `Lens::counter_score` in `observe.rs` (the only file that names the world).
+
+### The rules
+
+* **Tally** (`counter::tally`, every think, only when `counter_permille` > 0). Per kind: the number of units in `obs.visible` with `owner` not the AI, no footprint and `armed` (a non-empty loadout in the public weapon table). The entry keeps the **peak** count and the tick of it (a count equal to the peak refreshes the tick, a lower one changes nothing) and is dropped `intel_ticks` after that tick: still there at tick + `intel_ticks` - 1, gone at tick + `intel_ticks`. Never tallied: unarmed units, structures (seen or remembered), the AI's own units, and **the scout kind of the profile**. The last is a deviation from the letter of the brief ("armed"): the scout carries a pistol, so it is an armed kind, but the design memo says scouts must not count, and one scout would move the shares of a small army by about a tenth. The tally is in `AiState::intel` (`BTreeMap<Kind, (count, tick)>`). The tally counts every owner other than the AI, neutral included (fine for the 1v1 maps of today). A profile whose scout kind is also a role of the mix is refused at load, since that role would never be tallied.
+* **Lens question.** `Lens::counter_score(role, enemy)` is the largest `weapons::weapon_score(weapon, percent)` over the role's loadout, with `percent` the armour table's cell for the weapon's damage type and the enemy kind's armour type (100 for a kind or table the world lacks). A raw number: it is never compared between roles of different price.
+* **Share** (`counter::best_role`, `counter::shares`). Each tallied kind's value (count times `unit_cost`) goes to the mix role with the largest score **per credit**, found by cross-multiplication in `u128` (`score_a * cost_b` against `score_b * cost_a`); the earlier entry of the mix wins a tie; nobody wins when every score is 0 (the value still counts in the total, so the shares then add up to less than 1,000). A role's share is its value in thousandths of everything tallied.
+* **Weight** (`counter::weight`, `counter::weights`). `base * (1000 + counter_permille * share / 1000)` in thousandths, at most `2000 * base`, **no lower clamp** (a role that is not the counter keeps its base weight). `production::pick_kind` is unchanged apart from its weight type (`u32`); with the rule off the weights are `base * 1000`, so the pick order is the old one (pinned over 729 counts, below).
+* **Numbers** (`army:` in the profile). `counter_permille` 0 to 2000, default 0 (off). `intel_ticks` 100 to 60,000, default 3000, read only with the rule on. Both are in `Profile::digest` and the tally is in `AiState::digest` only with the rule on (tag `0x94`), so no frozen profile and no earlier checksum moved by the rule itself.
+
+**The shares on M1** (raw scores from the shipped tables, pinned in `the_lens_scores_every_role_against_every_armour_type_as_pinned`; per credit = score / price, price 100 / 300 / 700):
+
+| enemy armour | rifleman | rocket trooper | light tank | counter |
+|---|---|---|---|---|
+| infantry (rocket trooper) | 30,000 (300) | 36,000 (120) | 35,000 (50) | **rifleman** |
+| light (light tank) | 12,000 (120) | 117,000 (390) | 87,500 (125) | **rocket trooper** |
+| heavy (heavy tank) | 3,000 (30) | 90,000 (300) | 74,375 (106) | **rocket trooper** |
+| structure (defence tower) | 6,000 (60) | 63,000 (210) | 52,500 (75) | **rocket trooper** |
+
+By raw score the rocket trooper would win against everything; per credit the rifleman wins against infantry, and the light tank wins against nothing, so on M1 the rule is a dial between riflemen and rocket troopers.
+
+### Measured: the counter mix against a static rocket row
+
+**Setup.** Release `sf_headless tournament`, `m1_duel`, cap 60,000, 8-cycle of start sites, base seeds 458,758 (the file's), 777 and 888; one row = 96 games per seed with the profile under test on each seat (48 games with it on seat 0, 48 on seat 1, so 48 games from each site per seed, 144 per site over three seeds). The opponent is the frozen profile after #134 (`tools/sf_headless/tests/fixtures/normal_9_2a2.ron`, not shipped; `the_frozen_duel_opponent_is_the_shipped_profile_with_the_counter_mix_off` ties it to the shipped file). Rows: `ctl` = the new code with the numbers off (mix 4 : 2 : 3), `c1000` and `c2000` = `counter_permille` 1000 and 2000 with `intel_ticks` 3000, `rock` = the static mix 4 : 4 : 3 (rocket troopers doubled) with the rule off. The binary was built from the tree with the scout exclusion (an earlier set of `c1000` and `c2000` rows without it was discarded; `ctl` was played with that first build, where the rule is off and the exclusion cannot act). Rates are **wins as a share of the games played from that site** (draws and capped games count as not won); the verdict is the mean of the two site rates. One seed has about 45 decided games, a **standard error of about 7 points**; the pooled row is 144 games per site (about 4 points).
+
+Two duels per row. **Fixture duel**: the profile under test against the frozen profile (setup above). **Mirror duel**: release `m1_duel` with the profile under test on both seats, 100 games per seed on the same three seeds, cap 60,000; "decided" counts games with a winner. Fix round 1 (14-11-2026) added the rows 4 : 3 : 3 and 5 : 3 : 3 (rule off) and the mirror duel. A row ships only if all four hold, against the control: (1) site-balanced mean at least 27.9 %; (2) SW at least 27.6 % and NE at least 8.2 %; (3) more wins than losses from each site; (4) mirror duel decided at least 124 of 300.
+
+| Row | SW wins of 144 (w/l/d) | NE wins of 144 (w/l/d) | **site-balanced mean** | fixture decided of 288 | **mirror decided of 300** (SW : NE wins) | passes |
+|---|---|---|---|---|---|---|
+| `ctl` (4 : 2 : 3, off) = **shipped** | 47 (32.6 %) 47/19/78 | 19 (13.2 %) 19/47/78 | **22.9 %** | 132 | **139** (104 : 35) | control |
+| `c1000` | 38 (26.4 %) | 70 (48.6 %) | **37.5 %** | 143 | not run | no (2: SW) |
+| `c2000` | 37 (25.7 %) | 79 (54.9 %) | **40.3 %** | 152 | not run | no (2: SW) |
+| `rock` (4 : 4 : 3, off) | 71 (49.3 %) 71/22/51 | 70 (48.6 %) 70/3/71 | **49.0 %** | 166 | **110** (81 : 29) | no (4) |
+| `r433` (4 : 3 : 3, off) | 71 (49.3 %) 71/22/51 | 70 (48.6 %) 70/3/71 | **49.0 %** | 166 | **108** (79 : 29) | no (4) |
+| `r533` (5 : 3 : 3, off) | 73 (50.7 %) 73/24/47 | 70 (48.6 %) 70/4/70 | **49.7 %** | 171 | **112** (82 : 30) | no (4) |
+
+Per seed (fixture duel: wins from SW of 48 / from NE of 48 / mean; mirror duel: decided of 100, SW : NE):
+
+| Row | seed 458,758 | seed 777 | seed 888 |
+|---|---|---|---|
+| `ctl` | 17 / 7 / 25.0 %; mirror 48 (38 : 10) | 15 / 7 / 22.9 %; mirror 45 (32 : 13) | 15 / 5 / 20.8 %; mirror 46 (34 : 12) |
+| `c1000` | 18 / 23 / 42.7 % | 13 / 22 / 36.5 % | 7 / 25 / 33.3 % |
+| `c2000` | 16 / 24 / 41.7 % | 13 / 25 / 39.6 % | 8 / 30 / 39.6 % |
+| `rock` | 23 / 18 / 42.7 %; mirror 32 (22 : 10) | 22 / 26 / 50.0 %; mirror 39 (30 : 9) | 26 / 26 / 54.2 %; mirror 39 (29 : 10) |
+| `r433` | 23 / 18 / 42.7 %; mirror 32 (22 : 10) | 22 / 26 / 50.0 %; mirror 37 (28 : 9) | 26 / 26 / 54.2 %; mirror 39 (29 : 10) |
+| `r533` | 24 / 18 / 43.8 %; mirror 33 (23 : 10) | 23 / 26 / 51.0 %; mirror 38 (29 : 9) | 26 / 26 / 54.2 %; mirror 41 (30 : 11) |
+
+One seed has a standard error of about 7 points; differences of a game or two between rows are noise. The fixture duel of `r433` has the same wins, losses and draws per site as `rock` on all three seeds, but the games are not the same: 82 of the 288 final checksums differ (19, 31 and 32 of 96 per seed) and two results differ, both on seed 777, where they cancel within each site. With the infantry weights 4 : 3 and 4 : 4 the barracks makes the same units until 4 riflemen and 3 rocket troopers are alive; the eighth infantry unit is the first that differs. In the mirror duels 61 of the 300 final checksums and two results differ. The mirror rows of `ctl` and `rock` are the reviewer's (`ctl` reproduces the 139 of WP9.2a-2); the `r433`/`r533` rows and a check of `ctl`'s first seat (11 / 13 / 24, as before) are fix round 1's.
+
+Wins / losses / draws per site and seat, per seed, are in the PR body.
+
+**Verdict.** (1) The counter mix is **better than the control** on the site-balanced mean (37.5 % and 40.3 % against 22.9 %), but it is **worse than the control from SW** (26.4 % and 25.7 % against 32.6 %), so it fails condition (2). Why it helps from NE and hurts from SW was not traced. It does not beat the static rocket rows either, so `counter_permille` ships at 0. (2) The three static mixes with more rocket troopers (4 : 4 : 3, 4 : 3 : 3, 5 : 3 : 3) pass conditions (1) to (3) by a wide margin but **fail (4)**: against themselves they decide 110, 108 and 112 of 300 games, against 139 for the old mix. More rocket troopers make both sides harder to finish. **So no new mix ships: the shipped mix stays 4 : 2 : 3** (orchestrator decision 14-11-2026, fix round 1), and 4 : 4 : 3 is recorded as measured, not shipped. (3) **The done-when of 55 % site-balanced is not met** by anything shipped (the control is 22.9 %). (4) Not examined: other static mixes, `intel_ticks` other than 3000, `counter_permille` between 0 and 1000, a mix with the tank dropped, the mirror duel of the counter rows.
+
+### Pins
+
+No pin moved in the end. The first build of this work package shipped 4 : 4 : 3 and moved the base-state digest (`0x4d0a_8207_c799_2fad` -> `0x5057_42d7_c905_864d`), the `m1_ai` timings (floor 10,734, first wave 10,957, won 13,413, goal list 21,097) and the third picture (13,100); with 4 : 2 : 3 back every old value returns (digest `0x4d0a_8207_c799_2fad`, goal list 20,297 with the bound 20,500, floor 9,654, first wave 10,037, won 12,673, picture 12,400), and its screenshots were removed. The shipped numbers `counter_permille` 0 and `intel_ticks` 3000 are pinned. Not moved: `golden.rs` and every `assets/scenarios/*.expected` (no `*_defs/` copy was touched).
+
+### Cost
+
+`ai_perf.rs` (`what_the_counter_mix_costs_with_a_visible_army_of_200_units`, release, 200 armed enemy units in sight, rifleman, rocket trooper, light and heavy tank, the fastest of five runs per think so that a container spike is not read as the code): one think mean **7.7 us**, worst **46 us** (builder's run; the reviewer measured 8.7 us and 53 us) (all four managers; the budget is 20 us and 1 ms); the tally alone 0.9 us mean, 1.4 us worst; the weights of one production turn 0.55 us mean, 0.8 us worst. Asserted in release.
+
+### Tests
+
+`tools/sf_headless/tests/ai_counter.rs` (20 tests), each calling the production code: the tally keeps the peak, forgets after `intel_ticks` and not one tick earlier, follows the profile's number, counts only armed units of others (not unarmed units, the scout kind, structures, own units); the raw scores pinned per role and armour; the per-credit counter per armour (rifleman against infantry, rocket trooper against light, heavy and structure; the light tank against nothing); ties go to the earlier entry; the weight formula over its corners; the weights move toward the counter and stop at twice the base; the old pick order over a sweep of 729 count triples with the rule off; the pick leans toward the counter; **composition collapse** (every combination of four kinds at 0, 1, 10 and 100 units and seven strengths: the tank weight is never under its base and its share never under 3/15, the clamp floor, and 19 % of 1,500 picks); the digest only with the rule on; the fog twin (an army out of sight changes no command and no digest with the rule on; the same army in sight is tallied and moves the digest); the production turn queues what the weights say; a tallied kind no role of the mix scores against still counts in the total (the shares then add up to less than 1,000). Mutations, each run on a scratch edit of the source and reverted (`git checkout`), with the test that failed:
+
+| Mutation | Failing test |
+|---|---|
+| tally counts unarmed units | `the_tally_counts_armed_units_of_others_only` |
+| tally counts the AI's own units | `the_tally_counts_armed_units_of_others_only` |
+| tally counts the scout kind | `the_tally_counts_armed_units_of_others_only` |
+| a kind nobody counters is left out of the total (`total += worth` inside the `if let Some(i)`, fix round 1) | `a_tallied_kind_nobody_in_the_mix_counters_still_counts_in_the_total` |
+| expiry one tick late / one tick early | `the_tally_keeps_the_peak_and_forgets_it_...`, `the_tally_follows_intel_ticks_of_the_profile` |
+| the last count replaces the peak | `the_tally_keeps_the_peak_and_forgets_it_...` |
+| raw score instead of per credit | `per_credit_the_rifleman_counters_infantry_...`, `raw_scores_would_pick_...`, `the_weights_move_toward_the_counter_...` |
+| a later entry wins a tie | `a_tie_goes_to_the_earlier_entry_...` |
+| no upper clamp | `composition_collapse_...`, `the_weight_formula_is_pinned_over_its_corners`, `the_weights_move_...` |
+| non-counter roles pushed below their base | `composition_collapse_...`, `the_weight_formula_...`, `the_weights_move_...`, `with_the_rule_on_the_pick_leans_toward_the_counter` |
+| the tally entries are not hashed | `the_numbers_of_the_counter_mix_are_in_the_digest_only_when_it_is_on` |
+| the profile digest ignores the numbers | `profile::tests::the_counter_mix_numbers_are_hashed_only_when_it_is_on` |
+| production ignores the weights | `the_production_turn_queues_what_the_weights_say_...` |
+| the tally runs with the rule off | `with_the_rule_off_nothing_is_tallied_...` |
+| the observation shows the fog | `an_invisible_army_changes_no_command_and_no_digest_with_the_counter_mix_on` |
+| a range check removed (`intel_ticks`, `counter_permille`) | `every_number_is_checked_at_both_ends_when_the_file_is_read` |
+
+`sf_data`: the two numbers read as off and 3000 in all four frozen profiles (`a_profile_without_the_numbers_of_wp9_2b_1_reads_with_the_counter_mix_off`).
+
 ## Not done
 
+* **WP9.2b-1 gaps.** The counter mix is off: it did not beat the static rocket row (49.0 % against 40.3 % site-balanced), and it was worse than the control from the SW site (25.7 to 26.4 % against 32.6 %); why it helps from NE and hurts from SW was not traced. Not measured: other static mixes, `intel_ticks` other than 3000, `counter_permille` between 0 and 1000, a mix without the tank, the new roles of WP9.5b (heavy tank, siege artillery and the faction units are buildable but not in the mix). Nothing remembered is tallied (structures, or units that left sight, beyond `intel_ticks`). The 55 % site-balanced aim is not met: the shipped mix is the control (22.9 %); the static mixes 4 : 4 : 3, 4 : 3 : 3 and 5 : 3 : 3 reach 49.0 to 49.7 % but decide too few mirror games (110, 108, 112 of 300 against 139) and are not shipped.
+* **Choice of an economy target (the dropped WP9.2b-2, 14-11-2026).** Not built: the siege test was true at 1 of 2,461 launches on `m1_duel` (towers stand 9 to 12 cells from the centre, outside radius 8; an armed structure is remembered at only 46 % of launches; every economy structure is within 6 cells of the centre), so it would never act; its budget goes to WP9.3a, and it needs economy structures placed away from the centre, a defence memory that survives to launch and cover measured per target before it returns.
 * **WP9.1c-2 gaps.** The army floor costs the economy: on M1's 4,000 credits the goal list does not complete in 30,000 ticks without an attack
   ("The army floor", the money). One group at a time (no second wave while one is out; units made meanwhile gather); no retreat, regroup, focus fire or
   target priority beyond "the construction centre first" (9.2/9.3); while the whole army is out, a hit on a structure other than the centre is

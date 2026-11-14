@@ -228,6 +228,9 @@ pub struct AiState {
     /// Per army unit: the tick of the last order (gather, attack or defence) and how many gather orders it got
     /// without arriving; pruned to the live units every army turn.
     pub sent: BTreeMap<EntityId, (Tick, u8)>,
+    /// WP9.2b-1, the tally of the counter mix (`crate::counter`): per enemy kind the peak count of armed units seen at
+    /// one think and the tick of it. Empty, and not hashed, while `counter_permille` is zero.
+    pub intel: BTreeMap<Kind, (u32, Tick)>,
 }
 
 fn write_cell(h: &mut Fnv1a64, c: Option<Cell>) {
@@ -304,6 +307,7 @@ impl AiState {
             jitter: None,
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
+            intel: BTreeMap::new(),
         }
     }
 
@@ -571,6 +575,16 @@ impl AiState {
                         h.write_u32(id.generation());
                     }
                 }
+            }
+        }
+        // WP9.2b-1: the tally, only with the counter mix on.
+        if self.profile.army.counter_on() {
+            h.write_u8(0x94);
+            h.write_u32(self.intel.len() as u32);
+            for (kind, (n, tick)) in &self.intel {
+                h.write_u32(u32::from(kind.0));
+                h.write_u32(*n);
+                h.write_u64(tick.0);
             }
         }
         h.finish()

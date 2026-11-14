@@ -16,6 +16,7 @@ use sf_sim::{Cell, Command, PlayerId, Tick};
 
 use crate::army;
 use crate::base;
+use crate::counter;
 use crate::economy;
 use crate::memory;
 use crate::observe::{Lens, Observation};
@@ -80,6 +81,7 @@ impl Ai {
             return;
         }
         memory::update(&mut self.state.known_structures, obs);
+        counter::tally(&mut self.state, obs);
         army::watch(&mut self.state, obs, lens);
         let manager = Manager::of_think(self.state.thinks);
         self.state.manager_runs[manager as usize] += 1;
