@@ -53,6 +53,11 @@ pub const ARMY_COMMANDS_PER_TURN: usize = 4;
 /// How far from the first choice the gather cell search looks: rings 0 to 3 round it, 49 cells at most.
 const GATHER_RINGS: i64 = 3;
 
+/// How far from the first choice the gather cell search looks with `gather_refinery_gap` set: rings 0 to 10
+/// (441 cells at most). An engine bound, not a tuning number: the first choice can lie in the middle of an ore
+/// field or beside a refinery, and the nearest cell off both is some cells away.
+const GATHER_RINGS_WIDE: i64 = 10;
+
 /// How far round a footprint [`beside`] looks for open ground: rings 1 to 3 outside it.
 const BESIDE_RINGS: i64 = 3;
 
@@ -278,7 +283,9 @@ pub fn gathered(
         .filter(|o| is_army(state.scout, lens, o) && o.order == Order::Idle)
         .filter(|o| !in_a_group(state, o.id))
         .filter(|o| {
-            cheb(o.cell, gather) <= radius
+            // With `gather_everyone` a unit within the radius counts only after it has been sent there.
+            (cheb(o.cell, gather) <= radius
+                && (!a.gather_everyone || state.sent.contains_key(&o.id)))
                 || state
                     .sent
                     .get(&o.id)
@@ -1109,11 +1116,47 @@ pub fn ensure_gather(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) ->
     if let Some(g) = state.gather
         && lens.ground(g)
         && !under_a_structure(state, obs, g)
+        && gather_off_ore_and_refinery(state, obs, lens, g)
     {
         return Some(g);
     }
     state.gather = find_gather(state, obs, lens);
     state.gather
+}
+
+/// WP9.2a-2: whether `cell` keeps the rule `gather_refinery_gap` (not an ore cell, at least that many cells
+/// from every own refinery). True with the number 0, the old rule.
+fn gather_off_ore_and_refinery(
+    state: &AiState,
+    obs: &Observation,
+    lens: &Lens<'_>,
+    cell: Cell,
+) -> bool {
+    let gap_needed = i64::from(state.profile.army.gather_refinery_gap);
+    if gap_needed == 0 {
+        return true;
+    }
+    if lens.harvestable(cell) {
+        return false;
+    }
+    let at = (i64::from(cell.x), i64::from(cell.y), 1, 1);
+    obs.own
+        .iter()
+        .filter(|o| {
+            lens.building(o.kind)
+                .is_some_and(|b| b.function == BuildingFunction::HarvesterDock)
+        })
+        .filter_map(|o| {
+            o.footprint.map(|f| {
+                (
+                    i64::from(o.cell.x),
+                    i64::from(o.cell.y),
+                    i64::from(f.width),
+                    i64::from(f.height),
+                )
+            })
+        })
+        .all(|r| gap(at, r) >= gap_needed)
 }
 
 /// Whether `cell` lies under a structure the AI knows: its own, a visible one or a remembered one.
@@ -1212,6 +1255,9 @@ fn find_gather(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Ce
         if !lens.ground(c) || aprons.contains(&(x, y)) {
             return false;
         }
+        if !gather_off_ore_and_refinery(state, obs, lens, c) {
+            return false;
+        }
         if footprints
             .iter()
             .any(|&(fx, fy, fw, fh)| x >= fx && x < fx + fw && y >= fy && y < fy + fh)
@@ -1220,7 +1266,12 @@ fn find_gather(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Ce
         }
         own_structures.iter().all(|&r| gap((x, y, 1, 1), r) > lane)
     };
-    for ring in 0..=GATHER_RINGS {
+    let rings = if state.profile.army.gather_refinery_gap == 0 {
+        GATHER_RINGS
+    } else {
+        GATHER_RINGS_WIDE
+    };
+    for ring in 0..=rings {
         for y in first.1 - ring..=first.1 + ring {
             for x in first.0 - ring..=first.0 + ring {
                 if (x - first.0).abs().max((y - first.1).abs()) == ring && free(x, y) {
@@ -1367,10 +1418,19 @@ fn gather_units(
                 && home.binary_search(&o.id).is_err()
         })
         .collect();
+    let everyone = state.profile.army.gather_everyone;
     for o in free {
         if cheb(o.cell, gather) <= radius {
-            state.sent.remove(&o.id);
-            continue;
+            if !everyone {
+                state.sent.remove(&o.id);
+                continue;
+            }
+            // WP9.2a-2: a unit within the radius that was never sent (made beside the gather cell) is sent
+            // like any other; one that was sent is at its place (its count starts again at 0).
+            if let Some(entry) = state.sent.get_mut(&o.id) {
+                entry.1 = 0;
+                continue;
+            }
         }
         if o.order != Order::Idle {
             continue;
