@@ -4,8 +4,8 @@
 //! site: game 0 has seat 0 on the south-west site (12, 68), game 4 the same seating with the sites swapped (seat
 //! 0 on the north-east site (72, 14)). A control with the rules off shows what each test would catch.
 //!
-//! WP9.2b-1: these tests pin the gather rules on the unit mix of WP9.2a-2 (rocket trooper 2), not on the shipped
-//! mix; the start-site numbers below describe that older profile, not the one that ships now.
+//! WP9.2b-1: these tests pin the gather rules on the unit mix of WP9.2a-2 (rocket trooper 2), which is still the
+//! shipped mix (the measured 4:4:3, 4:3:3 and 5:3:3 were not shipped).
 
 use std::collections::BTreeMap;
 
@@ -37,23 +37,14 @@ fn duel(game: u32, rules_off: bool) -> (Box<World>, Vec<Ai>) {
     )
     .unwrap();
     let mut ais = prepared.ais;
-    // These pins are about the gather rules of WP9.2a-2 and were measured with the unit mix of that work package (rocket
-    // trooper weight 2); WP9.2b-1 ships 4, which moves single games (the first wave is made of other units), so the games
-    // here keep the old mix and the pins stay the ones WP9.2a-2 measured.
-    for ai in &mut ais {
-        let old = ai.state().clone();
-        let mut profile = old.profile.clone();
-        for (kind, w) in &mut profile.unit_mix {
-            if kind.0 == 13 {
-                assert_eq!(*w, 4, "the shipped rocket trooper weight");
-                *w = 2;
-            }
-        }
-        if rules_off {
+    if rules_off {
+        for ai in &mut ais {
+            let old = ai.state().clone();
+            let mut profile = old.profile.clone();
             profile.army.gather_refinery_gap = 0;
             profile.army.gather_everyone = false;
+            *ai = Ai::new(old.player, profile, ai_seed, old.start_sites);
         }
-        *ai = Ai::new(old.player, profile, ai_seed, old.start_sites);
     }
     (prepared.world, ais)
 }

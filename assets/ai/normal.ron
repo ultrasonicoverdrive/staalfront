@@ -136,8 +136,9 @@
                 ("advanced_defences", 1),
             ],
             // (role, weight): the share of the army each role aims at.
-            // WP9.2b-1: the rocket trooper weight 4, was 2 (measured, docs/rules/ai.md "Counter mix (WP9.2b-1)": 49.0 % of the games played from either site, site-balanced, against 22.9 % with 2).
-            unit_mix: [("rifleman", 4), ("rocket_trooper", 4), ("light_tank", 3)],
+            // WP9.2b-1: kept at 4 / 2 / 3. The milder static mixes 4:4:3, 4:3:3 and 5:3:3 win more against the profile of WP9.2a-2 but
+            // decide fewer games against themselves (110, 108, 112 of 300 against 139), docs/rules/ai.md "Counter mix (WP9.2b-1)".
+            unit_mix: [("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)],
             scout: Some("scout"),
         ),
         (
@@ -155,7 +156,7 @@
                 ("defence_tower", 2),
                 ("advanced_defences", 1),
             ],
-            unit_mix: [("rifleman", 4), ("rocket_trooper", 4), ("light_tank", 3)],
+            unit_mix: [("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)],
             scout: Some("scout"),
         ),
     ],

@@ -110,7 +110,7 @@ fn the_shipped_profile_is_pinned() {
     assert_eq!((a.counter_permille, a.intel_ticks), (0, 3000));
     assert_eq!(a.counter_on(), a.counter_permille != 0);
     assert_eq!(p.factions.len(), 2);
-    let mix = roles(&[("rifleman", 4), ("rocket_trooper", 4), ("light_tank", 3)]);
+    let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
     let meridian = &p.factions[0];
     assert_eq!(meridian.faction, Faction::Meridian);
     assert_eq!(
@@ -397,7 +397,7 @@ fn an_empty_unit_mix_is_a_profile_that_makes_no_units() {
     // The shipped text with line endings made `\n` (a Windows checkout has `\r\n`), the Meridian mix and scout
     // cut out.
     let shipped = EMBEDDED_NORMAL.replace("\r\n", "\n");
-    let from = "unit_mix: [(\"rifleman\", 4), (\"rocket_trooper\", 4), (\"light_tank\", 3)],\n            scout: Some(\"scout\"),\n        ),\n        (\n            faction: Veyran";
+    let from = "unit_mix: [(\"rifleman\", 4), (\"rocket_trooper\", 2), (\"light_tank\", 3)],\n            scout: Some(\"scout\"),\n        ),\n        (\n            faction: Veyran";
     assert!(shipped.contains(from));
     let text = shipped.replacen(
         from,

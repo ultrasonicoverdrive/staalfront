@@ -1273,7 +1273,7 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
 
 ## Counter mix (WP9.2b-1, 14-11-2026)
 
-**What it is.** The AI tallies the armed enemy units it sees and leans its unit mix toward the roles that do best against them, per credit. It is **built, tested and off**: the shipped `counter_permille` is 0. The measurement below shows it does not beat a static mix with the rocket trooper doubled, so the shipped profile has that static mix instead (rocket trooper weight 4, was 2). The code is in `crates/sf_ai/src/counter.rs`; the one question that reads the public tables is `Lens::counter_score` in `observe.rs` (the only file that names the world).
+**What it is.** The AI tallies the armed enemy units it sees and leans its unit mix toward the roles that do best against them, per credit. It is **built, tested and off**: the shipped `counter_permille` is 0. The measurement below shows it does not beat a static mix with the rocket trooper doubled. That static mix (and the milder 4 : 3 : 3 and 5 : 3 : 3) wins more against the profile of WP9.2a-2 but decides fewer games against itself than the old mix, so **the shipped mix stays 4 : 2 : 3** (fix round 1, 14-11-2026). The code is in `crates/sf_ai/src/counter.rs`; the one question that reads the public tables is `Lens::counter_score` in `observe.rs` (the only file that names the world).
 
 ### The rules
 
@@ -1298,38 +1298,37 @@ By raw score the rocket trooper would win against everything; per credit the rif
 
 **Setup.** Release `sf_headless tournament`, `m1_duel`, cap 60,000, 8-cycle of start sites, base seeds 458,758 (the file's), 777 and 888; one row = 96 games per seed with the profile under test on each seat (48 games with it on seat 0, 48 on seat 1, so 48 games from each site per seed, 144 per site over three seeds). The opponent is the frozen profile after #134 (`tools/sf_headless/tests/fixtures/normal_9_2a2.ron`, not shipped; `the_frozen_duel_opponent_is_the_shipped_profile_with_the_counter_mix_off` ties it to the shipped file). Rows: `ctl` = the new code with the numbers off (mix 4 : 2 : 3), `c1000` and `c2000` = `counter_permille` 1000 and 2000 with `intel_ticks` 3000, `rock` = the static mix 4 : 4 : 3 (rocket troopers doubled) with the rule off. The binary was built from the tree with the scout exclusion (an earlier set of `c1000` and `c2000` rows without it was discarded; `ctl` was played with that first build, where the rule is off and the exclusion cannot act). Rates are **wins as a share of the games played from that site** (draws and capped games count as not won); the verdict is the mean of the two site rates. One seed has about 45 decided games, a **standard error of about 7 points**; the pooled row is 144 games per site (about 4 points).
 
-| Row | SW wins of 144 | NE wins of 144 | **site-balanced mean** | decided of 288 | seat 0 / seat 1 wins of 144 |
-|---|---|---|---|---|---|
-| `ctl` (4 : 2 : 3, off) | 47 (32.6 %) | 19 (13.2 %) | **22.9 %** | 132 | 33 (22.9 %) / 33 (22.9 %) |
-| `c1000` | 38 (26.4 %) | 70 (48.6 %) | **37.5 %** | 143 | 51 (35.4 %) / 57 (39.6 %) |
-| `c2000` | 37 (25.7 %) | 79 (54.9 %) | **40.3 %** | 152 | 60 (41.7 %) / 56 (38.9 %) |
-| **`rock` (4 : 4 : 3, off) = shipped** | **71 (49.3 %)** | **70 (48.6 %)** | **49.0 %** | 166 | 64 (44.4 %) / 77 (53.5 %) |
+Two duels per row. **Fixture duel**: the profile under test against the frozen profile (setup above). **Mirror duel**: release `m1_duel` with the profile under test on both seats, 100 games per seed on the same three seeds, cap 60,000; "decided" counts games with a winner. Fix round 1 (14-11-2026) added the rows 4 : 3 : 3 and 5 : 3 : 3 (rule off) and the mirror duel. A row ships only if all four hold, against the control: (1) site-balanced mean at least 27.9 %; (2) SW at least 27.6 % and NE at least 8.2 %; (3) more wins than losses from each site; (4) mirror duel decided at least 124 of 300.
 
-Per seed (wins from SW of 48 / from NE of 48 / mean):
+| Row | SW wins of 144 (w/l/d) | NE wins of 144 (w/l/d) | **site-balanced mean** | fixture decided of 288 | **mirror decided of 300** (SW : NE wins) | passes |
+|---|---|---|---|---|---|---|
+| `ctl` (4 : 2 : 3, off) = **shipped** | 47 (32.6 %) 47/19/78 | 19 (13.2 %) 19/47/78 | **22.9 %** | 132 | **139** (104 : 35) | control |
+| `c1000` | 38 (26.4 %) | 70 (48.6 %) | **37.5 %** | 143 | not run | no (2: SW) |
+| `c2000` | 37 (25.7 %) | 79 (54.9 %) | **40.3 %** | 152 | not run | no (2: SW) |
+| `rock` (4 : 4 : 3, off) | 71 (49.3 %) 71/22/51 | 70 (48.6 %) 70/3/71 | **49.0 %** | 166 | **110** (81 : 29) | no (4) |
+| `r433` (4 : 3 : 3, off) | 71 (49.3 %) 71/22/51 | 70 (48.6 %) 70/3/71 | **49.0 %** | 166 | **108** (79 : 29) | no (4) |
+| `r533` (5 : 3 : 3, off) | 73 (50.7 %) 73/24/47 | 70 (48.6 %) 70/4/70 | **49.7 %** | 171 | **112** (82 : 30) | no (4) |
+
+Per seed (fixture duel: wins from SW of 48 / from NE of 48 / mean; mirror duel: decided of 100, SW : NE):
 
 | Row | seed 458,758 | seed 777 | seed 888 |
 |---|---|---|---|
-| `ctl` | 17 / 7 / 25.0 % | 15 / 7 / 22.9 % | 15 / 5 / 20.8 % |
+| `ctl` | 17 / 7 / 25.0 %; mirror 48 (38 : 10) | 15 / 7 / 22.9 %; mirror 45 (32 : 13) | 15 / 5 / 20.8 %; mirror 46 (34 : 12) |
 | `c1000` | 18 / 23 / 42.7 % | 13 / 22 / 36.5 % | 7 / 25 / 33.3 % |
 | `c2000` | 16 / 24 / 41.7 % | 13 / 25 / 39.6 % | 8 / 30 / 39.6 % |
-| `rock` | 23 / 18 / 42.7 % | 22 / 26 / 50.0 % | 26 / 26 / 54.2 % |
+| `rock` | 23 / 18 / 42.7 %; mirror 32 (22 : 10) | 22 / 26 / 50.0 %; mirror 39 (30 : 9) | 26 / 26 / 54.2 %; mirror 39 (29 : 10) |
+| `r433` | 23 / 18 / 42.7 %; mirror 32 (22 : 10) | 22 / 26 / 50.0 %; mirror 37 (28 : 9) | 26 / 26 / 54.2 %; mirror 39 (29 : 10) |
+| `r533` | 24 / 18 / 43.8 %; mirror 33 (23 : 10) | 23 / 26 / 51.0 %; mirror 38 (29 : 9) | 26 / 26 / 54.2 %; mirror 41 (30 : 11) |
+
+One seed has a standard error of about 7 points; differences of a game or two between rows are noise. The fixture duel of `r433` is the same, game for game, as `rock` (same final checksums): with the infantry weights 4 : 3 and 4 : 4 the barracks makes the same units until about the seventh infantry unit alive, which these games do not reach; the mirror duels differ in two games. The mirror rows of `ctl` and `rock` are the reviewer's (`ctl` reproduces the 139 of WP9.2a-2); the `r433`/`r533` rows and a check of `ctl`'s first seat (11 / 13 / 24, as before) are fix round 1's.
 
 Wins / losses / draws per site and seat, per seed, are in the PR body.
 
-**Verdict.** (1) The counter mix is **better than the control** on the site-balanced mean (37.5 % and 40.3 % against 22.9 %), but it is **worse than the control from SW** (26.4 % and 25.7 % against 32.6 %): the rule fails "neither site worse than its control". Why it helps from NE and hurts from SW was not traced. (2) **It does not beat the static-rockets row** (49.0 %), which wins as much from each site as the control's best site. By the brief the counter mix therefore stays off, and the better static option ships: **`unit_mix` rocket trooper 4** in both factions. The tally adds nothing measurable here: a static mix with more rockets does better without it. (3) **The done-when of 55 % site-balanced pooled is not met** (49.0 %). Of the 166 decided games the new mix wins 141 (85 %); the rest of the games are not decided (capped), 122 of 288 as before 156 of 288 for the control, so the gap to 55 % is games not finished, not games lost. (4) Not examined: other static mixes, `intel_ticks` other than 3000, `counter_permille` between 0 and 1000, a mix with the tank dropped.
+**Verdict.** (1) The counter mix is **better than the control** on the site-balanced mean (37.5 % and 40.3 % against 22.9 %), but it is **worse than the control from SW** (26.4 % and 25.7 % against 32.6 %), so it fails condition (2). Why it helps from NE and hurts from SW was not traced. It does not beat the static rocket rows either, so `counter_permille` ships at 0. (2) The three static mixes with more rocket troopers (4 : 4 : 3, 4 : 3 : 3, 5 : 3 : 3) pass conditions (1) to (3) by a wide margin but **fail (4)**: against themselves they decide 110, 108 and 112 of 300 games, against 139 for the old mix. More rocket troopers make both sides harder to finish. **So no new mix ships: the shipped mix stays 4 : 2 : 3** (orchestrator decision 14-11-2026, fix round 1), and 4 : 4 : 3 is recorded as measured, not shipped. (3) **The done-when of 55 % site-balanced is not met** by anything shipped (the control is 22.9 %). (4) Not examined: other static mixes, `intel_ticks` other than 3000, `counter_permille` between 0 and 1000, a mix with the tank dropped, the mirror duel of the counter rows.
 
-**What shipping the static mix costs** (pins and the opening, below): the rocket trooper costs 300 against 100, so the army floor (2,000) is reached later: in the `m1_ai` seat the floor at 10,734 (was 9,654), the first wave at 10,957 (was 10,037), the match won at 13,413 (was 12,673), the goal list's last build at **21,097 (was 20,297)**. The bound of the goal-list test, 20,500 since WP9.2a-2 (orchestrator decision, PLAN.md), is **missed**; the test asserts 21,097 with a bound of 21,500. Open for the orchestrator and Tijmen: either accept this, or ship the control mix (4 : 2 : 3) and the 22.9 % that goes with it; the change is two numbers in `assets/ai/normal.ron`.
+### Pins
 
-### Pins that moved and why
-
-All with the rocket trooper weight back at 2 the old value returns, shown by running the tests with that one change:
-
-* `the_digest_of_the_base_state_is_pinned`: `0x4d0a_8207_c799_2fad` -> `0x5057_42d7_c905_864d` (the shipped profile's mix is hashed). `the_digest_of_the_base_state_with_the_mix_of_wp9_2a_2_is_the_old_pin` (new) puts the old weight back and gets the old pin; the two older pins (`..._with_the_gather_numbers_off_is_the_wp9_2a_pin`, `..._with_the_numbers_of_wp9_2a_off_is_the_old_pin`) now put the old weight back too and keep their literals. The counter numbers are not in the digest with the rule off (`the_numbers_of_the_counter_mix_are_in_the_digest_only_when_it_is_on`).
-* `m1_ai` (`crates/sf_game/tests/ai_in_game.rs`): last structure ordered 12,417 (was 11,657), first attack 10,957 (was 10,037), won 13,413 (was 12,673), floor reached 10,734 (was 9,654), first wave of 6 worth 2,200 (was 2,000), the credits from tick 8,000 on (351 at 8,000 where 600 was), goal list without an attack 21,097 (was 20,297, bound 21,500). Cause: the first units of the mix are made differently once a rocket trooper is a fifth of the picks.
-* `an_ai_attack_wave_in_the_games_picture`: the third picture at tick 13,100 (was 12,400); the wave is at the human's centre then (6 units within 12 cells), 313 ticks before it falls (13,413). Screenshots: `docs/screenshots/wp9.2b-1/`.
-* `ai_march.rs` and `ai_duel.rs` are about the gather rules and the frozen opponent of WP9.2a: their games keep the old mix (`duel()` puts the weight back), so **their pins did not move** (without that, game 0's wave spread went 2 -> 3 and the staging exits changed: the first wave is made of other units). `the_frozen_profile_is_the_shipped_one_with_the_numbers_of_wp9_2a_off` puts the weight back before comparing.
-* `profile.rs` and `sf_data` pins of the shipped mix: `(13, 2)` -> `(13, 4)`; the shipped numbers `counter_permille` 0 and `intel_ticks` 3000 are pinned.
-* Not moved: `golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and every other `assets/scenarios/*.expected` (the scenarios use their frozen profile copies; no `*_defs/` copy was touched; the release `--expect` run of all 44 CI scenarios passes), `ai_vs_passive` (15,249).
+No pin moved in the end. The first build of this work package shipped 4 : 4 : 3 and moved the base-state digest (`0x4d0a_8207_c799_2fad` -> `0x5057_42d7_c905_864d`), the `m1_ai` timings (floor 10,734, first wave 10,957, won 13,413, goal list 21,097) and the third picture (13,100); with 4 : 2 : 3 back every old value returns (digest `0x4d0a_8207_c799_2fad`, goal list 20,297 with the bound 20,500, floor 9,654, first wave 10,037, won 12,673, picture 12,400), and its screenshots were removed. The shipped numbers `counter_permille` 0 and `intel_ticks` 3000 are pinned. Not moved: `golden.rs` and every `assets/scenarios/*.expected` (no `*_defs/` copy was touched).
 
 ### Cost
 
@@ -1362,7 +1361,7 @@ All with the rocket trooper weight back at 2 the old value returns, shown by run
 
 ## Not done
 
-* **WP9.2b-1 gaps.** The counter mix is off: it did not beat the static rocket row (49.0 % against 40.3 % site-balanced), and it was worse than the control from the SW site (25.7 to 26.4 % against 32.6 %); why it helps from NE and hurts from SW was not traced. Not measured: other static mixes, `intel_ticks` other than 3000, `counter_permille` between 0 and 1000, a mix without the tank, the new roles of WP9.5b (heavy tank, siege artillery and the faction units are buildable but not in the mix). Nothing remembered is tallied (structures, or units that left sight, beyond `intel_ticks`). The 55 % site-balanced aim is not met by the shipped mix (49.0 %): 122 of 288 games stay undecided. The goal list in the `m1_ai` seat ends at 21,097 (the 20,500 bound of WP9.2a-2 is missed).
+* **WP9.2b-1 gaps.** The counter mix is off: it did not beat the static rocket row (49.0 % against 40.3 % site-balanced), and it was worse than the control from the SW site (25.7 to 26.4 % against 32.6 %); why it helps from NE and hurts from SW was not traced. Not measured: other static mixes, `intel_ticks` other than 3000, `counter_permille` between 0 and 1000, a mix without the tank, the new roles of WP9.5b (heavy tank, siege artillery and the faction units are buildable but not in the mix). Nothing remembered is tallied (structures, or units that left sight, beyond `intel_ticks`). The 55 % site-balanced aim is not met: the shipped mix is the control (22.9 %); the static mixes 4 : 4 : 3, 4 : 3 : 3 and 5 : 3 : 3 reach 49.0 to 49.7 % but decide too few mirror games (110, 108, 112 of 300 against 139) and are not shipped.
 * **Choice of an economy target (the dropped WP9.2b-2, 14-11-2026).** Not built: the siege test was true at 1 of 2,461 launches on `m1_duel` (towers stand 9 to 12 cells from the centre, outside radius 8; an armed structure is remembered at only 46 % of launches; every economy structure is within 6 cells of the centre), so it would never act; its budget goes to WP9.3a, and it needs economy structures placed away from the centre, a defence memory that survives to launch and cover measured per target before it returns.
 * **WP9.1c-2 gaps.** The army floor costs the economy: on M1's 4,000 credits the goal list does not complete in 30,000 ticks without an attack
   ("The army floor", the money). One group at a time (no second wave while one is out; units made meanwhile gather); no retreat, regroup, focus fire or

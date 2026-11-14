@@ -205,7 +205,7 @@ mod tests {
                 (7, 1)
             ]
         );
-        assert_eq!(pairs(&m.unit_mix), [(12, 4), (13, 4), (19, 3)]);
+        assert_eq!(pairs(&m.unit_mix), [(12, 4), (13, 2), (19, 3)]);
         // Veyran adds the fortified bunker after the first tower (the second refinery comes before both).
         let v = resolved(Faction::Veyran);
         assert_eq!(pairs(&v.build_order)[5..8], [(2, 2), (6, 1), (10, 1)]);

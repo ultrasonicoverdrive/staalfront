@@ -42,8 +42,8 @@ fn shipped(permille: u16, intel: u32) -> (Box<World>, AiState) {
     let Prepared { world, ais, .. } =
         tournament::prepare(&setup, [Faction::Meridian, Faction::Veyran], 458_758, 1).unwrap();
     let mut state = ais[0].state().clone();
-    // The counter tests are written for the mix of WP9.2a-2 (4 : 2 : 3); the shipped mix has been 4 : 4 : 3 since
-    // WP9.2b-1 (the static row that beat the counter mix), so the test puts the old one back.
+    // The counter tests are written for the mix of WP9.2a-2 (4 : 2 : 3), which is the shipped mix; written out so that a
+    // later change of the shipped mix does not move these tests.
     state.profile.unit_mix = vec![(RIFLEMAN, 4), (ROCKET, 2), (TANK, 3)];
     state.profile.army.counter_permille = permille;
     state.profile.army.intel_ticks = intel;
@@ -674,15 +674,7 @@ fn the_frozen_duel_opponent_is_the_shipped_profile_with_the_counter_mix_off() {
     new.name = "normal_9_2a2".to_string();
     new.army.counter_permille = 0;
     new.army.intel_ticks = old.army.intel_ticks;
-    // The shipped mix has had the rocket trooper at 4 since WP9.2b-1; the frozen opponent keeps the 2 of WP9.2a-2.
-    for f in &mut new.factions {
-        for (role, w) in &mut f.unit_mix {
-            if role == "rocket_trooper" {
-                assert_eq!(*w, 4);
-                *w = 2;
-            }
-        }
-    }
+    // The shipped mix is still the one of WP9.2a-2 (the measured static mixes were not shipped, fix round 1).
     assert_eq!(old, new);
     assert!(!old.army.counter_on());
     assert_eq!(old.army.intel_ticks, 3000);
