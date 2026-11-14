@@ -102,6 +102,10 @@ fn the_shipped_profile_is_pinned() {
     );
     assert_eq!(a.reinforce_value, a.attack_value / 2);
     assert!(a.groups_on());
+    // WP9.2a-2: the gather cell keeps two cells from the refinery and off the ore, and every unit is gathered
+    // (measured, docs/rules/ai.md "The start-site advantage").
+    assert_eq!((a.gather_refinery_gap, a.gather_everyone), (2, true));
+    assert!(a.gather_rules_on());
     assert_eq!(p.factions.len(), 2);
     let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
     let meridian = &p.factions[0];
@@ -153,7 +157,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 40] = [
+    let table: [(&str, &str, [&str; 2]); 41] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",
@@ -241,6 +245,11 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
             "timing_jitter_permille: 0",
             "timing_jitter_permille",
             ["901", "901"],
+        ),
+        (
+            "gather_refinery_gap: 2",
+            "gather_refinery_gap",
+            ["17", "255"],
         ),
     ];
     for (from, name, bad) in table {
@@ -565,6 +574,33 @@ fn a_profile_without_the_numbers_of_wp9_2a_reads_with_them_off() {
     }
     a.stage_patience = 1;
     assert!(!a.groups_on(), "the patience alone does nothing");
+}
+
+#[test]
+fn a_profile_without_the_numbers_of_wp9_2a_2_reads_with_them_off() {
+    // The frozen profiles were written before the gather rules: the two numbers are absent and read as the value
+    // that switches the rule off, and `gather_rules_on` is false (the digest keeps its old layout).
+    for frozen in [
+        include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_vs_passive_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_raid_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_raid_guard_defs/normal.ron"),
+    ] {
+        let a = AiProfile::from_ron(frozen).unwrap().army;
+        assert_eq!((a.gather_refinery_gap, a.gather_everyone), (0, false));
+        assert!(!a.gather_rules_on());
+    }
+    // Either one makes it true.
+    let mut a = AiProfile::embedded().army;
+    a.gather_refinery_gap = 0;
+    a.gather_everyone = false;
+    assert!(!a.gather_rules_on());
+    let mut b = a;
+    b.gather_refinery_gap = 1;
+    assert!(b.gather_rules_on());
+    let mut c = a;
+    c.gather_everyone = true;
+    assert!(c.gather_rules_on());
 }
 
 #[test]

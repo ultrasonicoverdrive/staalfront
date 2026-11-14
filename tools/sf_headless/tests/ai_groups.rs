@@ -1271,7 +1271,9 @@ fn vs_passive_with_the_shipped_army() -> Scenario {
 /// The tick the match names the AI the winner in `ai_vs_passive` with the numbers off (13,839, pinned in
 /// `ai_army.rs`) and with the shipped numbers.
 const VS_PASSIVE_WON_OFF: u64 = 13_839;
-const VS_PASSIVE_WON_SHIPPED: u64 = 15_908;
+/// WP9.2a-2: 15,249, was 15,908 (the wave of six leaves at 11,550 instead of 11,150, and arrives together). Cause,
+/// measured: with `gather_everyone` off 15,908 comes back (any gap); with it on, 15,249 (any gap).
+const VS_PASSIVE_WON_SHIPPED: u64 = 15_249;
 
 #[test]
 fn ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned() {
@@ -1307,6 +1309,106 @@ fn ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned() {
     let won = won.expect("the AI wins");
     assert!(won < s.ticks, "{won}");
     assert_eq!(won, VS_PASSIVE_WON_SHIPPED);
+}
+
+// ---- WP9.2a-2: every unit is sent to the gather cell ---------------------------------------------------------------
+
+/// The `Move` commands: ids (indexes) and the point.
+fn moves(out: &[Command]) -> Vec<(Vec<u32>, Vec2)> {
+    out.iter()
+        .filter_map(|c| match c {
+            Command::Order {
+                ids,
+                order: Order::Move(p),
+                ..
+            } => Some((ids.iter().map(|i| i.index()).collect(), *p)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A base with a rifleman 7 cells from the gather cell (24, 64), where the vehicle factory lets its units out
+/// (made within `gather_radius` of the cell, so the old rule counts it as arrived).
+fn a_unit_beside_the_gather_cell(everyone: bool) -> (World, AiState, Vec<Own>) {
+    let (world, mut s) = army_state();
+    s.profile.army.gather_everyone = everyone;
+    let mut own = base(&world);
+    own.push(soldier(30, 20, 71));
+    (world, s, own)
+}
+
+#[test]
+fn with_gather_everyone_a_unit_made_within_the_radius_is_sent_to_the_gather_cell_and_without_it_is_not()
+ {
+    // Off (the old rule): 7 cells is within the radius of 8, so the unit counts as arrived and no order is sent.
+    let (world, mut s, own) = a_unit_beside_the_gather_cell(false);
+    let out = army_turn(&world, &mut s, &observation(&world, 3000, own));
+    assert!(moves(&out).is_empty(), "{out:?}");
+    // On: it gets one `Move` to the gather cell, and no other unit does.
+    let (world, mut s, own) = a_unit_beside_the_gather_cell(true);
+    let out = army_turn(&world, &mut s, &observation(&world, 3000, own.clone()));
+    assert_eq!(moves(&out), [(vec![30], middle(gather()))], "{out:?}");
+    // At the cell (idle, within the radius) it is not sent again, however many turns pass.
+    let mut at_cell = own;
+    at_cell.last_mut().unwrap().cell = gather();
+    for tick in [3040, 3080, 3400, 4000] {
+        let out = army_turn(&world, &mut s, &observation(&world, tick, at_cell.clone()));
+        assert!(moves(&out).is_empty(), "tick {tick}: {out:?}");
+    }
+}
+
+#[test]
+fn with_gather_everyone_a_unit_counts_as_gathered_only_after_it_was_sent() {
+    let gathered_ids = |world: &World, s: &AiState, own: Vec<Own>| -> Vec<u32> {
+        let obs = observation(world, 3000, own);
+        ids(&army::gathered(s, &obs, &Lens::new(world, P0), gather()))
+    };
+    // Off: standing within the radius is enough.
+    let (world, s, own) = a_unit_beside_the_gather_cell(false);
+    assert_eq!(gathered_ids(&world, &s, own), [30]);
+    // On: not before it was sent (the wave must not leave with a unit that stands where the factory made it) ...
+    let (world, mut s, own) = a_unit_beside_the_gather_cell(true);
+    assert!(gathered_ids(&world, &s, own.clone()).is_empty());
+    army_turn(&world, &mut s, &observation(&world, 3000, own.clone()));
+    // ... still not while it is under way (its order is the `Move`), ...
+    let mut on_its_way = own.clone();
+    on_its_way.last_mut().unwrap().order = Order::Move(middle(gather()));
+    assert!(gathered_ids(&world, &s, on_its_way).is_empty());
+    // ... and gathered once it stands idle at the cell, however long ago it was sent.
+    let mut at_cell = own;
+    at_cell.last_mut().unwrap().cell = gather();
+    assert_eq!(gathered_ids(&world, &s, at_cell), [30]);
+}
+
+#[test]
+fn the_wave_that_launches_with_gather_everyone_waits_for_the_unit_beside_the_cell() {
+    // Six riflemen at the cell and a seventh made beside it, `attack_value` set at seven: with the old rule the
+    // seventh counts at once and the strike launches with all seven; with the rule on it launches only after
+    // the seventh has been sent and stands at the cell, so the wave starts from one place.
+    let run = |everyone: bool| {
+        let (world, mut s, mut own) = a_unit_beside_the_gather_cell(everyone);
+        s.profile.army.attack_value = (7 * rifleman_cost(&world)) as u32;
+        own.extend(gathered_soldiers(6));
+        let first = army_turn(&world, &mut s, &observation(&world, 3000, own.clone()));
+        let launched_first = s.attacks_launched;
+        // The seventh arrives.
+        own.iter_mut()
+            .find(|o| o.id == EntityId::new(30, 0))
+            .unwrap()
+            .cell = gather();
+        army_turn(&world, &mut s, &observation(&world, 3040, own));
+        (launched_first, s.attacks_launched, moves(&first).len())
+    };
+    assert_eq!(
+        run(false),
+        (1, 1, 0),
+        "old rule: the first turn launches with seven"
+    );
+    assert_eq!(
+        run(true),
+        (0, 1, 1),
+        "new rule: one turn later, after the Move"
+    );
 }
 
 // ---- fix round 1: off means the old behaviour --------------------------------------------------------------------
@@ -1510,26 +1612,31 @@ fn a_raid_on_the_centre_while_the_strike_is_out_recalls_it_defends_and_loses_no_
     assert!(snap.iter().any(|v| v.id == EntityId::new(0, 0)));
 }
 
+/// The game of `m1_duel` that `a_long_duel_with_the_shipped_numbers_loses_no_unit` plays.
+const LONG_DUEL_GAME: u32 = 6;
+
 #[test]
 fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
-    // `m1_duel` game 0 as the tournament plays it (the file's base seed 458,758, the factions of game 0, sites
-    // not swapped), both seats on the shipped profile, to 30,000 ticks or the end of the game if sooner. Both
-    // seats are watched every 10 ticks with `watch_groups`: no unit in two groups and no unit lost. At least one
-    // group must have gone out for each seat, so the check is not vacuous. In this game (30,000 ticks, 3 attacks
-    // by seat 0, 1 by seat 1, one reinforcement out from tick 28,370) every strike ends with its members dead, so
-    // there are no survivors to send home: the loss path (survivors left on the old target) is caught by
-    // `every_survivor_of_an_ended_attack_is_sent_home_over_several_turns`, not here. What this run does catch is
-    // a unit in two groups, e.g. a reinforcement that also lists the strike's members.
+    // `m1_duel` game 6 as the tournament plays it (the file's base seed 458,758, the factions of game 6, sites
+    // swapped: WP9.2a-2 moved this from game 0, in which the gathered wave no longer leaves a reinforcement out
+    // before tick 33,761; in game 6 seat 0 has a strike and a reinforcement out together from tick 24,801, and
+    // the tick count is chosen to cover that), both seats on the shipped profile, to 30,000 ticks or the end of
+    // the game if sooner. Both seats are watched every 10 ticks with `watch_groups`: no unit in two groups and no
+    // unit lost. At least one group must have gone out for each seat, and one seat must have had two groups out
+    // together, so the check is not vacuous. The loss path (survivors left on the old target) is caught by
+    // `every_survivor_of_an_ended_attack_is_sent_home_over_several_turns`, not here: whether this game has
+    // survivors to send home is not asserted. What this run does catch is a unit in two groups, e.g. a
+    // reinforcement that also lists the strike's members.
     use sf_headless::tournament::{
         factions_for, load_setup, prepare_sited, seeds_for, sites_swapped,
     };
     let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     let setup = load_setup(&assets, &assets.join("matches/m1_duel.ron")).unwrap();
-    let (world_seed, ai_seed) = seeds_for(458_758, 0);
+    let (world_seed, ai_seed) = seeds_for(458_758, LONG_DUEL_GAME);
     let prepared = prepare_sited(
         &setup,
-        factions_for(setup.file_factions(), 0),
-        sites_swapped(0),
+        factions_for(setup.file_factions(), LONG_DUEL_GAME),
+        sites_swapped(LONG_DUEL_GAME),
         world_seed,
         ai_seed,
     )
@@ -1537,6 +1644,11 @@ fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
     let (mut world, mut ais) = (prepared.world, prepared.ais);
     let mut watched = [Watched::default(), Watched::default()];
     let mut out = [false, false];
+    // The most groups each seat had out at one time (a strike and its reinforcement make two).
+    let mut most = [0usize, 0];
+    // Whether each seat had a real reinforcement out (a group with `merge_into` set; `most` also counts a
+    // `Returning` group, review nit of WP9.2a-2).
+    let mut reinforced = [false, false];
     let mut wanted = Vec::new();
     while world.tick().0 < 30_000 {
         for ai in &mut ais {
@@ -1554,14 +1666,29 @@ fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
                 let st = ai.state();
                 watch_groups(&world, st, world.tick().0, &mut watched[seat]);
                 out[seat] |= !st.groups.is_empty();
+                most[seat] = most[seat].max(st.groups.len());
+                reinforced[seat] |= st.groups.iter().any(|g| g.merge_into.is_some());
             }
         }
         if world.match_result().is_some() {
             break;
         }
     }
-    println!("ended at tick {}", world.tick().0);
+    println!(
+        "ended at tick {}, most groups at once {most:?}, attacks {:?}",
+        world.tick().0,
+        ais.iter()
+            .map(|a| a.state().attacks_launched)
+            .collect::<Vec<_>>()
+    );
     assert_eq!(out, [true, true], "a group went out for each seat");
+    // WP9.2a-2 (review nit of WP9.2a): a second group, a reinforcement, went out while the strike was out. Without
+    // this a later change of the profile could make the game stop covering the two-groups case and the test would
+    // still pass.
+    assert!(
+        reinforced.iter().any(|&r| r),
+        "no seat had a reinforcement out: most groups at once {most:?}"
+    );
     assert!(
         ais.iter().all(|a| a.state().attacks_launched > 0),
         "each seat launched"

@@ -622,13 +622,13 @@ fn the_army_timing_in_the_game_seat() {
 /// `max_wait` 12,000): last build 3,017 (the barracks; the list then waits for the second refinery while the floor takes
 /// the money), first army unit 4,587, army at the gather cell 0, 4, 0 (the wave of 6, value 2,000, leaves at 9,717
 /// on `attack_value`), win 11,664. (WP9.1c-2, vehicle factory fifth, `max_wait` 6,000: 1,097, 1,147, [10, 0, 0], 6,037, 8,396.)
-// WP9.2a re-pin: 3,017 -> 12,097 (the AI rebuilds a structure while the strike is staging and marching); measured: with the staging, reinforcement and
+// WP9.2a re-pin: 3,017 -> 11,657 (the AI rebuilds a structure while the strike is staging and marching); measured: with the staging, reinforcement and
 // partial-defence numbers of the shipped profile set to 0 the old values come back (3,017, win 11,664).
-const M1_AI_LAST_BUILD: u64 = 12_097;
-const M1_AI_FIRST_ARMY: u64 = 4_587;
+const M1_AI_LAST_BUILD: u64 = 11_657;
+const M1_AI_FIRST_ARMY: u64 = 4_547;
 const M1_AI_ARMY: [usize; 3] = [0, 4, 0];
-const M1_AI_FIRST_ATTACK: u64 = 9_717;
-const M1_AI_WON: u64 = 12_312;
+const M1_AI_FIRST_ATTACK: u64 = 10_037;
+const M1_AI_WON: u64 = 12_673;
 
 /// Drives `ais` on `world` to `until` the way the sim thread does, calling `look` after every step.
 fn drive(
@@ -735,12 +735,17 @@ fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
     );
     assert_eq!(world.match_result(), None);
     // Measured (WP9.1c-3): the list's last build at 19,777 (was 29,777 and not complete: the vehicle factory
-    // waited for the 4,000 credits the floor spent on twelve units). The target of 20,000 is met in this seat (not in
-    // `ai_vs_passive`, 22,730); the ore of the map is the limit, see docs/rules/ai.md "The opening".
-    assert_eq!(last_build, 19_777);
+    // waited for the 4,000 credits the floor spent on twelve units). The target of 20,000 was met in this seat
+    // (not in `ai_vs_passive`, 22,730); the ore of the map is the limit, see docs/rules/ai.md "The opening".
+    // WP9.2a-2: 20,297. The new gather cell moves where the later structures are placed (the cell and its ring are
+    // kept free of them), so the list's timing shifts: gap rule alone 20,297, gathering of every unit alone 20,537,
+    // both 20,297, both off 19,777 (docs/rules/ai.md "The start-site advantage"). The target of 20,000 is no longer
+    // met in this seat; that is written down there as a known cost, not hidden by this pin.
+    assert_eq!(last_build, 20_297);
     // The last structure ordered is the list's last entry, the advanced defences (kind 7).
     assert_eq!(last_kind, 7);
-    assert!(last_build <= 20_000, "{last_build}");
+    // The target since WP9.2a-2: 20,500 (orchestrator decision 14-11-2026, PLAN.md), measured value plus a margin.
+    assert!(last_build <= 20_500, "{last_build}");
 }
 
 /// What `the_opening_in_the_game_seat` reads off a run.
@@ -848,24 +853,24 @@ fn opening(attack: bool, ticks: u64) -> Opening {
 /// WP9.1c-3, the opening in the game seat (`m1_ai`, shipped profile; 4,000 credits, one free harvester):
 /// the vehicle factory is the third build, the bought harvester is queued as soon as it stands and the second
 /// harvester exists at 1,887 (well before 4,000), the barracks comes after it, and the first unit of the mix is
-/// queued at 4,587. The army floor (2,000) is reached at 9,374 and the first wave leaves at 9,717 on `attack_value`
-/// (2,000, equal to the floor) with 6 units worth 2,000; the match is won at 11,664. Credits every 500 ticks are
+/// queued at 4,547 (4,587 before WP9.2a-2). The army floor (2,000) is reached at 9,654 and the first wave leaves at
+/// 10,037 on `attack_value` (2,000, equal to the floor) with 6 units worth 2,000; the match is won at 12,673. Credits every 500 ticks are
 /// pinned (they sit near the reserve while the floor spends everything above it).
 #[test]
 fn the_opening_in_the_game_seat() {
-    let o = opening(true, 12_400);
+    let o = opening(true, 12_800);
     println!("{o:#?}");
     assert_eq!(o.vehicle_factory_ordered, Some(817));
     assert_eq!(o.harvester_queued, Some(1_487));
     assert_eq!(o.second_harvester, Some(1_887));
-    assert_eq!(o.barracks_ordered, Some(3_017));
-    assert_eq!(o.first_unit_queued, Some(4_587));
-    assert_eq!(o.floor_reached, Some(9_374));
-    assert_eq!(o.first_wave, Some((9_717, 6, 2_000)));
-    assert_eq!(o.won, Some(12_312)); // WP9.2a: 11,664 before the staging (the strike waits at its cell)
+    assert_eq!(o.barracks_ordered, Some(2_977));
+    assert_eq!(o.first_unit_queued, Some(4_547));
+    assert_eq!(o.floor_reached, Some(9_654));
+    assert_eq!(o.first_wave, Some((10_037, 6, 2_000)));
+    assert_eq!(o.won, Some(12_673)); // WP9.2a: 11,664 before the staging (the strike waits at its cell); WP9.2a-2: 12,312 before the gather rules
     assert_eq!(
         o.builds[..5],
-        [(17, 1), (257, 2), (817, 4), (2_177, 1), (3_017, 3)]
+        [(17, 1), (257, 2), (817, 4), (2_137, 1), (2_977, 3)]
     );
     // What the rules promise: two harvesters by 4,000 and before the first unit of the mix.
     assert!(o.second_harvester.unwrap() < 4_000);
@@ -875,32 +880,32 @@ fn the_opening_in_the_game_seat() {
     assert_eq!(profile.army.attack_value, profile.army.army_floor_value);
     assert!(o.first_wave.unwrap().0 + 1_000 < u64::from(profile.army.max_wait));
     assert_eq!(
-        o.credits,
+        o.credits[..24],
         [
             (500, 3_157),
             (1_000, 2_091),
             (1_500, 1_165),
             (2_000, 100),
             (2_500, 0),
-            (3_000, 380),
-            (3_500, 0),
+            (3_000, 368),
+            (3_500, 10),
             (4_000, 400),
-            (4_500, 600),
+            (4_500, 780),
             (5_000, 300),
-            (5_500, 500),
-            (6_000, 400),
+            (5_500, 400),
+            (6_000, 470),
             (6_500, 800),
-            (7_000, 800),
+            (7_000, 966),
             (7_500, 400),
-            (8_000, 400),
+            (8_000, 600),
             (8_500, 800),
-            (9_000, 830),
-            (9_500, 400),
+            (9_000, 800),
+            (9_500, 300),
             (10_000, 400),
-            (10_500, 800),
+            (10_500, 610),
             (11_000, 800),
             (11_500, 1_000),
-            (12_000, 1_000),
+            (12_000, 432),
         ]
     );
 }

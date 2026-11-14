@@ -106,6 +106,8 @@
         // Timing jitter (decision of 13-11-2026): the permille `attack_value` and `max_wait` of a launch may deviate by. 0: measured
         // 0 / 100 / 200 on `m1_duel` with this profile, the games diverge most with 0 (91 / 75 / 73 distinct coarse outcomes of 100) and are decided most often (76 / 56 / 51).
         timing_jitter_permille: 0,
+        gather_refinery_gap: 2,
+        gather_everyone: true,
     ),
     factions: [
         (

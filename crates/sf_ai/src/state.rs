@@ -763,8 +763,8 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well (WP9.1c-3: 0x392b1f3256aa3c19 ->
-        // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`; WP9.2a: -> 0x8383_758e_5b5e_90e6, the numbers of the groups in the shipped profile and the group state; with them off and one group the old value comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin`).
-        assert_eq!(base_state().digest(), 0x8383_758e_5b5e_90e6);
+        // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`; WP9.2a: -> 0x8383_758e_5b5e_90e6, the numbers of the groups in the shipped profile and the group state; with them off and one group the old value comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin`; WP9.2a-2: 0x8383_758e_5b5e_90e6 -> 0x4d0a_8207_c799_2fad, `gather_refinery_gap` 2 and `gather_everyone` true in the shipped profile; with both off, 0x8383_758e_5b5e_90e6 comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin` covers the older pin).
+        assert_eq!(base_state().digest(), 0x4d0a_8207_c799_2fad);
     }
 
     #[test]
@@ -946,10 +946,22 @@ mod tests {
         a.reinforce_value = 0;
         a.defend_ratio_permille = 0;
         a.timing_jitter_permille = 0;
+        a.gather_refinery_gap = 0;
+        a.gather_everyone = false;
         s.groups.truncate(1);
         s.next_group = 0;
         s.jitter = None;
         assert_eq!(s.digest(), 0xaa33_3a1f_d36c_b5a9);
+    }
+
+    #[test]
+    fn the_digest_of_the_base_state_with_the_gather_numbers_off_is_the_wp9_2a_pin() {
+        // The cause of the move of the pin above, as a test (WP9.2a-2): the shipped profile with only the two
+        // gather numbers set to 0 hashes to the pin WP9.2a left.
+        let mut s = base_state();
+        s.profile.army.gather_refinery_gap = 0;
+        s.profile.army.gather_everyone = false;
+        assert_eq!(s.digest(), 0x8383_758e_5b5e_90e6);
     }
 
     #[test]

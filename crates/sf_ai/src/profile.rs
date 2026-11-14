@@ -126,6 +126,12 @@ impl Profile {
             h.write_u32(a.defend_ratio_permille);
             h.write_u32(u32::from(a.timing_jitter_permille));
         }
+        // The numbers of WP9.2a-2, only when one is set (a profile with both off keeps its digest).
+        if a.gather_rules_on() {
+            h.write_u8(0x93);
+            h.write_u8(a.gather_refinery_gap);
+            h.write_u8(u8::from(a.gather_everyone));
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
@@ -264,7 +270,7 @@ mod tests {
         p.army.gather_distance += 1;
         assert_ne!(digest, p.digest());
         // WP9.1c-1: every new number and the scout.
-        let changes: [fn(&mut Profile); 25] = [
+        let changes: [fn(&mut Profile); 27] = [
             |p| p.economy.max_queue += 1,
             |p| p.army.gather_radius += 1,
             |p| p.army.gather_group += 1,
@@ -292,6 +298,9 @@ mod tests {
             |p| p.army.reinforce_value += 1,
             |p| p.army.defend_ratio_permille += 1,
             |p| p.army.timing_jitter_permille += 1,
+            // WP9.2a-2, the gather rules.
+            |p| p.army.gather_refinery_gap += 1,
+            |p| p.army.gather_everyone = !p.army.gather_everyone,
         ];
         for (i, change) in changes.iter().enumerate() {
             let mut p = base.clone();

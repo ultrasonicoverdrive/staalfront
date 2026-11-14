@@ -681,7 +681,7 @@ construction saves for 1,500: the gap is the income of **one harvester, about 20
 credits on twelve units (2,000) and the first four goals, and the second harvester comes only with the vehicle factory. With the attack switched
 off (no win) **the goal list does not complete in 30,000 ticks**: `ai_vs_passive` makes 9 of its builds (the vehicle factory at 11,650, the last at
 29,090), `m1_ai` its last at 29,777; the army stays at 12 (`the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks`,
-`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. *(WP9.1c-3: with the final opening the list completes at 22,730 in `ai_vs_passive` (the 20,000 target missed, the cause is the map's ore) and at 19,777 in `m1_ai` (met); see "The opening".)* The guard against the known risk (under steady losses the army stays below the
+`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. *(WP9.1c-3: with the final opening the list completes at 22,730 in `ai_vs_passive` (the 20,000 target missed, the cause is the map's ore) and at 19,777 in `m1_ai` (met); see "The opening".)* *14-11-2026 (WP9.2a-2): superseded, 20,297 since WP9.2a-2, see "The start-site advantage".* The guard against the known risk (under steady losses the army stays below the
 floor and the goal list stalls): once an attack has gone out, the floor holds only while the army defends.
 
 Measured on `ai_vs_passive` (the AI as player 0 at (12, 68) with 4,000 credits against m1's static opponent, release, 40,000 ticks, the tick the
@@ -851,7 +851,7 @@ at 22,730 and 19,777 ticks, the last build being the advanced defences). The cre
 
 ### The 20,000 target and the ore of the map
 
-The brief's target, "goal list complete by 20,000 with the attack off", is **met in `m1_ai` (19,777) and not in `ai_vs_passive` (22,730)**. The cause is the
+The brief's target, "goal list complete by 20,000 with the attack off", is **met in `m1_ai` (19,777) and not in `ai_vs_passive` (22,730)**. *14-11-2026 (WP9.2a-2): superseded, 20,297 since WP9.2a-2, see "The start-site advantage"; the target is now "by 20,500" (orchestrator decision, PLAN.md).* The cause is the
 map's ore, not the AI. Read off `assets/maps/m1/terrain.png` by the sweep of this PR: **174 ore cells in six diamond fields of 29 cells**. A cell starts with
 120 (`ore.ron`, inline in `ai_vs_passive.ron`), so a field holds 29 x 120 = **3,480 credits**, and it regrows 1 per cell per 200 ticks, 29 per 200 ticks for a field,
 **about 145 per 1,000 ticks**. The trace of the run with the tower first (cumulative ore delivered at ticks 1,000 to 12,000: 0, 200, 800, 1,400, 1,800, 2,200,
@@ -1056,7 +1056,7 @@ Staging already makes the games diverge (91 of 100 coarse outcomes without a jit
 14.5 to 19.4 us with the shipped ones. A wave of 45 units (`ai_raid_guard` with 48 more riflemen), as one command (`gather_group` 64, the old way) against commands of at most 19: launch step 748 to 849 us against 801 to 958 us (five alternating runs each), staging-exit step 87 to 95 us against 71 to 116 us:
 **chunking is a size bound on a command, not a speed gain**; the cost is the per-unit path planning in the sim. Think cost with groups out: `ai_vs_passive`, shipped numbers, 16,000 ticks: mean 0.24 us per AI per tick, worst think 42 us (construction); `ai_raid_guard`: mean 0.21 us, worst 29 us; budget 20 us and 1 ms (asserted in release).
 
-**`ai_vs_passive` with the shipped numbers wins at tick 15,908, 92 ticks before the end of the 16,000-tick scenario** (13,839 with the numbers off), the wave of six leaving at 11,150 in both (`ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned`). **Why staging costs about 2,000 ticks here** (traced every 10 ticks on the merged tree): the strike stages from 11,151 to 12,711 (the 70 % threshold, not the patience), then 4 of its 6 units die one after another between 13,071 and 13,351 on the way from the staging cell, and the 2 that reach the centre need until 15,908 to destroy it. With staging off all 6 are at the target at 12,951 and the centre falls at 13,839; with reinforcement off and staging on the trace is the same as shipped. So the cost is not the waiting: the wave leaves the staging cell strung out and arrives piecemeal. That is the "wave marches as one body" fix the seat diagnosis proposes for WP9.2a-2; it is not fixed here, and the scenario was not lengthened. **The 92-tick margin is a known weakness of this pin**: a change that slows the wave by 100 ticks fails it.
+**`ai_vs_passive` with the shipped numbers wins at tick 15,908, 92 ticks before the end of the 16,000-tick scenario** (13,839 with the numbers off), the wave of six leaving at 11,150 in both (`ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned`). **Why staging costs about 2,000 ticks here** (traced every 10 ticks on the merged tree): the strike stages from 11,151 to 12,711 (the 70 % threshold, not the patience), then 4 of its 6 units die one after another between 13,071 and 13,351 on the way from the staging cell, and the 2 that reach the centre need until 15,908 to destroy it. With staging off all 6 are at the target at 12,951 and the centre falls at 13,839; with reinforcement off and staging on the trace is the same as shipped. So the cost is not the waiting: the wave leaves the staging cell strung out and arrives piecemeal. That is the "wave marches as one body" fix the seat diagnosis proposes for WP9.2a-2; it is not fixed here, and the scenario was not lengthened. **The 92-tick margin is a known weakness of this pin**: a change that slows the wave by 100 ticks fails it. *14-11-2026 (WP9.2a-2): superseded, the pin is 15,249 and the margin 751 ticks; see "The start-site advantage".*
 
 **Commands:** in the 40,000-tick duel game of `the_commands_of_a_duel_game_stay_at_a_bounded_rate` (game 0, new on seat 0; won by seat 0 at 37,931) the AIs sent 65 and 52 commands, 1.71 and 1.37 per 1,000 ticks; the ceiling is 2.3 per 1,000 (1.71 × 1.3, rounded up to one decimal; it was 3.5, which let a doubling pass).
 
@@ -1082,11 +1082,113 @@ Only what the shipped `normal.ron` drives moved; every frozen scenario, every `.
 ### Not done in WP9.2a
 
 * The home guard is off in the shipped profile (measured harmful, above): the "Known gap" **stays open** in shipped play; the rule works in `ai_raid_guard` (a variant profile). The jitter is 0 in the shipped profile.
-* `ai_vs_passive` wins 92 ticks before its end with the shipped numbers (the strung-out wave after staging, above).
+* `ai_vs_passive` wins 92 ticks before its end with the shipped numbers (the strung-out wave after staging, above). *(WP9.2a-2: 751 ticks before its end.)*
 * The stuck rule is unchanged and no case of a winning attack ended by `stuck` was looked for beyond the runs above.
-* The SW site advantage (74 of 76 decided games in `m1_duel`, and 3 of 9 for the new profile from NE in the duel) is diagnosed ("AI against AI", the 8-cycle) but not fixed: the gather cell on its own ore and a wave that marches as one body are WP9.2a-2. The 24 capped games are not explained. Staging patience and distance were tuned on a handful of runs, one seed set; the shipped profile was not tuned against the human.
+* *(14-11-2026: partly addressed in WP9.2a-2, see "The start-site advantage"; the gap shrinks, the map is not fair.)* The SW site advantage (74 of 76 decided games in `m1_duel`, and 3 of 9 for the new profile from NE in the duel) is diagnosed ("AI against AI", the 8-cycle) but not fixed: the gather cell on its own ore and a wave that marches as one body are WP9.2a-2. The 24 capped games are not explained. Staging patience and distance were tuned on a handful of runs, one seed set; the shipped profile was not tuned against the human.
 * Raids (`GroupRole::Raid`), retreat and target choice are WP9.2b and 9.3.
 * The chunks of one launch go in the same army turn (up to the budget of 4 commands); spreading them over turns was not tried.
+
+## The start-site advantage (WP9.2a-2, 14-11-2026)
+
+**The finding it answers** (seat diagnosis of 13-11-2026): in `m1_duel` the south-west start site (SW, (12, 68)) wins whichever player stands on it (72 : 1, and 1 : 75 with the two `cell:` lines swapped), so the "seat advantage" of WP9.5a was a site advantage. WP9.2a made the tournament alternate the sites; this work package fixes the two causes that sit in the AI. It does **not** make the map fair: the base layout, the distance to the ore and the staging cells stay as they are, and mirroring M1 is Tijmen's decision.
+
+### What was found in the code and in traced games
+
+* **The gather cell of the north-east site (NE) is an ore cell.** `find_gather` took (66, 26), a cell of the AI's own ore field, one cell from where its refinery (65, 21, 3 x 4) goes up. The army gathered among the harvesters (`docs/screenshots/wp9.2a-2/before_m1_ai_t09600_attack_wave_all_views.png`). The cell is chosen at the first army turn, when only the construction centre stands, and was never looked at again.
+* **The `gather_radius` skip is real and measured, but it is the small part.** A unit within `gather_radius` (8) of the gather cell counted as arrived and was never sent. The two tanks of the SW vehicle factory come out 7 cells from the cell (24, 64) and stood there when the wave launched: 7 cells from the cell in **63 of 63** SW launches over the first 64 games (NE: 2 to 5, 35 of 64 at 4). They did join the wave (it takes every gathered unit within the radius).
+* **The large part is the march.** An `AttackMove` forms no formation (`docs/rules/formations.md`: only a `Move` does), so every unit goes at its own pace. In game 0 of `m1_duel` (traced every 100 ticks) the NE tanks were about 18 to 20 cells ahead of the NE infantry at tick 10,500 and met the SW wave alone: tanks at (37, 39) and (39, 37), infantry at (55 to 58, 28 to 32), and by tick 11,400 the NE army was dead (7 to 1 units, the one left is the scout) while SW had lost one of six. This is one traced game plus the table below, not a measured speed difference between the routes: why the SW tanks stayed with their infantry in that trace was not looked into.
+* **So the first clash was lopsided in SW's favour whoever stood there.** Army value left 2,500 ticks after the first launch, first 64 games of `m1_duel` (sum over the games; "more left" counts the games in which a site has more value standing): SW 80,000 : NE 14,400 (SW more in 55 games, NE in 9). The economy then follows [probable; measured as a state, not as a cause: 6,000 ticks after the first launch, first 16 games, rules off, SW has 2 to 3 harvesters and 6 to 7 structures in every game, NE has 0 or 1 harvesters in 11 of the 16 and 3 to 8 structures]; the staging cell of SW, (57, 32), lies a few cells from the NE ore field.
+
+### The two rules (profile numbers, defaults keep the old behaviour)
+
+* `gather_refinery_gap` (0 to 16; **shipped 2**; 0 = off): the gather cell is never an ore cell (`Lens::harvestable`, the terrain, not an entity) and keeps at least that many free cells from every own harvester dock (`BuildingFunction::HarvesterDock`; `placement::gap`). `find_gather` searches rings 0 to 10 round its first choice with the rule on (`GATHER_RINGS_WIDE`, an engine bound; 3 without), in the same order (ring, y, x) as before. `ensure_gather` checks a kept cell against the rule too, so when the first refinery goes up beside a cell chosen at tick 0 the cell is worked out again (NE: (66, 26) -> (65, 25) at tick 200 -> (68, 28) once the refinery stands; SW stays (24, 64)). 
+* `gather_everyone` (bool; **shipped true**; false = off): every army unit is sent to the gather cell when it is made, whatever its distance from it. A unit within `gather_radius` that has no entry in `AiState::sent` gets the `Move` like any other; one that was sent counts as gathered (`gathered()` requires the entry; its count of tries starts again at 0 when it stands there), so the wave launches only with units that were sent and stand at the cell. Single-unit `Move`s: in `m1_duel` game 0 seat 0 sends 33 instead of 9 by tick 39,977 (about one more per unit made; the `ai_duel` command-rate bound moved for it).
+* Both are in the AI digest only when one is set (tag `0x93`; `Profile::gather_rules_on`), so no frozen profile and no earlier checksum moved by this. `ai_raid_guard_defs/normal.ron` and the other frozen copies are untouched and read both as off.
+
+### What was tried and not shipped: a march leash
+
+A third rule was built, measured and **removed** again: while a group is staging or advancing, a member nearer the leg's target than the rearmost member by more than N cells is stopped (`Command::Stop`) until the body catches up (for at most `stage_patience` ticks of the stage). It evens the first clash (leash 3 alone: army value left 23,600 SW : 26,100 NE in the first 64 games; with the shipped gather rules and leash 3: 31,800 : 23,100) but the games stop being decided: the decided games fall to 8 to 45 of 100 (30 with the shipped gather rules and leash 3, against 48 without a leash), and the SW share of them does not fall (28 : 2 at leash 3). Measured 100-game rows (default seed; "gap/everyone" = the two rules above, leash in cells):
+
+| gap / everyone / leash | decided | SW : NE wins | seats 0 : 1 | undecided |
+|---|---|---|---|---|
+| 0 / off / 2 | 16 | 14 : 2 | 11 : 5 | 84 |
+| 0 / off / 3 | 8 | 8 : 0 | 3 : 5 | 92 |
+| 0 / off / 4 | 18 | 17 : 1 | 6 : 12 | 82 |
+| 0 / off / 6 | 37 | 37 : 0 | 15 : 22 | 63 |
+| 0 / off / 8 | 45 | 45 : 0 | 19 : 26 | 55 |
+| 2 / off / 3 | 16 | 15 : 1 | 4 : 12 | 84 |
+| 2 / on / 3 | 30 | 28 : 2 | 13 : 17 | 70 |
+| 0 / off / 5 | 28 | 27 : 1 | 9 : 19 | 72 |
+| 2 / off / 5 | 41 | 41 : 0 | 20 : 21 | 59 |
+| 2 / on / 5 | 18 | 15 : 3 | 7 : 11 | 82 |
+
+The preferred route of the brief (the strike waits at the staging cell until `stage_permille` is met) already exists in WP9.2a; the gather rules alone give the even first clash, so the leash was not needed and is not in the code.
+
+### Measured
+
+All numbers: release `sf_headless`, `m1_duel`, sites alternating (8-cycle), the machine idle apart from my own runs (three tournaments at a time on 4 cores for the variants, the final and baseline runs alone).
+
+**First clash** (army value left 2,500 ticks after the first launch, first 64 games, sum over the games; units alive in brackets):
+
+| Rules | SW value (units) | NE value (units) | more value on SW : NE (games) |
+|---|---|---|---|
+| off (2cacd4b) | 80,000 (250) | 14,400 (52) | 55 : 9 |
+| gap 2 only | 81,000 (260) | 5,900 (17) | 61 : 3 |
+| everyone only | 35,500 (159) | 36,200 (150) | 27 : 34 |
+| **both (shipped)** | **40,200 (184)** | **22,400 (96)** | **37 : 26** |
+
+**Wins per start site and per seat, 100 games each** (decided = someone's construction centre fell within 60,000 ticks; undecided = nobody's did, a few of them flagged as a stalemate). Site 0 is SW. The per-seat columns are the older table form; the per-site ones are what this work package is about.
+
+| Run | decided | SW : NE | NE share of decided | seat 0 : seat 1 | undecided (of them stalemate) | median ticks of decided |
+|---|---|---|---|---|---|---|
+| base seed 458,758, rules off | 76 | **74 : 2** | 2.6 % | 38 : 38 | 24 (0) | 28,338 |
+| gap 2 only | 79 | 73 : 6 | 7.6 % | 37 : 42 | 21 (0) | 19,836 |
+| everyone only | 34 | 31 : 3 | 8.8 % | 18 : 16 | 66 (0) | 25,628 |
+| **base seed, shipped (both)** | **48** | **38 : 10** | **20.8 %** | **25 : 23** | 52 (1) | 35,055 |
+| seed 777, rules off | 78 | 76 : 2 | 2.6 % | 35 : 43 | 22 (0) | 26,855 |
+| seed 777, shipped | 45 | 32 : 13 | 28.9 % | 14 : 31 | 55 (0) | 31,873 |
+| seed 888, shipped | 46 | 34 : 12 | 26.1 % | 24 : 22 | 54 (0) | 33,716 |
+
+Reading: **the gap shrinks, it does not close.** NE wins 10 to 13 of 100 games instead of 2 (its share of the decided games 2.6 % to 21 to 29 %), the first clash is even, and the wins per seat are about level at two of three seeds (at seed 777 seat 1 wins 31 : 14: a seat or faction effect that was not examined). SW still wins 71 to 79 % of the decided games. **Games are decided less often**: 76 to 48 decided, 24 to 52 undecided; an undecided game holds 11.5 attacks on average (both AIs together, base seed; 10.4 with the rules off), a decided one 4.4 (3.2 off): the AIs keep launching waves that do not finish the game. The distinct coarse outcomes fall from 91 to 69 of 100. Whether that is acceptable (an AI that cannot finish a game against an equal) is not decided here. What decides the games that are decided after an even first clash was not traced; the seat diagnosis pointed at the base layout (SW's refinery and factory sit about 4 cells from its centre on the side the attack comes from, NE's refinery about 8 cells out) and at the staging cells, none of which this work package moves. **The map is not shown to be fair and this is not claimed.**
+
+**Where the wave starts** (the largest Chebyshev distance of a member of the first strike from the gather cell, at the tick it goes out, first 64 games): SW 7 in all 63 launches with the rules off, 1 to 4 (mean 1.7, 61 launches) with them on; NE 2 to 5 (mostly 4) off, 1 to 2 (mean 1.6, 64 launches) on. Pinned for games 0 and 4 in `tools/sf_headless/tests/ai_march.rs`. At the staging exit the spread is small with or without the rules (mean 2.0 SW and 1.8 NE off, 0.9 and 1.8 on, measured on the strikes that reach the exit: 24 of 32 SW and 8 of 32 NE strikes off, 14 and 18 on: with the rules on the NE strikes live to the staging cell). **So at the staging exit the rules do not improve NE** (mean 1.8 off, 1.8 on); the gain on NE is at launch and in that its strikes now reach the staging cell at all. Pinned exactly per game in `ai_march.rs` (`EXIT_SPREAD`, rules on and a rules-off control): only one seat of each game reaches the exit before tick 20,000, so game 0 (SW: 0 on, 3 off), game 4 (NE 1 on; off, its SW seat 4) and game 3 (NE: 1 on, 4 off) are used. These single games show a smaller spread with the rules on; the 64-game means above are the fair comparison.
+
+**What counts as "sent" for `gather_everyone`.** `send` (in `army.rs`) records every unit it orders in `sent`, whatever the order: the gather `Move`, but also a defence or a march order. So a unit that defended and was never moved to the gather cell counts as sent and is not sent again by `gather_everyone`; it is still re-sent by `ensure_gather` when it stands idle at home more than 8 cells from the cell (limited by `resend_ticks`). Left as it is: keying `sent` on the gather `Move` only would change the command stream of every game and all pins.
+
+**The long duel is sensitive to profile changes.** `a_long_duel_keeps_every_unit_in_one_group` (`ai_groups.rs`, game 6) needs a reinforcement out; it also fails under the mutation that switches the ore check of the gather cell off, because game 6 then loses its reinforcement. A profile change that fails it should move the game, not drop the check.
+
+**`ai_vs_passive`**: wins at tick **15,249** (was 15,908): the margin to the end of the 16,000-tick scenario is **751 ticks, was 92** (13,839 with the WP9.2a numbers off). The wave of six leaves later (11,550, was 11,150: it first has to stand together) and wins sooner after it (3,699 ticks from launch to the win, was 4,758). Cause measured: with `gather_everyone` off 15,908 returns (any gap), with it on 15,249 (any gap); why the arrival is faster was not traced. The scenario was not lengthened.
+
+### Pins that moved and why
+
+All with `gather_refinery_gap` 0 and `gather_everyone` false the old value returns (measured one rule at a time where it matters, below).
+
+* `the_digest_of_the_base_state_is_pinned`: `0x8383_758e_5b5e_90e6` -> `0x4d0a_8207_c799_2fad` (the shipped profile has the numbers); with both off the old value returns (`the_digest_of_the_base_state_with_the_gather_numbers_off_is_the_wp9_2a_pin`).
+* `ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned`: 15,908 -> 15,249 (above).
+* `m1_ai` (`crates/sf_game/tests/ai_in_game.rs`; the AI is the NE seat): the barracks is ordered at 2,977 (was 3,017), the first unit queued at 4,547 (was 4,587), the floor reached at 9,654 (was 9,374), the first wave at 10,037 (was 9,717) and the match won at 12,673 (was 12,312), last structure at 11,657 (was 12,097). One rule at a time: gap only 2,977 / 4,547 / first wave 9,997 / won 12,621; everyone only 3,017 (unchanged) / 4,587 / 9,997 / 12,595; both off: every old value. The first differences come before any army exists (the second power plant at 2,137, was 2,177): the gather cell and its ring are kept free of structures by the placement search (`placement.rs`), so a gather cell that moves moves the cells the later structures take.
+* `the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`: the list's last build at **20,297 (was 19,777)**. **The WP9.1c-3 target of 20,000 is no longer met in this seat** (gap only 20,297, everyone only 20,537, both 20,297; gap 1 with everyone 20,017; gap 2 to 4 give the same cell). It is written down here as a known cost; the test asserts the new number and an upper bound of 21,000 instead of 20,000. Not chased by tuning the gap to land under 20,000.
+* `an_ai_attack_wave_in_the_games_picture`: the third picture moved from tick 11,500 to 12,400 (the wave arrives at the human's centre later; the centre falls at 12,673).
+* `the_commands_of_a_duel_game_stay_at_a_bounded_rate`: bound 2.3 -> 3.1 per 1,000 ticks (measured 2.32 and 1.45; the extra commands are the 24 single-unit `Move`s of the gathering and a game that is no longer decided in 40,000 ticks; rules off: 1.71 and 1.37 in 37,931 ticks as before).
+* `the_frozen_profile_is_the_shipped_one_with_the_numbers_of_wp9_2a_off` and `tournament_decided` (`DECIDED` stays 1,224 and 2,885): the fixtures switch the two gather numbers off too (they are about the equality with the frozen profile and about a game decided in a few thousand ticks, not about the gathering; with them on the strong seat 0 wins at 1,480 instead of 1,224).
+* `a_long_duel_with_the_shipped_numbers_loses_no_unit` (review nit of #133): it now asserts that a seat had two groups out together (a strike and its reinforcement). In game 0 the gathered wave no longer leaves a reinforcement out before tick 33,761, so the test plays **game 6** (seat 0 has two groups out from tick 24,801), 30,000 ticks. Mutation: `reinforce_value` 0 in the shipped profile makes it fail.
+* No pin of an earlier phase moved: `golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and every other `assets/scenarios/*.expected` are unchanged (those scenarios use their frozen profile copies); no frozen `*_defs/` copy was changed.
+
+### Tests (each new rule has a mutation, run and reverted)
+
+* `tools/sf_headless/tests/ai_march.rs` (real `m1_duel` games, both sites: game 0 and game 4): `the_gather_cell_is_never_an_ore_cell_and_keeps_its_gap_on_both_start_sites` (at tick 200 and 6,000, the kept cell and the cell worked out again), `the_wave_starts_from_one_place_on_both_start_sites` (pinned `[2, 1]` for both games, bound 4), and the two controls with the rules off: `with_the_rules_off_the_north_east_gather_cell_is_an_ore_cell` ((66, 26), next to the refinery) and `with_the_rules_off_the_south_west_wave_starts_seven_cells_from_the_gather_cell` (`[7, 4]` and `[4, 7]`), plus `the_shipped_profile_sets_both_rules`.
+* `tools/sf_headless/tests/ai_groups.rs` (built observations): `with_gather_everyone_a_unit_made_within_the_radius_is_sent_to_the_gather_cell_and_without_it_is_not`, `with_gather_everyone_a_unit_counts_as_gathered_only_after_it_was_sent`, `the_wave_that_launches_with_gather_everyone_waits_for_the_unit_beside_the_cell`.
+* `sf_data` (`ai_profile/tests.rs`): the shipped numbers pinned (2, true), the range of the gap in `every_number_is_checked_at_both_ends_when_the_file_is_read`, `a_profile_without_the_numbers_of_wp9_2a_2_reads_with_them_off` (all four frozen copies). `sf_ai`: both numbers in the digest test and the digest pins above.
+* Mutations, each failing the named test: the ore check removed -> `the_gather_cell_is_never_an_ore_cell...`; the gap comparison `>= gap` made `>= 0` -> the same test (the gap assertion) and `the_wave_starts_from_one_place...`; `ensure_gather` not checking a kept cell against the rule -> the same two; `gather_units` ignoring the switch -> `the_wave_starts_from_one_place...` (the wave never launches) and three tests in `ai_groups.rs`; `gathered()` ignoring whether the unit was sent -> `..._counts_as_gathered_only_after_it_was_sent` and `the_wave_that_launches_...`; `gather_everyone` false in `normal.ron` -> `the_shipped_profile_sets_both_rules`, `the_wave_starts_from_one_place...` and `the_shipped_profile_is_pinned`; `gather_refinery_gap` 0 in `normal.ron` -> `the_shipped_profile_sets_both_rules`, the ore test, the wave test, `the_shipped_profile_is_pinned` and the range test; the range check of the gap removed -> `every_number_is_checked_at_both_ends...`; either number left out of the digest -> `the_digest_sees_every_number_and_list` and the base-state pin.
+
+### Not done in WP9.2a-2
+
+* The map: base layout, distance to the ore, the staging cells (SW's lies 5 to 8 cells from the NE ore field) and the mirror of M1 stay as they are (Tijmen).
+* The games are decided less often (48 of 100, was 76) and the SW share of the decided games is still 71 to 79 %; neither was fixed. A march leash was built, measured (table above) and removed.
+* The WP9.1c-3 target of 20,000 for the goal list in the game seat is missed by 297 ticks (above).
+* A seat effect at seed 777 (seat 1 wins 31 : 14) was seen and not examined. 100 games per row is a small sample: differences of a few games are noise.
+* The staging cells were not looked at (a strike that stages next to the enemy ore field is what starves the enemy), nor a second refinery moving the gather cell again (it can: the cell is re-checked every army turn and the army walks to the new one).
+* Not run on the real game with a human: the game seat was looked at in `m1_ai` (idle human) only.
+
 
 ## The schedule
 
@@ -1122,7 +1224,7 @@ faction:
 * Numbers: `think_interval`, `stagger`; `economy` (`power_margin`, `harvesters_per_refinery`, `reserve`, `max_parallel_builds`,
   `silo_percent`, `repair_below_percent`, `blocked_ticks`, `placement_cap`, `lane`, the aprons, `max_queue`); `army` (`attack_value`, `max_wait`, `min_units`,
   `first_attack_tick`, `defend_ticks`, `gather_distance`, `gather_radius`, `gather_group`, `gather_tries`, `resend_ticks`, `scouts_max`, `scout_tick`,
-  `scout_patience`, `scout_retry`). Every one is range-checked when the file is read; the values are placeholders of the memo.
+  `scout_patience`, `scout_retry`; WP9.2a: the numbers of "Groups"; WP9.2a-2: `gather_refinery_gap`, `gather_everyone`, see "The start-site advantage"). Every one is range-checked when the file is read; the values are placeholders of the memo.
   In WP9.1a only `think_interval` and `stagger` acted; which act since WP9.1b-1 is under "The base".
 
 The shipped Meridian list: power_plant 1, refinery 1, barracks 1, power_plant 2, vehicle_factory 1, defence_tower 1, refinery 2, radar 1,

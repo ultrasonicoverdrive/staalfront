@@ -233,6 +233,18 @@ pub struct ArmyRules {
     /// scaled by a draw from minus to plus this many permille, 0 to 900. Left out: 0, no draw.
     #[serde(default)]
     pub timing_jitter_permille: u16,
+    /// WP9.2a-2, the gather cell off the ore and off the refinery: the gather cell is never an ore cell and
+    /// keeps at least this many free cells from every own refinery (harvester dock), 0 to 16. A cell that
+    /// breaks the rule is worked out again, also when a refinery goes up beside a cell kept earlier. Left
+    /// out: 0, the old rule (the frozen profiles and the pins of the earlier phases keep it).
+    #[serde(default)]
+    pub gather_refinery_gap: u8,
+    /// WP9.2a-2, the wave starts from one place: every army unit is sent to the gather cell when it is made,
+    /// whatever its distance from it, and counts as gathered only after it has been sent (before, a unit
+    /// made within `gather_radius` of the cell, such as the tanks of a factory beside it, was never sent and
+    /// stood at the factory exit). Left out: false, the old rule.
+    #[serde(default)]
+    pub gather_everyone: bool,
 }
 
 impl ArmyRules {
@@ -244,6 +256,12 @@ impl ArmyRules {
             || self.reinforce_value != 0
             || self.defend_ratio_permille != 0
             || self.timing_jitter_permille != 0
+    }
+
+    /// Whether any number of WP9.2a-2 is set (the gather cell rule or the gathering of everyone). With both
+    /// off the digest of the profile has the layout it had before.
+    pub fn gather_rules_on(&self) -> bool {
+        self.gather_refinery_gap != 0 || self.gather_everyone
     }
 }
 
@@ -450,6 +468,7 @@ impl AiProfile {
             0,
             900,
         )?;
+        range("army.gather_refinery_gap", a.gather_refinery_gap, 0, 16)?;
         if p.factions.is_empty() {
             return err("no faction section");
         }
