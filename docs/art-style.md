@@ -50,6 +50,14 @@ A test pins the shipped values (`tools/sf_model_gen/tests/models.rs`,
 
 The team colour is the engine's dynamic region (the material named `team`):
 
+- **narrow stripes, not frames** (refinement round 2, 14-11-2026): every band is about
+  0.25-0.35 m wide, so the team colour reads as markings; a test holds every upward-facing team
+  triangle of LOD0 and LOD1 to at most 350 mm across (`every_team_band_is_narrow`; LOD2 is the far
+  view, where the harvester drum keeps two wider bands for its 150-triangle budget). Where narrow
+  stripes do not reach 20 %, add stripes rather than widening them: two concentric roof bands
+  (`team_rings`, built with `insets` so the band is equally wide across the chamfers), a platform
+  edge stripe, two cross bands on a deck, stripes on a crane arm, a ring on a tank top, four narrow
+  drum bands;
 - **bands and trim, never whole surfaces** (tuning round 14-11-2026): a band round the turret roof
   edge, a stripe across the rear deck, a stripe along the fenders or the hull top, panels on the
   skirts, a band round a building's roof edge, a flange on a stack, the shoulder of a tank, a pad
@@ -90,13 +98,15 @@ the material colour:
 - **edge wear:** a bevel strip (no axis-aligned normal, narrower than 320 mm) whose corner sees open
   sky (no AO ray blocked) is, on about two thirds of its triangles (fixed hash), moved 35 % towards a
   grey a quarter above its luminance: lighter and less saturated, as paint rubbed thin. Big slanted
-  facets (a dome segment) are not edges and get none.
+  facets (a dome segment) are not edges and get none, and neither does any triangle of a turned
+  surface (`kit::lathe`, marked `Tri::lathed`; refinement round 2: the narrow segments of the
+  Meridian dome showed as light streaks; `a_lathed_dome_gets_no_edge_wear`).
 
 The vertex colour is RGB: the wanted linear colour divided by the material factor, which is a grey at
 the palette colour's brightest channel over 0.85 (`shade::factor`). A plain open face therefore shows
 exactly the palette colour, and highlights and worn edges stay inside glTF's 0..1 range. The team
 material keeps its own factor and ignores `COLOR_0`. Tests: `tools/sf_model_gen/tests/shade.rs`
-(one per rule: plain colour, highlight, wear, crease and grime).
+(one per rule: plain colour, highlight, wear, no wear on lathes, crease and grime).
 
 Keep colours clean and bright: the AO darkens creases, not whole surfaces; judge it in the engine
 render (contact sheet), not only in numbers.
