@@ -713,14 +713,15 @@ pub fn veyran_defence_tower() -> Model {
     let pal = Palette::shipped();
     Model::new("veyran_defence_tower", pal.materials("veyran"), |lod| {
         let b = lod.bevel(1);
+        let k = i32::from(lod.has(1));
         let mut body = loft(
             &[
-                (chamfer_rect(1850, 1850, 520), 0),
-                (chamfer_rect(1550, 1550, 440), 1700),
-                (chamfer_rect(1550, 1550, 440), 1900),
-                (chamfer_rect(1350, 1350, 380), 2150),
+                (chamfer_rect(1850, 1850, 520 * k), 0),
+                (chamfer_rect(1550, 1550, 440 * k), 1700),
+                (chamfer_rect(1550, 1550, 440 * k), 1900),
+                (chamfer_rect(1350, 1350, 380 * k), 2150),
             ],
-            &[PAINT2, PAINT, TEAM],
+            &[PAINT, PAINT2, TEAM],
             Some(PAINT2),
             None,
         );
@@ -742,6 +743,26 @@ pub fn veyran_defence_tower() -> Model {
                 body.add(bolt([-1400 + i * 400, 1900, -1450], 40, 25, 4, METAL));
             }
             body.add(closed_box([-1890, 0, -500], [-1820, 1100, 500], METAL));
+            // Armour fins on the corners, louvres on the back, a plinth, lamps on the ledge.
+            for q in 0..4u8 {
+                body.add(closed_box([1180, 0, 1180], [1420, 1500, 1420], PAINT2).turned_y(q));
+                body.add(bolt([1450, 1900, 1450], 70, 60, 8, ACCENT).turned_y(q));
+            }
+            for i in 0..6 {
+                let y = 300 + i * 180;
+                body.add(closed_box([-1760, y, -1100], [-1700, y + 60, 1100], PAINT2));
+            }
+            body.add(bevel_box(
+                [-1900, 0, -1880],
+                [1900, 120, 1880],
+                60,
+                METAL,
+                METAL,
+            ));
+            for i in 0..5 {
+                let y = 300 + i * 300;
+                body.add(closed_box([-1880, y, 560], [-1820, y + 40, 900], METAL));
+            }
         }
         let mut turret = loft(
             &[
