@@ -104,7 +104,7 @@ the material colour:
 
 The vertex colour is RGB: the wanted linear colour divided by the material factor, which is a grey at
 the palette colour's brightest channel over 0.85 (`shade::factor`). A plain open face therefore shows
-exactly the palette colour, and highlights and worn edges stay inside glTF's 0..1 range. The team
+the palette colour within the per-facet variation and 8-bit rounding (the test allows 6 %), and highlights and worn edges stay inside glTF's 0..1 range. The team
 material keeps its own factor and ignores `COLOR_0`. Tests: `tools/sf_model_gen/tests/shade.rs`
 (one per rule: plain colour, highlight, wear, no wear on lathes, crease and grime).
 

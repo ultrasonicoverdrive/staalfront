@@ -48,24 +48,42 @@ fn every_part_of_both_rigs_has_a_picture_of_its_shape_size() {
     let s = scene();
     assert_eq!(s.characters.len(), 2);
     let files = cutout_files();
+    let check = |rel: String, art: &Art| {
+        let (_, bytes) = files
+            .iter()
+            .find(|(p, _)| *p == rel)
+            .unwrap_or_else(|| panic!("no picture for {rel}"));
+        let img = image::decode_png(bytes).expect("an 8-bit RGBA PNG");
+        let (w, h) = match *art {
+            Art::Rect { w, h, .. } | Art::RoundRect { w, h, .. } => (w, h),
+            Art::Circle { radius, .. } => (radius * 2.0, radius * 2.0),
+            Art::Image(_) => return,
+        };
+        let px = |v: f32| (v.ceil() as u32).max(3);
+        assert_eq!((img.width, img.height), (px(w), px(h)), "{rel}");
+    };
+    let mut mouths = 0;
     for ch in &s.characters {
         for part in &ch.parts {
-            let rel = format!("{CUTOUT_DIR}/{}/{}.png", ch.id, part.name);
-            let (_, bytes) = files
-                .iter()
-                .find(|(p, _)| *p == rel)
-                .unwrap_or_else(|| panic!("no picture for {rel}"));
-            let img = image::decode_png(bytes).expect("an 8-bit RGBA PNG");
-            let (w, h) = match part.art {
-                Art::Rect { w, h, .. } | Art::RoundRect { w, h, .. } => (w, h),
-                Art::Circle { radius, .. } => (radius * 2.0, radius * 2.0),
-                Art::Image(_) => continue,
-            };
-            let px = |v: f32| (v.ceil() as u32).max(3);
-            assert_eq!((img.width, img.height), (px(w), px(h)), "{rel}");
-            assert_eq!(!part.mouth_shapes.is_empty(), part.name == "mouth", "{rel}");
+            check(
+                format!("{CUTOUT_DIR}/{}/{}.png", ch.id, part.name),
+                &part.art,
+            );
+            assert_eq!(
+                !part.mouth_shapes.is_empty(),
+                part.name == "mouth",
+                "{}",
+                part.name
+            );
+            // The mouth shapes too: each picture has the size of the shape it replaces.
+            for (id, art) in &part.mouth_shapes {
+                let rel = format!("{CUTOUT_DIR}/{}/{}_{}.png", ch.id, part.name, id.letter());
+                check(rel, art);
+                mouths += 1;
+            }
         }
     }
+    assert!(mouths >= 9, "{mouths} mouth shapes checked");
 }
 
 #[test]

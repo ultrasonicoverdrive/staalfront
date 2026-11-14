@@ -254,6 +254,9 @@ read by its default scene as before, so the checker says what is missing (`lod-r
 `LOD<n>` scene with two roots, a root with another number than its scene, or two scenes with one
 number is refused with a message (`glb` in the checker, a `GlbError::Invalid` in the engine).
 Node names stay local to their level, as before (`hull` may appear in every level).
+An optional `COLOR_0` (float, or normalised u8/u16, `VEC3` or `VEC4`; alpha ignored) multiplies the
+base colour factor per vertex (baked shading, WP11.6a); it must have the `POSITION` count, and the
+`team` material ignores it.
 
 **Why a loader change and not an import step.** The change is one function and its tests
 (`glb::tests`, `sf_asset_check/tests/rules.rs`); the checker calls the loader's function, so the two

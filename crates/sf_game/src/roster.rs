@@ -355,7 +355,7 @@ impl Loader<'_> {
 
 /// The file of a structure state (a build stage or a damage stage) as it lies under `assets`: `file` if it
 /// exists; for a set v5 model, whose generator has made only the finished look so far (WP11.6a; the states
-/// are WP11.6c), the set v4 file of the same name; else none.
+/// are WP11.6c), the set v4 file of the same name; else none. Remove the fallback in WP11.6c.
 pub(crate) fn state_file(assets: &Path, file: &str) -> Option<String> {
     if assets.join(file).is_file() {
         return Some(file.to_owned());

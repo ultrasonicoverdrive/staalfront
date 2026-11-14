@@ -1,5 +1,5 @@
 //! The rules of the kit, per model of set v5 (WP11.6a, docs/art-style.md): budgets per level and
-//! strictly fewer triangles per level, the team share of the top-down view in 20-40 % on many
+//! strictly fewer triangles per level, the team share of the top-down view in 20-30 % on many
 //! triangles, the nodes the engine and the checker need, sizes inside the set v4 models they
 //! replace, and `sf_asset_check` with no finding at all. Every check runs on what the generator
 //! itself builds and writes (`models::MODELS`, `glb::write`).
