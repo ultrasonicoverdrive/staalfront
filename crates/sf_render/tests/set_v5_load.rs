@@ -101,9 +101,11 @@ fn every_model_loads_with_three_levels_parts_and_anchors() {
         assert!(tris[0] > tris[1] && tris[1] > tris[2], "{file}: {tris:?}");
         for (n, level) in m.levels.iter().enumerate() {
             let names: Vec<&str> = level.anchors.iter().map(|a| a.name.as_str()).collect();
-            assert!(
+            let building = !file.contains("light_tank") && !file.contains("harvester");
+            assert_eq!(
                 names.contains(&"fx_smoke_0") && names.contains(&"fx_fire_0"),
-                "{file} LOD{n}: {names:?}"
+                building,
+                "{file} LOD{n}: {names:?} (structures have smoke and fire anchors)"
             );
             let armed = file.contains("light_tank") || file.contains("defence_tower");
             if armed {

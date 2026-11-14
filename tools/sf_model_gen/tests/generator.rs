@@ -13,10 +13,10 @@ const PINNED: [(&str, usize, u64); 6] = [
         311532,
         0x08330bf944248af7,
     ),
-    ("meridian_harvester.glb", 245640, 0xb0906761beed1116),
-    ("meridian_light_tank.glb", 261504, 0x1ffa2bb4720ce1c9),
+    ("meridian_harvester.glb", 245340, 0xe4a8ead5f4ab68cf),
+    ("meridian_light_tank.glb", 261188, 0xa4b2f54d8105e6d5),
     ("veyran_defence_tower.glb", 132364, 0xb2244ce5d2175dd2),
-    ("veyran_light_tank.glb", 223384, 0xd24d42ce98ab8d32),
+    ("veyran_light_tank.glb", 223060, 0x3bbade9ed20c114c),
     ("veyran_power_plant.glb", 188340, 0x37e789954ba4d2cd),
 ];
 

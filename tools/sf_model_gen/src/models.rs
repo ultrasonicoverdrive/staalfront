@@ -123,6 +123,8 @@ fn wedge(hx: i32, fx: i32, nose: i32, hz: i32) -> Vec<[i32; 2]> {
     ]
 }
 
+/// Smoke and fire anchors of a structure. Vehicles have none yet: without them a hurt vehicle smokes by
+/// the engine's rule, as every other vehicle does (`docs/art-style.md` section 7).
 fn anchors(n: Node, smoke: P, fire: P) -> Node {
     n.child(Node::empty("fx_smoke_0", smoke))
         .child(Node::empty("fx_fire_0", fire))
@@ -248,7 +250,7 @@ pub fn meridian_light_tank() -> Model {
             Node::part("barrel", [1150, 310, 0], barrel).child(Node::empty("muzzle", [1830, 0, 0]));
         let turret = Node::part("turret", [-420, 1060, 0], turret).child(barrel);
         let hull = Node::part("hull", [0, 0, 0], hull).child(turret);
-        vec![anchors(hull, [-1500, 1100, 0], [-1200, 1100, 400])]
+        vec![hull]
     })
 }
 
@@ -355,7 +357,7 @@ pub fn veyran_light_tank() -> Model {
             Node::part("barrel", [1150, 230, 0], barrel).child(Node::empty("muzzle", [1880, 0, 0]));
         let turret = Node::part("turret", [-500, 1000, 0], turret).child(barrel);
         let hull = Node::part("hull", [0, 0, 0], hull).child(turret);
-        vec![anchors(hull, [-1500, 1050, 0], [-1100, 1050, -400])]
+        vec![hull]
     })
 }
 
@@ -465,7 +467,7 @@ pub fn meridian_harvester() -> Model {
         }
         let turret = Node::empty("turret", [0, 900, 0]).child(Node::empty("barrel", [0, 0, 0]));
         let hull = Node::part("hull", [0, 0, 0], hull).child(turret);
-        vec![anchors(hull, [-1000, 2200, 0], [1500, 1200, 0])]
+        vec![hull]
     })
 }
 

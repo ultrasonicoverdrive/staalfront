@@ -82,10 +82,12 @@ fn every_level_has_the_nodes_of_its_role() {
     for m in models() {
         for (n, root) in m.lods.iter().enumerate() {
             assert_eq!(root.name, format!("{}_LOD{n}", m.stem));
-            let mut need = vec!["fx_smoke_0", "fx_fire_0"];
+            let mut need = vec![];
             if is_building(&m.stem) {
-                need.push("body");
+                need.extend(["body", "fx_smoke_0", "fx_fire_0"]);
             } else {
+                // Vehicles smoke by the engine's rule (no anchors), like every other vehicle.
+                assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
                 need.extend(["hull", "turret", "barrel"]);
             }
             if m.stem.ends_with("light_tank") || m.stem.ends_with("defence_tower") {

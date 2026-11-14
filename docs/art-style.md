@@ -95,8 +95,10 @@ most 40 % and LOD2 at most 15 % of LOD0 (`every_level_is_inside_its_budget_and_r
 
 As `docs/conventions.md` section 12 and `sf_asset_check` ask: roots `<stem>_LOD0..2`; vehicles
 `hull -> turret -> barrel -> muzzle` (empty `turret`/`barrel` nodes for an unarmed vehicle);
-buildings `body` (and `body -> turret -> barrel -> muzzle` for a defence); empty anchors
-`fx_smoke_0` and `fx_fire_0` in every model. At most four parts per level (the engine's limit).
+buildings `body` (and `body -> turret -> barrel -> muzzle` for a defence) with empty anchors
+`fx_smoke_0` and `fx_fire_0`. Vehicles get no smoke anchors yet: a hurt vehicle smokes by the
+engine's rule like every other vehicle (anchors on the v5 tanks changed what
+`damage_screenshot.rs` counts as anchor puffs; WP11.6b decides for all vehicles at once). At most four parts per level (the engine's limit).
 
 ## 8. Cutscene parts
 
