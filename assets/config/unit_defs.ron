@@ -64,7 +64,7 @@
             flags: (build_radius: 8),
             model: Shape(Cube), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_construction_center.glb"),
+                Meridian: Glb("set_v5/meridian_construction_center.glb"),
                 Veyran: Glb("set_v4/veyran_construction_center.glb"),
             },
             icon: "construction_center",
@@ -78,7 +78,7 @@
             model: Glb("testpack_v1/models/energiecentrale.glb"), strategic_icon: Square,
             models: {
                 Meridian: Glb("set_v4/meridian_power_plant.glb"),
-                Veyran: Glb("set_v4/veyran_power_plant.glb"),
+                Veyran: Glb("set_v5/veyran_power_plant.glb"),
             },
             icon: "power_plant",
             build_picture: (color: (230, 190, 60), label: "PWR", order: 10),
@@ -150,7 +150,7 @@
             model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
             models: {
                 Meridian: Glb("set_v4/meridian_defence_tower.glb"),
-                Veyran: Glb("set_v4/veyran_defence_tower.glb"),
+                Veyran: Glb("set_v5/veyran_defence_tower.glb"),
             },
             icon: "defence_tower",
             build_picture: (color: (170, 80, 80), label: "TWR", order: 60),
@@ -229,7 +229,7 @@
             flags: (harvests: true),
             model: Glb("testpack_v1/models/grondstofwagen.glb"), strategic_icon: Triangle,
             models: {
-                Meridian: Glb("set_v4/meridian_harvester.glb"),
+                Meridian: Glb("set_v5/meridian_harvester.glb"),
                 Veyran: Glb("set_v4/veyran_harvester.glb"),
             },
             icon: "harvester",
@@ -331,8 +331,8 @@
             weapons: ["cannon"],
             model: Glb("testpack_v1/models/lichte_tank.glb"), strategic_icon: Triangle,
             models: {
-                Meridian: Glb("set_v4/meridian_light_tank.glb"),
-                Veyran: Glb("set_v4/veyran_light_tank.glb"),
+                Meridian: Glb("set_v5/meridian_light_tank.glb"),
+                Veyran: Glb("set_v5/veyran_light_tank.glb"),
             },
             icon: "light_tank",
             build_picture: (color: (180, 130, 70), label: "LTANK", order: 20),
