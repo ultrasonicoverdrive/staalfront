@@ -85,9 +85,15 @@ fn is_building(file: &str) -> bool {
 
 /// Has a gun: a muzzle anchor and a turning turret and barrel.
 fn is_armed(file: &str) -> bool {
-    ["light_tank", "heavy_tank", "siege_artillery", "gunboat", "defence_tower"]
-        .iter()
-        .any(|b| file.contains(b))
+    [
+        "light_tank",
+        "heavy_tank",
+        "siege_artillery",
+        "gunboat",
+        "defence_tower",
+    ]
+    .iter()
+    .any(|b| file.contains(b))
 }
 
 /// A neutral object has no player colour.
@@ -117,7 +123,7 @@ fn the_folder_holds_the_models_and_the_pack_lists_them() {
         .expect("models.ron has the pack set_v5");
     assert_eq!(spec.dir, "set_v5");
     let listed: BTreeSet<&str> = spec.models.iter().map(|m| m.file.as_str()).collect();
-    assert_eq!(listed, FILES.into_iter().collect());
+    assert_eq!(listed, FILES.iter().copied().collect());
     let pack = glb::load_pack(&config, "set_v5", &assets()).expect("pack loads");
     assert_eq!(pack.set.models().len(), FILES.len());
 }
@@ -142,7 +148,15 @@ fn every_model_loads_with_three_levels_parts_and_anchors() {
                 "{file} LOD{n}: {names:?} (structures have smoke and fire anchors)"
             );
             if is_armed(file) {
-                assert!(names.contains(&"muzzle"), "{file} LOD{n}: {names:?}");
+                // The heavy tank's twin cannon has a muzzle anchor per barrel.
+                let muzzles: &[&str] = if file.contains("heavy_tank") {
+                    &["muzzle_l", "muzzle_r"]
+                } else {
+                    &["muzzle"]
+                };
+                for m in muzzles {
+                    assert!(names.contains(m), "{file} LOD{n}: {names:?}");
+                }
                 let joints: Vec<Joint> = level.parts.iter().map(|p| p.joint).collect();
                 assert!(
                     joints.contains(&Joint::Yaw) && joints.contains(&Joint::Pitch),
@@ -289,7 +303,8 @@ fn every_model_is_drawn_in_its_player_colour_and_the_contact_sheet_is_written_on
                 }
             }
             let sheet = Rgba8::new(TW * cols, TH * rows, px);
-            let path = PathBuf::from(&dir).join(format!("set_v5_contact_sheet_raw_{}.png", page + 1));
+            let path =
+                PathBuf::from(&dir).join(format!("set_v5_contact_sheet_raw_{}.png", page + 1));
             image::write_png(&path, &sheet).expect("write the contact sheet");
         }
     }

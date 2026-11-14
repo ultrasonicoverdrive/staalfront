@@ -102,7 +102,9 @@ pub fn heavy_tank(style: Style) -> Model {
         }
         hull.add(team_strip([-2500, 1300, -1000], [-2200, 1335, 1000], lod));
         hull.add(team_strip([1500, 1300, -950], [1800, 1318, 950], lod));
-        hull.add(team_strip([2000, 1300, -900], [2300, 1318, 900], lod));
+        if lod.has(1) {
+            hull.add(team_strip([2000, 1300, -900], [2300, 1318, 900], lod));
+        }
         hull.add(both_sides(team_strip(
             [-2600, 880, 1510],
             [2400, 898, 1810],
@@ -132,12 +134,6 @@ pub fn heavy_tank(style: Style) -> Model {
                 [2900, 1110, 1080],
                 ACCENT,
             )));
-            for z in [-500, 500] {
-                hull.add(
-                    lathe_x(&[(100, 0), (100, 260)], 8, &[METAL], Some(RUBBER), None)
-                        .moved([-3150, 1000, z]),
-                );
-            }
             if !round {
                 hull.add(closed_box([-2950, 900, -700], [-2900, 1000, 700], ACCENT));
             }
@@ -186,8 +182,7 @@ pub fn heavy_tank(style: Style) -> Model {
         );
         if lod.has(0) {
             turret.add(hatch([-300, roof_y, 380], 270, 8, PAINT2));
-            turret.add(hatch([-300, roof_y, -380], 230, 8, PAINT));
-            for i in 0..3 {
+            for i in 0..2 {
                 turret.add(both_sides(
                     lathe_x(&[(55, 0), (55, 230)], 4, &[METAL], Some(RUBBER), None).moved([
                         600,
@@ -201,7 +196,6 @@ pub fn heavy_tank(style: Style) -> Model {
                 [100, 560, 1240],
                 PAINT2,
             )));
-            turret.add(closed_box([-1500, 200, -700], [-1300, 600, 700], PAINT2));
             if !round {
                 turret.add(both_sides(closed_box(
                     [-900, 180, 1100],
@@ -210,9 +204,12 @@ pub fn heavy_tank(style: Style) -> Model {
                 )));
             }
         }
-        let barrel_mesh = {
+        // The twin cannon (weapon `twin_cannon`, a burst of two): two barrels side by side, one
+        // muzzle anchor each (`muzzle_l`, `muzzle_r`, the n-th shot of a burst comes from the
+        // n-th), 912 mm apart like the set v4 heavy tank's.
+        let one = {
             let mut b = lathe_x(
-                &if lod.has(1) {
+                &if lod.has(0) {
                     vec![
                         (150, 0),
                         (150, 1500),
@@ -232,14 +229,16 @@ pub fn heavy_tank(style: Style) -> Model {
             if !round && lod.has(1) {
                 b.add(closed_box([2300, -190, -190], [2650, 190, 190], METAL));
             }
-            if lod.has(0) {
-                b.add(closed_box([-50, -230, -300], [300, 230, 300], PAINT2));
-            }
             b
         };
+        let mut barrel_mesh = one.clone().moved([0, 0, 456]).with(one.moved([0, 0, -456]));
+        if lod.has(0) {
+            barrel_mesh.add(closed_box([-50, -230, -700], [300, 230, 700], PAINT2));
+        }
         let muzzle = if round { 2500 } else { 2650 };
         let barrel = Node::part("barrel", [1250, 330, 0], barrel_mesh)
-            .child(Node::empty("muzzle", [muzzle, 0, 0]));
+            .child(Node::empty("muzzle_l", [muzzle, 0, -456]))
+            .child(Node::empty("muzzle_r", [muzzle, 0, 456]));
         let turret = Node::part("turret", [-250, 1300, 0], turret).child(barrel);
         vec![Node::part("hull", [0, 0, 0], hull).child(turret)]
     })

@@ -311,7 +311,7 @@ fn repair_body(t: &Truck, lod: Lod, hull: &mut Mesh) {
             )));
         }
         hull.add(closed_box(
-            [t.back - 0, deck + 200, -600],
+            [t.back, deck + 200, -600],
             [t.back + 40, deck + 320, 600],
             ACCENT,
         ));
@@ -376,7 +376,7 @@ fn transport_body(t: &Truck, lod: Lod, hull: &mut Mesh) {
         }
         body.add(hatch([mid, top, 0], 240, 8, PAINT2));
         body.add(closed_box(
-            [mid - hl - 0, deck + 400, -400],
+            [mid - hl, deck + 400, -400],
             [mid - hl + 40, deck + 1200, 400],
             if t.style == Style::Angular {
                 ACCENT

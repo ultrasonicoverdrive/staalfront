@@ -203,22 +203,39 @@ fn every_level_has_the_nodes_of_its_role() {
                 assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
                 need.extend(["hull", "turret", "barrel"]);
             }
-            if is_armed(&m.stem) || m.stem.ends_with("defence_tower") {
+            if m.stem.ends_with("heavy_tank") {
+                // The twin cannon (burst of two): a muzzle per barrel, 912 mm apart like the set
+                // v4 heavy tank's; the n-th shot of a burst comes from the n-th anchor.
+                need.extend(["turret", "barrel", "muzzle_l", "muzzle_r"]);
+                let (l, r) = (
+                    root.find("muzzle_l").unwrap(),
+                    root.find("muzzle_r").unwrap(),
+                );
+                assert_eq!(l.at[0], r.at[0], "{}", m.stem);
+                assert_eq!(
+                    r.at[2] - l.at[2],
+                    912,
+                    "{}: the barrels are 912 mm apart",
+                    m.stem
+                );
+                assert!(root.find("muzzle").is_none(), "{}", m.stem);
+            } else if is_armed(&m.stem) || m.stem.ends_with("defence_tower") {
                 need.extend(["turret", "barrel", "muzzle"]);
             }
             for name in need {
                 let node = root
                     .find(name)
                     .unwrap_or_else(|| panic!("{} LOD{n}: no node {name}", m.stem));
-                if name.starts_with("fx_") || name == "muzzle" {
+                if name.starts_with("fx_") || name.starts_with("muzzle") {
                     assert!(node.mesh.is_empty(), "{} {name} is an empty anchor", m.stem);
                 }
             }
             // The muzzle hangs under a barrel with geometry (docs/conventions.md §12).
             if let Some(barrel) = root.find("barrel")
-                && root.find("muzzle").is_some()
+                && (root.find("muzzle").is_some() || root.find("muzzle_l").is_some())
             {
-                assert!(!barrel.mesh.is_empty() && barrel.find("muzzle").is_some());
+                assert!(!barrel.mesh.is_empty());
+                assert!(barrel.find("muzzle").is_some() || barrel.find("muzzle_l").is_some());
             }
         }
     }

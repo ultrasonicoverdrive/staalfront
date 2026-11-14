@@ -380,11 +380,11 @@ fn meridian_and_veyran_riflemen_side_by_side_at_close_zoom() {
     assert!(mm > 3 * mv && vv > 3 * vm, "the colours do not swap");
 }
 
-/// All the infantry of set v4 at once, a row per role: Meridian left, Veyran
+/// All the infantry of the roster at once (set v3 and the heavy gun team of set v5), a row per role: Meridian left, Veyran
 /// right, the neutral civilians and technicians apart. A look at the whole
 /// set, with a check that every figure is drawn and upright.
 #[test]
-fn the_infantry_of_set_v4_stands_upright_in_a_row_per_role() {
+fn the_infantry_of_the_roster_stands_upright_in_a_row_per_role() {
     let mut scene = Scene::new();
     let mut r = renderer(&scene.map);
     let mut figures: Vec<(&str, u8, EntityId)> = Vec::new();
@@ -442,7 +442,7 @@ fn the_infantry_of_set_v4_stands_upright_in_a_row_per_role() {
         .collect();
     assert_eq!(
         people.len(),
-        14,
+        15,
         "all the infantry of the set is in the roster"
     );
     for model in people {
@@ -490,7 +490,7 @@ fn the_infantry_of_set_v4_stands_upright_in_a_row_per_role() {
     let empty = scene.shoot(&mut r, &cam);
     scene.sync(true);
     let img = scene.shoot(&mut r, &cam);
-    save("infantry_set_v4.png", &img);
+    save("infantry_roster.png", &img);
     let mut seen = 0;
     for (role, owner, id) in &figures {
         let p = scene.screen(&cam, *id);

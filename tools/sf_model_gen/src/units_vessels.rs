@@ -303,13 +303,11 @@ pub fn neutral_ferry() -> Model {
                 [1850, deck + 1600, 4150],
                 PAINT2,
             ));
-            for sign in [-1, 1] {
-                hull.add(closed_box(
-                    [-1300, deck + 700, 4100 + (sign + 1) * 0],
-                    [1300, deck + 1300, 4125],
-                    ACCENT,
-                ));
-            }
+            hull.add(closed_box(
+                [-1300, deck + 700, 4100],
+                [1300, deck + 1300, 4125],
+                ACCENT,
+            ));
             hull.add(closed_box(
                 [-1300, deck + 700, 2075],
                 [1300, deck + 1300, 2100],
