@@ -157,7 +157,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 40] = [
+    let table: [(&str, &str, [&str; 2]); 41] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",

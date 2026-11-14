@@ -215,13 +215,17 @@ fn launch_spread(game: u32, rules_off: bool) -> [u32; 2] {
 }
 
 /// The most cells any member of a wave stands from the gather cell when it goes out, with the rules on, over the
-/// 16 games measured (the two sites, 8 games each: 1 to 3).
-const LAUNCH_SPREAD_MAX: u32 = 3;
+/// first 64 games of `m1_duel` (the two sites, 32 games each; a launch before tick 20,000 in 61 games on SW and 64
+/// on NE): 1 to 4 cells, mean 1.7 on SW and 1.6 on NE. With the rules off it is 7 in all 63 launches on SW and 2 to
+/// 5 (mostly 4) on NE.
+const LAUNCH_SPREAD_MAX: u32 = 4;
 
 #[test]
 fn the_wave_starts_from_one_place_on_both_start_sites() {
-    for game in [0u32, 4] {
+    // Pinned exactly for the two games (`[seat 0, seat 1]`): in game 0 seat 0 is on SW, in game 4 on NE.
+    for (game, want) in [(0u32, [2u32, 1]), (4, [2, 1])] {
         let spread = launch_spread(game, false);
+        assert_eq!(spread, want, "game {game}");
         for (seat, far) in spread.into_iter().enumerate() {
             let site = if on_south_west(game, seat) {
                 "SW"
@@ -239,16 +243,9 @@ fn the_wave_starts_from_one_place_on_both_start_sites() {
 #[test]
 fn with_the_rules_off_the_south_west_wave_starts_seven_cells_from_the_gather_cell() {
     // The control: the two tanks of the south-west factory are made within `gather_radius` (8) of the gather cell,
-    // count as arrived and are never sent; they stand 7 cells from it when the wave goes out (16 of 16 games
-    // measured), and the test above fails on it.
-    for game in [0u32, 4] {
-        let spread = launch_spread(game, true);
-        for (seat, far) in spread.into_iter().enumerate() {
-            if on_south_west(game, seat) {
-                assert_eq!(far, 7, "game {game}");
-            } else {
-                assert!(far <= 5, "game {game}: {far}");
-            }
-        }
-    }
+    // count as arrived and are never sent; they stand 7 cells from it when the wave goes out (63 of 63 launches
+    // measured), the north-east wave 4 here (2 to 5 over 64 games; its units stand about the ore field); the test
+    // above fails on it.
+    assert_eq!(launch_spread(0, true), [7, 4], "game 0: seat 0 is on SW");
+    assert_eq!(launch_spread(4, true), [4, 7], "game 4: seat 0 is on NE");
 }
