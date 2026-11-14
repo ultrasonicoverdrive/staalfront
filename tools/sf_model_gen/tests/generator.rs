@@ -13,8 +13,6 @@ use sf_model_gen::files;
 // Veyran's steel tones 25 % lighter and cooler, no edge wear on lathed surfaces (the dome).
 // WP11.6c: 137 files added (every structure's states, the mission objects, the heaps); the six
 // files above kept their bytes (the faster AO pre-filter and the palette's new entries change none).
-// WP11.6c: 137 files added (every structure's states, the mission objects, the heaps); the six
-// files above kept their bytes (the faster AO pre-filter and the palette's new entries change none).
 const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_advanced_defences.glb", 457052, 0x0c0dc29c9e944e34),
     (
