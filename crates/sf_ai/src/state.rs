@@ -641,7 +641,8 @@ impl AiState {
         self.strike().map(|g| g.goal)
     }
 
-    /// The units on `list` of every group (or of the Returning ones only when `returning` is set), ascending.
+    /// The units on `list` of every group when `returning` is set, or of the groups that are not Returning only when it
+    /// is not, ascending.
     fn union_of(&self, list: impl Fn(&Group) -> &Vec<EntityId>, returning: bool) -> Vec<EntityId> {
         let mut all: Vec<EntityId> = self
             .groups

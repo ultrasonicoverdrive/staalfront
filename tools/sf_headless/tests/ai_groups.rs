@@ -985,7 +985,7 @@ fn check_groups(s: &AiState, at: u64) {
 #[test]
 fn a_unit_is_in_at_most_one_group_in_every_army_turn_of_a_long_run() {
     // The shipped numbers on the scenario of `ai_vs_passive` (the AI wins at 15,908 ticks with these numbers), observed after
-    // every tick.
+    // every tick: `run_observed` calls the closure after each step; `every: 100` is only the checksum sample interval.
     let s = {
         let mut s = load("ai_vs_passive");
         let old = s.ais[0].state().clone();
@@ -1468,7 +1468,7 @@ fn watch_groups(world: &World, st: &AiState, tick: u64, w: &mut Watched) {
 fn a_raid_on_the_centre_while_the_strike_is_out_recalls_it_defends_and_loses_no_unit() {
     // `ai_raid_guard` with the shipped army numbers (guard 0, staging patience 1800, jitter 0), and the two
     // raiders sent at the construction centre (slot 0) instead of the power plant, run to 8,000 ticks and
-    // watched every 10: the raid comes while the strike is out (a defence call), the hit on the centre calls the
+    // watched after every tick (`every: 10` is only the checksum sample interval): the raid comes while the strike is out (a defence call), the hit on the centre calls the
     // strike back (a recall), no unit is in two groups, and no unit is lost (in no group and still on its way to
     // the old target or staging cell long after its group ended).
     let mut s = load("ai_raid_guard");
@@ -1508,4 +1508,62 @@ fn a_raid_on_the_centre_while_the_strike_is_out_recalls_it_defends_and_loses_no_
     let snap = f.world.snapshot();
     assert!(!snap.iter().any(|v| v.owner == P1 && v.kind == RIFLEMAN));
     assert!(snap.iter().any(|v| v.id == EntityId::new(0, 0)));
+}
+
+#[test]
+fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
+    // `m1_duel` game 0 as the tournament plays it (the file's base seed 458,758, the factions of game 0, sites
+    // not swapped), both seats on the shipped profile, to 30,000 ticks or the end of the game if sooner. Both
+    // seats are watched every 10 ticks with `watch_groups`: no unit in two groups and no unit lost. At least one
+    // group must have gone out for each seat, so the check is not vacuous. In this game (30,000 ticks, 3 attacks
+    // by seat 0, 1 by seat 1, one reinforcement out from tick 28,370) every strike ends with its members dead, so
+    // there are no survivors to send home: the loss path (survivors left on the old target) is caught by
+    // `every_survivor_of_an_ended_attack_is_sent_home_over_several_turns`, not here. What this run does catch is
+    // a unit in two groups, e.g. a reinforcement that also lists the strike's members.
+    use sf_headless::tournament::{
+        factions_for, load_setup, prepare_sited, seeds_for, sites_swapped,
+    };
+    let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+    let setup = load_setup(&assets, &assets.join("matches/m1_duel.ron")).unwrap();
+    let (world_seed, ai_seed) = seeds_for(458_758, 0);
+    let prepared = prepare_sited(
+        &setup,
+        factions_for(setup.file_factions(), 0),
+        sites_swapped(0),
+        world_seed,
+        ai_seed,
+    )
+    .unwrap();
+    let (mut world, mut ais) = (prepared.world, prepared.ais);
+    let mut watched = [Watched::default(), Watched::default()];
+    let mut out = [false, false];
+    let mut wanted = Vec::new();
+    while world.tick().0 < 30_000 {
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                wanted.clear();
+                ai.think(&world, &mut wanted);
+                for command in wanted.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        world.step();
+        if world.tick().0 % 10 == 0 {
+            for (seat, ai) in ais.iter().enumerate() {
+                let st = ai.state();
+                watch_groups(&world, st, world.tick().0, &mut watched[seat]);
+                out[seat] |= !st.groups.is_empty();
+            }
+        }
+        if world.match_result().is_some() {
+            break;
+        }
+    }
+    println!("ended at tick {}", world.tick().0);
+    assert_eq!(out, [true, true], "a group went out for each seat");
+    assert!(
+        ais.iter().all(|a| a.state().attacks_launched > 0),
+        "each seat launched"
+    );
 }

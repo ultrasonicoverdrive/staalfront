@@ -253,8 +253,10 @@ pub const DEFAULT_STAGE_PERMILLE: u16 = 700;
 /// `stage_distance` above 0, and a profile that leaves `stage_distance` out (staging off, the default) never
 /// uses it. It is not a tuned number: 600 was measured too short (riflemen need 800 to 1,000 ticks to reach the
 /// staging cell), and the shipped `normal` profile writes 1800 (`docs/rules/ai.md`, "Groups"). It stays 600
-/// because the profile digest of the frozen profiles hashes it; a profile that turns staging on must write its
-/// own patience below `attack_patience` (checked).
+/// because a profile with some WP9.2a number on but staging off still hashes it: `Profile::digest` writes all
+/// the WP9.2a numbers once `groups_on()`, so a new default would move the digest of such a profile. The frozen
+/// profiles (all WP9.2a numbers 0) do not hash it. A profile that turns staging on must write its own patience
+/// below `attack_patience` (checked).
 pub const DEFAULT_STAGE_PATIENCE: u32 = 600;
 fn default_stage_permille() -> u16 {
     DEFAULT_STAGE_PERMILLE
