@@ -19,6 +19,7 @@ pub mod kit;
 pub mod models;
 pub mod palette;
 pub mod shade;
+pub mod units;
 
 /// Every file of set v5: `(file name, bytes)`, in the order of [`models::MODELS`].
 pub fn files() -> Vec<(String, Vec<u8>)> {

@@ -24,6 +24,17 @@
             rubber: (20, 20, 20),
             accent: (160, 32, 48),
         ),
+        // Neutral models (WP11.6b: the supply truck, the ferry) have no team material; the third
+        // slot is a second light paint instead (`paint3`, the `paint_light` colour).
+        "neutral": (
+            paint: (190, 176, 140),
+            paint_light: (206, 196, 164),
+            paint2: (96, 108, 92),
+            paint2_shade: (70, 80, 70),
+            metal: (44, 44, 40),
+            rubber: (20, 20, 20),
+            accent: (150, 70, 40),
+        ),
     },
     // The base colour stored in the team material (the engine replaces it with the player colour).
     team_base: (235, 235, 235),
