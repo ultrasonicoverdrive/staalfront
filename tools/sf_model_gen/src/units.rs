@@ -7,8 +7,8 @@
 //! builders take a [`Style`] so a role of both factions shares its recipe and differs in outline.
 
 use crate::kit::{
-    Lod, Mat, Mesh, Model, Node, P, bevel_box, bolt, chamfer_rect, closed_box, cuboid, extrude_z1,
-    hatch, lathe, lathe_x, lathe_z, loft, plate, railing, seam_side_z, seam_top, shifted,
+    Model, Node, bevel_box, chamfer_rect, closed_box, extrude_z1, hatch, lathe, lathe_x, loft,
+    plate, seam_top, shifted,
 };
 use crate::models::{Track, both_sides, team_frame, team_strip, wedge};
 use crate::palette::{Palette, slot::*};
@@ -181,9 +181,9 @@ pub fn heavy_tank(style: Style) -> Model {
         if lod.has(1) {
             turret.add(closed_box([1250, 140, -480], [1620, 560, 480], PAINT2));
         }
-            turret.add(
-                lathe(&[(30, 0), (30, 1000)], 4, &[METAL], None, None).moved([-900, roof_y, -600]),
-            );
+        turret.add(
+            lathe(&[(30, 0), (30, 1000)], 4, &[METAL], None, None).moved([-900, roof_y, -600]),
+        );
         if lod.has(0) {
             turret.add(hatch([-300, roof_y, 380], 270, 8, PAINT2));
             turret.add(hatch([-300, roof_y, -380], 230, 8, PAINT));

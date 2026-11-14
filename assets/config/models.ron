@@ -95,20 +95,35 @@
         // decor (Square) stand still. `--crowd --models set_v4` draws the whole list;
         // the damage states (_damaged, _foundation, ...) are not roles of
         // `unit_defs.ron` and wait for the building WPs.
-        // Art set v5 (WP11.6a): the style proof of our own generator `tools/sf_model_gen`
+        // Art set v5 (WP11.6a/b): the models of our own generator `tools/sf_model_gen`
         // (style G "semi-realistic, bright", docs/art-style.md), engine axes, three levels each.
-        // Six models; the roles they show are wired to them in `unit_defs.ron`.
+        // The six models of the style proof (WP11.6a) and every vehicle and vessel plus the
+        // heavy gun team (WP11.6b); the roles they show are wired to them in `unit_defs.ron`.
         "set_v5": (
             dir: "set_v5",
             axes: (front: PlusX, up: PlusY, metres_per_unit: 1.0),
             lod_px: [60.0, 30.0],
             models: [
+                (file: "meridian_amphibious_transport.glb", icon: Triangle),
                 (file: "meridian_construction_center.glb", icon: Square),
                 (file: "meridian_harvester.glb", icon: Triangle),
+                (file: "meridian_heavy_tank.glb", icon: Triangle),
                 (file: "meridian_light_tank.glb", icon: Triangle),
+                (file: "meridian_light_transport.glb", icon: Triangle),
+                (file: "meridian_repair_truck.glb", icon: Triangle),
+                (file: "meridian_siege_artillery.glb", icon: Triangle),
+                (file: "neutral_ferry.glb", icon: HalfCircle),
+                (file: "neutral_supply_truck.glb", icon: Triangle),
                 (file: "veyran_defence_tower.glb", icon: Square),
+                (file: "veyran_gunboat.glb", icon: HalfCircle),
+                (file: "veyran_harvester.glb", icon: Triangle),
+                (file: "veyran_heavy_gun_team.glb", icon: Circle),
+                (file: "veyran_heavy_tank.glb", icon: Triangle),
                 (file: "veyran_light_tank.glb", icon: Triangle),
                 (file: "veyran_power_plant.glb", icon: Square),
+                (file: "veyran_repair_truck.glb", icon: Triangle),
+                (file: "veyran_siege_artillery.glb", icon: Triangle),
+                (file: "veyran_transport_truck.glb", icon: Triangle),
             ],
         ),
         "set_v4": (

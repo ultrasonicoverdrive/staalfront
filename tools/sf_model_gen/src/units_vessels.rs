@@ -14,8 +14,14 @@ fn bollards(lod: Lod, xs: &[i32], y: i32, z: i32) -> Mesh {
     if lod.has(0) {
         for &x in xs {
             m.add(
-                lathe(&[(90, 0), (90, 230), (130, 290)], 4, &[METAL], Some(METAL), None)
-                    .moved([x, y, z]),
+                lathe(
+                    &[(90, 0), (90, 230), (130, 290)],
+                    4,
+                    &[METAL],
+                    Some(METAL),
+                    None,
+                )
+                .moved([x, y, z]),
             );
         }
     }
@@ -55,28 +61,35 @@ pub fn veyran_gunboat() -> Model {
             hull.add(team_strip([x, deck, -hz], [x + 300, deck + 18, hz], lod));
         }
         // The bridge: two steps, a sloped front, slit windows in crimson.
-        hull.add(loft(
-            &if lod.has(1) {
-                vec![
-                    (wedge(1700, 800, 800, 1500), deck),
-                    (wedge(1700, 800, 800, 1500), deck + 700),
-                    (wedge(1250, 520, 650, 1050), deck + 1100),
-                ]
-            } else {
-                vec![
-                    (wedge(1700, 800, 800, 1500), deck),
-                    (wedge(1250, 520, 650, 1050), deck + 1100),
-                ]
-            },
-            if lod.has(1) { &[PAINT, PAINT][..] } else { &[PAINT][..] },
-            Some(PAINT),
-            None,
-        ).moved([-300, 0, 0]));
+        hull.add(
+            loft(
+                &if lod.has(1) {
+                    vec![
+                        (wedge(1700, 800, 800, 1500), deck),
+                        (wedge(1700, 800, 800, 1500), deck + 700),
+                        (wedge(1250, 520, 650, 1050), deck + 1100),
+                    ]
+                } else {
+                    vec![
+                        (wedge(1700, 800, 800, 1500), deck),
+                        (wedge(1250, 520, 650, 1050), deck + 1100),
+                    ]
+                },
+                if lod.has(1) {
+                    &[PAINT, PAINT][..]
+                } else {
+                    &[PAINT][..]
+                },
+                Some(PAINT),
+                None,
+            )
+            .moved([-300, 0, 0]),
+        );
         let roof_y = deck + 1100;
         hull.add(
             team_frame(
                 &wedge(1240, 510, 640, 1040),
-                &wedge(960, 340, 380, 760),
+                &wedge(960, 340, 470, 760),
                 roof_y - 10,
                 roof_y + 40,
                 lod,
@@ -87,13 +100,26 @@ pub fn veyran_gunboat() -> Model {
         // The funnel: octagonal, with a crimson glow band and a team flange.
         let seg = if lod.has(1) { 8 } else { 4 };
         let funnel: Vec<(i32, i32)> = if lod.has(1) {
-            vec![(620, 0), (560, 700), (600, 760), (600, 840), (520, 900), (520, 1150)]
+            vec![
+                (620, 0),
+                (560, 700),
+                (600, 760),
+                (600, 840),
+                (520, 900),
+                (520, 1150),
+            ]
         } else {
             vec![(620, 0), (520, 1150)]
         };
         hull.add(
-            lathe(&funnel, seg, &[PAINT2, PAINT2, ACCENT, PAINT2, PAINT2], Some(METAL), None)
-                .moved([-3700, deck, 0]),
+            lathe(
+                &funnel,
+                seg,
+                &[PAINT2, PAINT2, ACCENT, PAINT2, PAINT2],
+                Some(METAL),
+                None,
+            )
+            .moved([-3700, deck, 0]),
         );
         if lod.has(1) {
             hull.add(both_sides(closed_box(
@@ -102,21 +128,36 @@ pub fn veyran_gunboat() -> Model {
                 ACCENT,
             )));
             // The mast with a radar bar.
-            hull.add(lathe(&[(40, 0), (40, 1300)], 4, &[METAL], None, None).moved([-700, roof_y, 0]));
-            hull.add(closed_box([-900, roof_y + 1100, -500], [-500, roof_y + 1200, 500], METAL));
+            hull.add(
+                lathe(&[(40, 0), (40, 1300)], 4, &[METAL], None, None).moved([-700, roof_y, 0]),
+            );
+            hull.add(closed_box(
+                [-900, roof_y + 1100, -500],
+                [-500, roof_y + 1200, 500],
+                METAL,
+            ));
         }
         // The aft mount: a low gun house with a short fixed barrel.
         if lod.has(1) {
-        hull.add(loft(
-            &[
-                (wedge(600, 300, 300, 650), deck),
-                (wedge(500, 250, 250, 480), deck + 450),
-            ],
-            &[PAINT],
-            Some(PAINT),
-            None,
-        ).moved([-6800, 0, 0]));
-            hull.add(lathe_x(&[(70, 0), (70, 900)], 4, &[METAL], Some(METAL), None).moved([-6200, deck + 250, 0]));
+            hull.add(
+                loft(
+                    &[
+                        (wedge(600, 300, 300, 650), deck),
+                        (wedge(500, 250, 250, 480), deck + 450),
+                    ],
+                    &[PAINT],
+                    Some(PAINT),
+                    None,
+                )
+                .moved([-6800, 0, 0]),
+            );
+            hull.add(
+                lathe_x(&[(70, 0), (70, 900)], 4, &[METAL], Some(METAL), None).moved([
+                    -6200,
+                    deck + 250,
+                    0,
+                ]),
+            );
         }
         if lod.has(0) {
             // Rails along both sides, bollards, hatches, vents and tie-down bars.
@@ -135,8 +176,16 @@ pub fn veyran_gunboat() -> Model {
             // A crimson trim band along the waterline at the bow.
             hull.add(closed_box([6400, 120, -500], [8900, 220, 500], ACCENT));
             // The anchor and a lifeboat on the foredeck.
-            hull.add(closed_box([7000, deck, -300], [7500, deck + 240, 300], METAL));
-            hull.add(closed_box([800, deck, -1700], [2000, deck + 500, -900], PAINT2));
+            hull.add(closed_box(
+                [7000, deck, -300],
+                [7500, deck + 240, 300],
+                METAL,
+            ));
+            hull.add(closed_box(
+                [800, deck, -1700],
+                [2000, deck + 500, -900],
+                PAINT2,
+            ));
         }
         // The forward turret and gun.
         let mut turret = loft(
@@ -158,11 +207,22 @@ pub fn veyran_gunboat() -> Model {
         ));
         if lod.has(0) {
             turret.add(hatch([-300, 550, 0], 200, 8, PAINT2));
-            turret.add(both_sides(closed_box([-500, 200, 800], [300, 360, 860], ACCENT)));
+            turret.add(both_sides(closed_box(
+                [-500, 200, 800],
+                [300, 360, 860],
+                ACCENT,
+            )));
         }
         let mut barrel_mesh = lathe_x(
             &if lod.has(1) {
-                vec![(130, 0), (130, 1900), (170, 1950), (170, 2300), (130, 2350), (130, 2700)]
+                vec![
+                    (130, 0),
+                    (130, 1900),
+                    (170, 1950),
+                    (170, 2300),
+                    (130, 2350),
+                    (130, 2700),
+                ]
             } else {
                 vec![(140, 0), (140, 2700)]
             },
@@ -215,28 +275,53 @@ pub fn neutral_ferry() -> Model {
         }
         // Lane marks along the deck and stop bars at the ramps, in the third paint.
         for z in [-1800, 0, 1800] {
-            hull.add(cuboid([-9300, deck, z - 90], [9300, deck + 14, z + 90], PAINT3));
+            hull.add(cuboid(
+                [-9300, deck, z - 90],
+                [9300, deck + 14, z + 90],
+                PAINT3,
+            ));
         }
         for x in [-9500, 9300] {
             hull.add(cuboid([x, deck, -3300], [x + 200, deck + 14, 3300], PAINT3));
         }
         // The wheelhouse on the +Z side: a box with windows all round, a roof overhang, a stack.
-        hull.add(loft(
-            &[
-                (chamfer_rect(1700, 1000, c(200)), deck),
-                (chamfer_rect(1700, 1000, c(200)), deck + 1500),
-            ],
-            &[PAINT],
-            Some(PAINT2),
-            None,
-        ).moved([0, 0, 3100]));
+        hull.add(
+            loft(
+                &[
+                    (chamfer_rect(1700, 1000, c(200)), deck),
+                    (chamfer_rect(1700, 1000, c(200)), deck + 1500),
+                ],
+                &[PAINT],
+                Some(PAINT2),
+                None,
+            )
+            .moved([0, 0, 3100]),
+        );
         if lod.has(1) {
-            hull.add(cuboid([-1850, deck + 1500, 2000], [1850, deck + 1600, 4150], PAINT2));
+            hull.add(cuboid(
+                [-1850, deck + 1500, 2000],
+                [1850, deck + 1600, 4150],
+                PAINT2,
+            ));
             for sign in [-1, 1] {
-                hull.add(closed_box([-1300, deck + 700, 4100 + (sign + 1) * 0], [1300, deck + 1300, 4125], ACCENT));
+                hull.add(closed_box(
+                    [-1300, deck + 700, 4100 + (sign + 1) * 0],
+                    [1300, deck + 1300, 4125],
+                    ACCENT,
+                ));
             }
-            hull.add(closed_box([-1300, deck + 700, 2075], [1300, deck + 1300, 2100], ACCENT));
-            hull.add(lathe(&[(220, 0), (220, 900)], 8, &[METAL], Some(RUBBER), None).moved([800, deck + 1600, 3400]));
+            hull.add(closed_box(
+                [-1300, deck + 700, 2075],
+                [1300, deck + 1300, 2100],
+                ACCENT,
+            ));
+            hull.add(
+                lathe(&[(220, 0), (220, 900)], 8, &[METAL], Some(RUBBER), None).moved([
+                    800,
+                    deck + 1600,
+                    3400,
+                ]),
+            );
         }
         if lod.has(0) {
             // Rails along both long sides (the wheelhouse side is open at the house), bollards,
@@ -249,13 +334,38 @@ pub fn neutral_ferry() -> Model {
             let xs: Vec<i32> = (0..8).map(|i| -9000 + i * 2600).collect();
             hull.add(bollards(lod, &xs, deck, 4200));
             hull.add(bollards(lod, &xs, deck, -4200));
-            hull.add(lathe(&[(300, 0), (300, 700), (200, 760)], 8, &[METAL, METAL], Some(METAL), None).moved([-8400, deck, 2800]));
-            hull.add(lathe_z(&[(300, 0), (300, 60)], 8, &[PAINT3], Some(PAINT3), None).moved([200, deck + 700, 2060]));
+            hull.add(
+                lathe(
+                    &[(300, 0), (300, 700), (200, 760)],
+                    8,
+                    &[METAL, METAL],
+                    Some(METAL),
+                    None,
+                )
+                .moved([-8400, deck, 2800]),
+            );
+            hull.add(
+                lathe_z(&[(300, 0), (300, 60)], 8, &[PAINT3], Some(PAINT3), None).moved([
+                    200,
+                    deck + 700,
+                    2060,
+                ]),
+            );
             for i in 0..3 {
-                hull.add(closed_box([5000 + i * 700, deck, 2400], [5600 + i * 700, deck + 600, 3000], PAINT));
+                hull.add(closed_box(
+                    [5000 + i * 700, deck, 2400],
+                    [5600 + i * 700, deck + 600, 3000],
+                    PAINT,
+                ));
             }
             for i in 0..6 {
-                hull.add(seam_top([-6000 + i * 300, deck, -3800], [-6000 + i * 300, deck, -3300], 60, 20, METAL));
+                hull.add(seam_top(
+                    [-6000 + i * 300, deck, -3800],
+                    [-6000 + i * 300, deck, -3300],
+                    60,
+                    20,
+                    METAL,
+                ));
             }
             hull.add(hatch([-4800, deck, -2400], 340, 8, PAINT2));
             hull.add(hatch([4800, deck, -2400], 340, 8, PAINT2));
@@ -313,14 +423,19 @@ pub fn veyran_heavy_gun_team() -> Model {
         }
         let mut head = Mesh::new();
         if near {
-            head.add(lathe(
-                &[(120, 0), (150, 90), (140, 220), (60, 290)],
-                lod.segs(8),
-                &[PAINT2, PAINT2, PAINT2],
-                Some(PAINT2),
-                None,
-            ).moved([-320, 1460, 0]));
-            head.add(closed_box([-190, 1560, -90], [-170, 1620, 90], ACCENT));
+            head.add(
+                lathe(
+                    &[(120, 0), (150, 90), (140, 220), (60, 290)],
+                    lod.segs(8),
+                    &[PAINT2, PAINT2, PAINT2],
+                    Some(PAINT2),
+                    None,
+                )
+                .moved([-320, 1460, 0]),
+            );
+            if full {
+                head.add(closed_box([-190, 1560, -90], [-170, 1620, 90], ACCENT));
+            }
         } else {
             head.add(cuboid([-420, 1460, -130], [-220, 1730, 130], PAINT2));
         }
@@ -335,10 +450,26 @@ pub fn veyran_heavy_gun_team() -> Model {
         if near {
             gun.add(closed_box([150, 450, -300], [700, 700, 300], PAINT2));
             gun.add(both_sides(
-                lathe_z(&[(300, 0), (300, 90)], lod.segs(16), &[RUBBER], Some(METAL), None).moved([300, 300, 440]),
+                lathe_z(
+                    &[(300, 0), (300, 90)],
+                    lod.segs(16),
+                    &[RUBBER],
+                    Some(METAL),
+                    None,
+                )
+                .moved([300, 300, 440]),
             ));
             gun.add(closed_box([520, 700, -520], [580, 1220, 520], PAINT));
-            gun.add(lathe_x(&[(95, 0), (95, 500)], lod.segs(8), &[METAL], Some(METAL), None).moved([580, 950, 0]));
+            gun.add(
+                lathe_x(
+                    &[(95, 0), (95, 500)],
+                    lod.segs(8),
+                    &[METAL],
+                    Some(METAL),
+                    None,
+                )
+                .moved([580, 950, 0]),
+            );
             gun.add(closed_box([-80, 330, -80], [160, 400, 80], METAL));
         } else {
             gun.add(cuboid([150, 450, -520], [700, 1220, 520], PAINT));
@@ -353,11 +484,18 @@ pub fn veyran_heavy_gun_team() -> Model {
             // Pouches on the belt, an ammunition box beside the gun, a spade on the trail, an
             // elevation wheel and a breech block.
             for i in 0..4 {
-                torso.add(closed_box([-520, 900, -200 + i * 110], [-460, 1020, -120 + i * 110], PAINT2));
+                torso.add(closed_box(
+                    [-520, 900, -200 + i * 110],
+                    [-460, 1020, -120 + i * 110],
+                    PAINT2,
+                ));
             }
             gun.add(closed_box([-120, 0, 330], [250, 260, 560], PAINT2));
             gun.add(closed_box([-420, 0, -200], [-380, 140, 200], METAL));
-            gun.add(lathe_z(&[(110, 0), (110, 40)], 8, &[METAL], Some(METAL), None).moved([300, 560, 310]));
+            gun.add(
+                lathe_z(&[(110, 0), (110, 40)], 8, &[METAL], Some(METAL), None)
+                    .moved([300, 560, 310]),
+            );
             gun.add(closed_box([420, 800, -150], [520, 1060, 150], METAL));
             gun.add(closed_box([150, 700, -330], [700, 760, -300], METAL));
             gun.add(closed_box([150, 700, 300], [700, 760, 330], METAL));

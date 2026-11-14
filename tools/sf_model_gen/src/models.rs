@@ -21,25 +21,25 @@ pub(crate) const SHOE: crate::kit::Tone = 820;
 
 /// The recipes of set v5, sorted by file name.
 pub const MODELS: &[fn() -> Model] = &[
-    crate::units_wheeled::neutral_supply_truck,
-    crate::units_vessels::veyran_gunboat,
-    crate::units_vessels::neutral_ferry,
-    crate::units_vessels::veyran_heavy_gun_team,
-    crate::units_transport::meridian_light_transport,
     crate::units_transport::meridian_amphibious_transport,
-    crate::units_transport::veyran_harvester,
     meridian_construction_center,
     meridian_harvester,
     crate::units::meridian_heavy_tank,
     meridian_light_tank,
+    crate::units_transport::meridian_light_transport,
     crate::units_wheeled::meridian_repair_truck,
     crate::units_artillery::meridian_siege_artillery,
+    crate::units_vessels::neutral_ferry,
+    crate::units_wheeled::neutral_supply_truck,
     veyran_defence_tower,
+    crate::units_vessels::veyran_gunboat,
+    crate::units_transport::veyran_harvester,
+    crate::units_vessels::veyran_heavy_gun_team,
     crate::units::veyran_heavy_tank,
-    crate::units_artillery::veyran_siege_artillery,
     veyran_light_tank,
-    crate::units_wheeled::veyran_repair_truck,
     veyran_power_plant,
+    crate::units_wheeled::veyran_repair_truck,
+    crate::units_artillery::veyran_siege_artillery,
     crate::units_wheeled::veyran_transport_truck,
 ];
 
@@ -227,7 +227,15 @@ pub(crate) fn bolt_z(at: P, r: i32, h: i32) -> Mesh {
 }
 
 /// A vertical panel line on a face that looks along `+X`, at `x`, from `y0` to `y1` at `z`.
-pub(crate) fn seam_side_x(x: i32, y0: i32, y1: i32, z: i32, width: i32, raise: i32, mat: Mat) -> Mesh {
+pub(crate) fn seam_side_x(
+    x: i32,
+    y0: i32,
+    y1: i32,
+    z: i32,
+    width: i32,
+    raise: i32,
+    mat: Mat,
+) -> Mesh {
     closed_box([x, y0, z - width / 2], [x + raise, y1, z + width / 2], mat).toned(crate::kit::SEAM)
 }
 
