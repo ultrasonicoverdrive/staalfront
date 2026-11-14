@@ -54,14 +54,13 @@ fn with_profile(mut s: Scenario, change: impl Fn(&mut sf_ai::Profile)) -> Scenar
 struct Story {
     launches: Vec<(u64, u64)>,
     bounces: Vec<(u64, u64, u32)>,
-    finished: Finished,
 }
 
 fn story(s: &Scenario) -> Story {
     let mut launches = Vec::new();
     let mut bounces = Vec::new();
     let (mut launched, mut bounced, mut last_bounce) = (0, 0, 0);
-    let finished = run_observed(
+    run_observed(
         s,
         &RunOptions {
             ticks: s.ticks,
@@ -84,11 +83,7 @@ fn story(s: &Scenario) -> Story {
         },
     )
     .unwrap();
-    Story {
-        launches,
-        bounces,
-        finished,
-    }
+    Story { launches, bounces }
 }
 
 /// The waves of `ai_bounce`: `(tick, launch value)`; the first at the attack value 800, then each exactly the escalated
