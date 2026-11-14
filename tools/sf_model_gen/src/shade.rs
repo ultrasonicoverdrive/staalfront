@@ -14,13 +14,15 @@
 //! - the triangle's own [`crate::kit::Tone`] (panel lines, recesses);
 //! - **top-edge highlight**: a face that slopes upward (a bevel or chamfer on top, `n.y` between
 //!   [`HIGHLIGHT_MIN_UP`] and [`HIGHLIGHT_MAX_UP`]) is up to [`HIGHLIGHT`] brighter;
-//! - **edge wear**: on a bevel (no axis-aligned normal) whose corner sees open sky (no AO ray
-//!   blocked), about two thirds of the triangles (fixed hash) are lifted [`WEAR`] towards a lighter
-//!   grey: paint rubbed thin on an exposed edge, lighter and less saturated.
+//! - **edge wear**: on a bevel (no axis-aligned normal, narrower than [`WEAR_WIDTH_MM`]) whose
+//!   corner sees open sky (no AO ray blocked), about two thirds of the triangles (fixed hash) are
+//!   lifted [`WEAR`] towards a lighter grey: paint rubbed thin on an exposed edge, lighter and less
+//!   saturated.
 //!
 //! The vertex colour is RGB: it is the wanted linear colour divided by the material factor the GLB
-//! stores, [`factor`] (the palette colour over [`NOMINAL`]), so a plain face is exactly the palette
-//! colour and a highlight can go above it without leaving glTF's 0..1 range.
+//! stores, [`factor`] (a grey: the palette colour's brightest channel over [`NOMINAL`]), so a plain
+//! face is exactly the palette colour and a highlight or worn edge can go above it without leaving
+//! glTF's 0..1 range.
 //!
 //! The result is rounded to 1/255, so tiny float differences cannot reach the file. Only basic
 //! IEEE operations are used (no `sin`, `pow`), so every platform computes the same bytes.
@@ -47,6 +49,8 @@ pub const HIGHLIGHT_MIN_UP: f32 = 0.2;
 pub const HIGHLIGHT_MAX_UP: f32 = 0.97;
 /// How far worn edge paint moves towards a light grey (lighter, desaturated).
 pub const WEAR: f32 = 0.35;
+/// Only a face narrower than this (its height over its longest edge) is an edge that wears.
+pub const WEAR_WIDTH_MM: f32 = 320.0;
 /// A face pointing straight down loses this share.
 pub const DOWN: f32 = 0.3;
 /// Facet variation, either way.
@@ -153,10 +157,12 @@ fn hits(o: V, d: V, tri: &Occluder) -> bool {
     t > 1.0 && t < AO_REACH_MM
 }
 
-/// The material factor the GLB stores for a linear palette colour: the colour over [`NOMINAL`],
-/// at most 1 per channel.
+/// The material factor the GLB stores for a linear palette colour: a grey at the colour's
+/// brightest channel over [`NOMINAL`] (at most 1). The hue lives in the vertex colour, so edge wear
+/// can lift a weak channel (desaturate) without leaving glTF's 0..1 range for `COLOR_0`.
 pub fn factor(lin: [f32; 3]) -> [f32; 3] {
-    lin.map(|c| (c / NOMINAL).min(1.0))
+    let top = lin.iter().copied().fold(0.0_f32, f32::max);
+    [(top / NOMINAL).min(1.0); 3]
 }
 
 /// The vertex colour of every corner of `tris` (all the triangles of one level, in model space),
@@ -209,7 +215,20 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
         } else {
             1.0
         };
-        let bevel = n.iter().all(|c| c.abs() < HIGHLIGHT_MAX_UP);
+        // A bevel strip: no axis-aligned normal and narrow (a big slanted facet, such as a dome
+        // segment, is not an edge and gets no wear).
+        let [a, b, c] = t.v.map(v);
+        let longest = [sub(b, a), sub(c, b), sub(a, c)]
+            .iter()
+            .map(|e| dot(*e, *e))
+            .fold(0.0_f32, f32::max)
+            .sqrt();
+        let area2 = {
+            let x = cross(sub(b, a), sub(c, a));
+            dot(x, x).sqrt()
+        };
+        let narrow = longest > 0.0 && area2 / longest < WEAR_WIDTH_MM;
+        let bevel = narrow && n.iter().all(|c| c.abs() < HIGHLIGHT_MAX_UP);
         let worn = bevel && hash(i as u32 ^ 0x55) % 3 != 0;
         let base = lin[usize::from(t.mat.0)];
         let fac = factor(base);

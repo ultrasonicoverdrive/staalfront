@@ -9,12 +9,11 @@
 //! bevels shrink and go, and details (wheels, cleats, seams, bolts, hatches) drop out, while the
 //! node tree and the team panels stay in every level.
 
+use crate::kit::RECESS;
 use crate::kit::{
     Lod, Mat, Mesh, Model, Node, P, bevel_box, bolt, chamfer_rect, closed_box, cuboid, extrude_z1,
     frame, hatch, lathe, lathe_x, lathe_z, loft, ngon, plate, railing, seam_side_z, seam_top,
-
 };
-use crate::kit::RECESS;
 use crate::palette::{Palette, slot::*};
 
 /// The tone of a track shoe (a little darker than the band it sits on).
@@ -142,9 +141,22 @@ fn team_strip(lo: P, hi: P, lod: Lod) -> Mesh {
     }
 }
 
-/// A team band round a roof edge ([`frame`]); at LOD2 only its top (zero-height walls drop out).
-fn team_frame(outer: &[[i32; 2]], inner: &[[i32; 2]], y0: i32, y1: i32, lod: Lod) -> Mesh {
-    frame(outer, inner, if lod.has(1) { y0 } else { y1 }, y1, TEAM)
+/// A team band round a roof edge ([`frame`]), with the roof inside it filled flush in `fill`; at
+/// LOD2 only the tops (zero-height walls drop out). The flush fill matters for the baked shade: a
+/// band standing proud of a large roof face would darken all of it, because the roof's corners
+/// (its only vertices) lie against the band.
+fn team_frame(
+    outer: &[[i32; 2]],
+    inner: &[[i32; 2]],
+    y0: i32,
+    y1: i32,
+    lod: Lod,
+    fill: Mat,
+) -> Mesh {
+    let mut m = frame(outer, inner, if lod.has(1) { y0 } else { y1 }, y1, TEAM);
+    let top: Vec<P> = inner.iter().map(|p| [p[0], y1, p[1]]).collect();
+    m.face(&top, fill, [0, 1, 0]);
+    m
 }
 
 /// A bolt head on a face that looks along `-Z`, its base at `at`.
@@ -295,18 +307,22 @@ pub fn meridian_light_tank() -> Model {
                 590,
                 640,
                 lod,
+                PAINT,
             )
             .moved([80, 0, 0]),
         );
         turret.add(closed_box([1050, 120, -380], [1380, 500, 380], PAINT2));
         turret.add(lathe(&[(30, 0), (30, 900)], 4, &[METAL], None, None).moved([-800, 640, -560]));
         if lod.has(0) {
-            turret.add(hatch([-250, 600, 330], 260, 8, PAINT2));
+            turret.add(hatch([-250, 640, 330], 260, 8, PAINT2));
             // Smoke dischargers, three a side, angled forward.
             for i in 0..3 {
                 turret.add(both_sides(
-                    lathe_x(&[(55, 0), (55, 220)], 4, &[METAL], Some(RUBBER), None)
-                        .moved([600, 380, 1050 - i * 140]),
+                    lathe_x(&[(55, 0), (55, 220)], 4, &[METAL], Some(RUBBER), None).moved([
+                        600,
+                        380,
+                        1050 - i * 140,
+                    ]),
                 ));
             }
             turret.add(both_sides(closed_box(
@@ -410,7 +426,11 @@ pub fn veyran_light_tank() -> Model {
             hull.add(closed_box([-1500, 1035, -560], [-900, 1180, -260], PAINT2));
             hull.add(closed_box([-1500, 1035, 300], [-800, 1075, 380], METAL));
             for z in [-400, 400] {
-                hull.add(closed_box([-2300, 780, z - 90], [-2150, 900, z + 90], METAL));
+                hull.add(closed_box(
+                    [-2300, 780, z - 90],
+                    [-2150, 900, z + 90],
+                    METAL,
+                ));
             }
             hull.add(both_sides(closed_box(
                 [2050, 860, 600],
@@ -443,6 +463,7 @@ pub fn veyran_light_tank() -> Model {
             490,
             505,
             lod,
+            PAINT,
         ));
         turret.add(lathe(&[(25, 0), (25, 800)], 4, &[METAL], None, None).moved([-850, 505, -500]));
         if lod.has(0) {
@@ -452,11 +473,14 @@ pub fn veyran_light_tank() -> Model {
                 ACCENT,
             )));
             turret.add(cuboid([-650, 505, 150], [-350, 680, 450], PAINT2));
-            turret.add(hatch([-150, 490, -180], 190, 8, PAINT2));
+            turret.add(hatch([-150, 505, -180], 190, 8, PAINT2));
             for i in 0..2 {
                 turret.add(both_sides(
-                    lathe_x(&[(55, 0), (55, 220)], 4, &[METAL], Some(RUBBER), None)
-                        .moved([150, 300, 860 - i * 130]),
+                    lathe_x(&[(55, 0), (55, 220)], 4, &[METAL], Some(RUBBER), None).moved([
+                        150,
+                        300,
+                        860 - i * 130,
+                    ]),
                 ));
             }
             turret.add(seam_top(
@@ -526,6 +550,7 @@ pub fn meridian_harvester() -> Model {
                 2240,
                 2280,
                 lod,
+                PAINT,
             )
             .moved([2280, 0, 0]),
         );
@@ -570,7 +595,7 @@ pub fn meridian_harvester() -> Model {
         hull.add(closed_box([-2700, 900, -900], [-2400, 1200, 900], METAL));
         hull.add(closed_box([0, 900, -900], [300, 1200, 900], METAL));
         if lod.has(0) {
-            hull.add(hatch([2250, 2250, 0], 300, 8, PAINT));
+            hull.add(hatch([2250, 2280, 0], 300, 8, PAINT));
             // A ladder up the drum side, grab rails on the cab, a beacon, drum straps' bolts.
             for k in 0..5 {
                 hull.add(closed_box(
@@ -584,7 +609,13 @@ pub fn meridian_harvester() -> Model {
                 [1740, 2200, 1540],
                 METAL,
             )));
-            hull.add(railing([1850, 2280, -1000], [2650, 2280, -1000], 220, 3, METAL));
+            hull.add(railing(
+                [1850, 2280, -1000],
+                [2650, 2280, -1000],
+                220,
+                3,
+                METAL,
+            ));
             hull.add(
                 lathe(&[(110, 0), (110, 160), (60, 220)], 8, &[ACCENT], None, None)
                     .moved([1950, 2280, 700]),
@@ -655,6 +686,7 @@ pub fn veyran_power_plant() -> Model {
                 3700,
                 3750,
                 lod,
+                PAINT,
             )
             .moved([0, 0, -1500]),
         );
@@ -687,6 +719,7 @@ pub fn veyran_power_plant() -> Model {
                 6500,
                 6560,
                 lod,
+                METAL,
             ));
             m
         };
@@ -707,7 +740,11 @@ pub fn veyran_power_plant() -> Model {
                 ));
             }
             for x in [-900, 900] {
-                body.add(cuboid([x - 550, 3750, -3300], [x + 550, 4250, -2200], PAINT2));
+                body.add(cuboid(
+                    [x - 550, 3750, -3300],
+                    [x + 550, 4250, -2200],
+                    PAINT2,
+                ));
             }
         }
         if lod.has(0) {
@@ -743,11 +780,16 @@ pub fn veyran_power_plant() -> Model {
                 );
                 for k in 0..5 {
                     body.add(
-                        lathe_z(&[(160, 0), (160, 80)], 8, &[METAL], Some(METAL), None)
-                            .moved([x, 2450, -4800 + k * 1600]),
+                        lathe_z(&[(160, 0), (160, 80)], 8, &[METAL], Some(METAL), None).moved([
+                            x,
+                            2450,
+                            -4800 + k * 1600,
+                        ]),
                     );
                 }
-                body.add(lathe(&[(90, 0), (90, 2050)], 8, &[METAL], None, None).moved([x, 400, 1900]));
+                body.add(
+                    lathe(&[(90, 0), (90, 2050)], 8, &[METAL], None, None).moved([x, 400, 1900]),
+                );
             }
             // The front: a door with a frame and a crimson lintel, a window row, bolted panels.
             body.add(closed_box([-1000, 400, -5330], [1000, 2400, -5290], METAL));
@@ -764,8 +806,14 @@ pub fn veyran_power_plant() -> Model {
                 if (-1300..=1300).contains(&x) {
                     continue;
                 }
-                body.add(closed_box([x - 60, 1900, -5345], [x + 460, 2450, -5290], PAINT2));
-                body.add(closed_box([x, 1960, -5365], [x + 400, 2390, -5340], RUBBER).toned(RECESS));
+                body.add(closed_box(
+                    [x - 60, 1900, -5345],
+                    [x + 460, 2450, -5290],
+                    PAINT2,
+                ));
+                body.add(
+                    closed_box([x, 1960, -5365], [x + 400, 2390, -5340], RUBBER).toned(RECESS),
+                );
             }
             for x in [-2700, 1500] {
                 body.add(plate([x, 600, -5340], [x + 1200, 1600, -5300], 15, PAINT2));
@@ -788,19 +836,25 @@ pub fn veyran_power_plant() -> Model {
             }
             for i in 0..4 {
                 let x = -1350 + i * 700;
-                body.add(closed_box([x, 3700, -900], [x + 500, 3900, -300], PAINT2));
-                body.add(seam_top([x + 40, 3900, -600], [x + 460, 3900, -600], 40, 12, METAL));
+                body.add(closed_box([x, 3750, -900], [x + 500, 3950, -300], PAINT2));
+                body.add(seam_top(
+                    [x + 40, 3950, -600],
+                    [x + 460, 3950, -600],
+                    40,
+                    12,
+                    METAL,
+                ));
             }
             for i in 0..5 {
                 let x = -1200 + i * 600;
-                body.add(seam_top([x, 3700, -3700], [x, 3700, -3400], 50, 12, PAINT));
-                body.add(seam_top([x, 3700, 200], [x, 3700, 700], 50, 12, PAINT));
+                body.add(seam_top([x, 3750, -3600], [x, 3750, -3400], 50, 12, PAINT));
+                body.add(seam_top([x, 3750, 200], [x, 3750, 600], 50, 12, PAINT));
             }
             let (rx, rz0, rz1) = (1500, -3600, 600);
-            body.add(railing([-rx, 3700, rz0], [rx, 3700, rz0], 450, 6, METAL));
-            body.add(railing([-rx, 3700, rz1], [rx, 3700, rz1], 450, 6, METAL));
-            body.add(railing([-rx, 3700, rz0], [-rx, 3700, rz1], 450, 7, METAL));
-            body.add(railing([rx, 3700, rz0], [rx, 3700, rz1], 450, 7, METAL));
+            body.add(railing([-rx, 3750, rz0], [rx, 3750, rz0], 450, 6, METAL));
+            body.add(railing([-rx, 3750, rz1], [rx, 3750, rz1], 450, 6, METAL));
+            body.add(railing([-rx, 3750, rz0], [-rx, 3750, rz1], 450, 7, METAL));
+            body.add(railing([rx, 3750, rz0], [rx, 3750, rz1], 450, 7, METAL));
             for i in 0..10 {
                 body.add(bolt([-3500 + i * 780, 400, -5450], 50, 30, 4, METAL));
                 body.add(bolt([-3500 + i * 780, 400, 5450], 50, 30, 4, METAL));
@@ -808,31 +862,54 @@ pub fn veyran_power_plant() -> Model {
             // The stacks: a walkway ring with a ladder up to it, rivet bands.
             for x in [-1700, 1700] {
                 body.add(
-                    frame(&ngon(1150, 8, true), &ngon(740, 8, true), 3900, 3970, PAINT2)
-                        .moved([x, 0, 4100]),
+                    frame(
+                        &ngon(1150, 8, true),
+                        &ngon(740, 8, true),
+                        3900,
+                        3970,
+                        PAINT2,
+                    )
+                    .moved([x, 0, 4100]),
                 );
                 let lz = 4100 + 820;
                 for side in [-200, 200] {
-                    body.add(closed_box([x + side - 25, 400, lz], [x + side + 25, 3970, lz + 50], METAL));
+                    body.add(closed_box(
+                        [x + side - 25, 400, lz],
+                        [x + side + 25, 3970, lz + 50],
+                        METAL,
+                    ));
                 }
                 for k in 0..10 {
                     let y = 700 + k * 320;
                     body.add(cuboid([x - 200, y, lz], [x + 200, y + 35, lz + 40], METAL));
                 }
                 for k in 0..8 {
-                    body.add(
-                        bolt([0, 0, 0], 35, 20, 4, METAL)
-                            .moved([x + 680 * (k % 2 * 2 - 1), 5580, 4100 + (k / 2 - 2) * 220 + 110]),
-                    );
+                    body.add(bolt([0, 0, 0], 35, 20, 4, METAL).moved([
+                        x + 680 * (k % 2 * 2 - 1),
+                        5580,
+                        4100 + (k / 2 - 2) * 220 + 110,
+                    ]));
                 }
             }
             // A transformer at the rear with insulators.
             for x in [-3000, 2300] {
-                body.add(bevel_box([x, 400, 5000], [x + 700, 1300, 5500], 40, PAINT2, PAINT2));
+                body.add(bevel_box(
+                    [x, 400, 5000],
+                    [x + 700, 1300, 5500],
+                    40,
+                    PAINT2,
+                    PAINT2,
+                ));
                 for k in 0..3 {
                     body.add(
-                        lathe(&[(60, 0), (60, 300), (110, 320), (110, 360)], 8, &[ACCENT, METAL], Some(METAL), None)
-                            .moved([x + 130 + k * 220, 1300, 5250]),
+                        lathe(
+                            &[(60, 0), (60, 300), (110, 320), (110, 360)],
+                            8,
+                            &[ACCENT, METAL],
+                            Some(METAL),
+                            None,
+                        )
+                        .moved([x + 130 + k * 220, 1300, 5250]),
                     );
                 }
             }
@@ -878,6 +955,7 @@ pub fn meridian_construction_center() -> Model {
                     3500,
                     3550,
                     lod,
+                    PAINT,
                 )
                 .moved([-1600, 0, -1500]),
             );
@@ -932,6 +1010,7 @@ pub fn meridian_construction_center() -> Model {
                     650,
                     680,
                     lod,
+                    METAL,
                 )
                 .moved([4500, 0, -4500]),
             );
@@ -960,7 +1039,11 @@ pub fn meridian_construction_center() -> Model {
                 }
                 for i in 0..7 {
                     let x = -6000 + i * 1300;
-                    body.add(closed_box([x - 60, 1940, -6140], [x + 860, 2760, -6100], PAINT2));
+                    body.add(closed_box(
+                        [x - 60, 1940, -6140],
+                        [x + 860, 2760, -6100],
+                        PAINT2,
+                    ));
                     body.add(closed_box([x, 2000, -6160], [x + 800, 2700, -6130], ACCENT));
                     body.add(seam_side_z(x - 250, 600, 3150, -6100, 60, 15, PAINT));
                     // A bolted panel under each window.
@@ -972,8 +1055,12 @@ pub fn meridian_construction_center() -> Model {
                     body.add(closed_box([-6630, 1000, z], [-6580, 2400, z + 600], PAINT2));
                     for k in 0..2 {
                         body.add(
-                            cuboid([-6680, 1150 + k * 450, z + 40], [-6630, 1210 + k * 450, z + 560], METAL)
-                                .toned(RECESS),
+                            cuboid(
+                                [-6680, 1150 + k * 450, z + 40],
+                                [-6630, 1210 + k * 450, z + 560],
+                                METAL,
+                            )
+                            .toned(RECESS),
                         );
                     }
                 }
@@ -983,12 +1070,36 @@ pub fn meridian_construction_center() -> Model {
                     body.add(bolt([t, 500, 7250], 60, 35, 4, METAL));
                 }
                 // Railings along the open platform edges.
-                body.add(railing([-7200, 500, -7200], [1800, 500, -7200], 700, 7, METAL));
-                body.add(railing([7200, 500, -1700], [7200, 500, 7200], 700, 7, METAL));
-                body.add(railing([-3000, 500, 7200], [3000, 500, 7200], 700, 5, METAL));
+                body.add(railing(
+                    [-7200, 500, -7200],
+                    [1800, 500, -7200],
+                    700,
+                    7,
+                    METAL,
+                ));
+                body.add(railing(
+                    [7200, 500, -1700],
+                    [7200, 500, 7200],
+                    700,
+                    7,
+                    METAL,
+                ));
+                body.add(railing(
+                    [-3000, 500, 7200],
+                    [3000, 500, 7200],
+                    700,
+                    5,
+                    METAL,
+                ));
                 // Roof units in the corners of the hall roof, between the band and the dome.
                 for (x, z) in [(-4500, -4100), (1300, -4100), (-4500, 1100), (1300, 1100)] {
-                    body.add(bevel_box([x - 500, 3500, z - 500], [x + 500, 4000, z + 500], 60, PAINT2, PAINT2));
+                    body.add(bevel_box(
+                        [x - 500, 3500, z - 500],
+                        [x + 500, 4000, z + 500],
+                        60,
+                        PAINT2,
+                        PAINT2,
+                    ));
                     body.add(
                         lathe(&[(320, 0), (320, 60)], 8, &[METAL], Some(METAL), None)
                             .toned(RECESS)
@@ -1014,7 +1125,11 @@ pub fn meridian_construction_center() -> Model {
                     );
                     let lx = x + 1210;
                     for side in [-180, 180] {
-                        body.add(closed_box([lx, 500, z + side - 25], [lx + 50, 3500, z + side + 25], METAL));
+                        body.add(closed_box(
+                            [lx, 500, z + side - 25],
+                            [lx + 50, 3500, z + side + 25],
+                            METAL,
+                        ));
                     }
                     for k in 0..6 {
                         let y = 900 + k * 420;
@@ -1022,15 +1137,30 @@ pub fn meridian_construction_center() -> Model {
                     }
                 }
                 body.add(closed_box([4300, 3500, 1700], [4900, 3560, 2900], METAL));
-                body.add(railing([4300, 3560, 1700], [4300, 3560, 2900], 500, 3, METAL));
-                body.add(railing([4900, 3560, 1700], [4900, 3560, 2900], 500, 3, METAL));
+                body.add(railing(
+                    [4300, 3560, 1700],
+                    [4300, 3560, 2900],
+                    500,
+                    3,
+                    METAL,
+                ));
+                body.add(railing(
+                    [4900, 3560, 1700],
+                    [4900, 3560, 2900],
+                    500,
+                    3,
+                    METAL,
+                ));
                 body.add(
                     lathe(&[(80, 0), (80, 700)], 8, &[METAL], None, None)
                         .moved([-1600, 6150, -1500]),
                 );
                 // Pad lamps.
                 for (x, z) in [(2400, -6600), (6600, -6600), (2400, -2400), (6600, -2400)] {
-                    body.add(lathe(&[(90, 0), (90, 80), (50, 140)], 4, &[ACCENT], None, None).moved([x, 650, z]));
+                    body.add(
+                        lathe(&[(90, 0), (90, 80), (50, 140)], 4, &[ACCENT], None, None)
+                            .moved([x, 650, z]),
+                    );
                 }
             }
             let body = Node::part("body", [0, 0, 0], body);
@@ -1118,9 +1248,13 @@ pub fn veyran_defence_tower() -> Model {
                 }
                 for i in 0..6 {
                     body.add(
-                        closed_box([1360, 500 + i * 180, -900], [1700, 540 + i * 180, -860], PAINT2)
-                            .toned(crate::kit::SEAM)
-                            .turned_y(q),
+                        closed_box(
+                            [1360, 500 + i * 180, -900],
+                            [1700, 540 + i * 180, -860],
+                            PAINT2,
+                        )
+                        .toned(crate::kit::SEAM)
+                        .turned_y(q),
                     );
                 }
             }
@@ -1133,11 +1267,17 @@ pub fn veyran_defence_tower() -> Model {
                 lathe(&[(70, 0), (70, 1900)], 8, &[METAL], None, None).moved([-1700, 0, -1100]),
             );
             for z in [-1050, 1050] {
-                body.add(lathe(&[(20, 0), (20, 1400)], 4, &[METAL], None, None).moved([-1050, 2150, z]));
+                body.add(
+                    lathe(&[(20, 0), (20, 1400)], 4, &[METAL], None, None).moved([-1050, 2150, z]),
+                );
             }
             // A ladder up the back.
             for side in [980, 1420] {
-                body.add(closed_box([-1950, 0, side - 25], [-1900, 2150, side + 25], METAL));
+                body.add(closed_box(
+                    [-1950, 0, side - 25],
+                    [-1900, 2150, side + 25],
+                    METAL,
+                ));
             }
             for k in 0..7 {
                 let y = 250 + k * 280;
@@ -1160,6 +1300,7 @@ pub fn veyran_defence_tower() -> Model {
             650,
             690,
             lod,
+            PAINT,
         ));
         turret.add(lathe(&[(25, 0), (25, 700)], 4, &[METAL], None, None).moved([-800, 690, 420]));
         if lod.has(0) {
@@ -1175,7 +1316,8 @@ pub fn veyran_defence_tower() -> Model {
                     .moved([-450, 900, 0]),
             );
             for z in [-160, 0, 160] {
-                turret.add(closed_box([520, 560, z - 50], [600, 620, z + 50], RUBBER).toned(RECESS));
+                turret
+                    .add(closed_box([520, 560, z - 50], [600, 620, z + 50], RUBBER).toned(RECESS));
             }
             for i in 0..6 {
                 turret.add(both_sides(
@@ -1184,7 +1326,7 @@ pub fn veyran_defence_tower() -> Model {
                         .moved([-800 + i * 220, 400, 860]),
                 ));
             }
-            turret.add(hatch([-100, 650, -200], 170, 8, PAINT2));
+            turret.add(hatch([-100, 690, -200], 170, 8, PAINT2));
             turret.add(both_sides(closed_box(
                 [-850, 60, 900],
                 [450, 160, 960],
@@ -1195,9 +1337,16 @@ pub fn veyran_defence_tower() -> Model {
         barrel.add(closed_box([850, -160, -160], [1050, 160, 160], METAL));
         if lod.has(0) {
             // A sleeve at the root and the slots of the muzzle brake.
-            barrel.add(lathe_x(&[(165, 0), (165, 260)], 8, &[PAINT2], None, Some(PAINT2)));
+            barrel.add(lathe_x(
+                &[(165, 0), (165, 260)],
+                8,
+                &[PAINT2],
+                None,
+                Some(PAINT2),
+            ));
             for z in [-170, 170] {
-                barrel.add(closed_box([890, -80, z - 15], [1010, 80, z + 15], RUBBER).toned(RECESS));
+                barrel
+                    .add(closed_box([890, -80, z - 15], [1010, 80, z + 15], RUBBER).toned(RECESS));
             }
         }
         let barrel =

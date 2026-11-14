@@ -7,17 +7,19 @@ use std::path::{Path, PathBuf};
 use sf_model_gen::files;
 
 /// (file, byte length, FNV-1a 64 of the bytes), pinned as literals, sorted by file name.
+// Re-pinned 14-11-2026 (tuning round): team as bands and trim, stronger AO and grime, the top-edge
+// highlight and edge wear (RGB vertex colour, a grey material factor), the building detail.
 const PINNED: [(&str, usize, u64); 6] = [
     (
         "meridian_construction_center.glb",
-        311532,
-        0x08330bf944248af7,
+        467696,
+        0x7cc84bc66bda2692,
     ),
-    ("meridian_harvester.glb", 245340, 0xe4a8ead5f4ab68cf),
-    ("meridian_light_tank.glb", 261188, 0xa4b2f54d8105e6d5),
-    ("veyran_defence_tower.glb", 132364, 0xb2244ce5d2175dd2),
-    ("veyran_light_tank.glb", 223060, 0x3bbade9ed20c114c),
-    ("veyran_power_plant.glb", 188340, 0x37e789954ba4d2cd),
+    ("meridian_harvester.glb", 242380, 0x98f689bd8c9c7181),
+    ("meridian_light_tank.glb", 242188, 0xb36968875a2cc372),
+    ("veyran_defence_tower.glb", 343516, 0x3cda5c0218fec60a),
+    ("veyran_light_tank.glb", 221024, 0xf5f43c70b26a35b6),
+    ("veyran_power_plant.glb", 467204, 0xd1fdd6f5a27bd3af),
 ];
 
 fn fnv1a(bytes: &[u8]) -> u64 {

@@ -49,6 +49,26 @@ fn every_level_is_inside_its_budget_and_really_reduced() {
     }
 }
 
+/// The tuning round (14-11-2026): buildings spend their budget on real detail (vents, pipes,
+/// railings, roof units, window rows, door frames, bolted panels), 2,500-3,500 triangles in LOD0;
+/// vehicles get a little more detail but stay under the unit budget.
+#[test]
+fn buildings_use_their_detail_budget() {
+    for m in models() {
+        let t = m.triangles();
+        if is_building(&m.stem) {
+            assert!(
+                (2500..=3500).contains(&t[0]),
+                "{}: LOD0 {} not in 2500-3500",
+                m.stem,
+                t[0]
+            );
+        } else {
+            assert!((1200..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+        }
+    }
+}
+
 #[test]
 fn the_checker_finds_nothing_and_the_team_share_is_20_to_30_percent_in_every_level() {
     let checker = Checker::embedded();
