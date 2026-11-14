@@ -51,6 +51,6 @@ Scenario(
     production: Some((queue_limit: 5, exit_radius: 4, build_speed: (3, 2))),
     power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
     vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
-    ticks: 30000,
+    ticks: 21000,
     commands: [],
 )
