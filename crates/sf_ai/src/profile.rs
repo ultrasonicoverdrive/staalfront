@@ -298,7 +298,7 @@ mod tests {
             |p| p.army.reinforce_value += 1,
             |p| p.army.defend_ratio_permille += 1,
             |p| p.army.timing_jitter_permille += 1,
-            // WP9.2a-2.
+            // WP9.2a-2, the gather rules.
             |p| p.army.gather_refinery_gap += 1,
             |p| p.army.gather_everyone = !p.army.gather_everyone,
         ];
