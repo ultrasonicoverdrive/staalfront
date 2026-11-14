@@ -138,6 +138,15 @@ impl Profile {
             h.write_u32(u32::from(a.counter_permille));
             h.write_u32(a.intel_ticks);
         }
+        // The numbers of WP9.3a-1, only when one is on (off keeps the digest). The cap is read only with the escalation on.
+        if a.escalate_on() {
+            h.write_u8(0x95);
+            h.write_u32(u32::from(a.escalate_permille));
+            h.write_u32(a.attack_value_max);
+        }
+        if a.harvester_threat {
+            h.write_u8(0x96);
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {

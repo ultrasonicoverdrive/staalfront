@@ -231,6 +231,16 @@ pub struct AiState {
     /// WP9.2b-1, the tally of the counter mix (`crate::counter`): per enemy kind the peak count of armed units seen at
     /// one think and the tick of it. Empty, and not hashed, while `counter_permille` is zero.
     pub intel: BTreeMap<Kind, (u32, Tick)>,
+    /// WP9.3a-1, R2, the bounce ledger: how many strikes failed since the last one that ended because its target was
+    /// gone. Always 0 while `escalate_permille` is zero; not hashed then.
+    pub bounces: u32,
+    /// The launch value of the strike that failed last (0 before the first).
+    pub bounce_value: u64,
+    /// The tick the last strike failed (0 before the first): the `max_wait` fallback counts from here.
+    pub bounce_tick: Tick,
+    /// WP9.3a-1, the harvester threat: every own harvester as the last think saw it, `(kind, cell, hp)`. Empty, and not
+    /// hashed, while `harvester_threat` is off.
+    pub harv_seen: BTreeMap<EntityId, HpSeen>,
 }
 
 fn write_cell(h: &mut Fnv1a64, c: Option<Cell>) {
@@ -308,6 +318,10 @@ impl AiState {
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
             intel: BTreeMap::new(),
+            bounces: 0,
+            bounce_value: 0,
+            bounce_tick: Tick(0),
+            harv_seen: BTreeMap::new(),
         }
     }
 
@@ -585,6 +599,25 @@ impl AiState {
                 h.write_u32(u32::from(kind.0));
                 h.write_u32(*n);
                 h.write_u64(tick.0);
+            }
+        }
+        // WP9.3a-1: the bounce ledger, only with the escalation on, and the harvesters seen, only with the threat on.
+        if self.profile.army.escalate_on() {
+            h.write_u8(0x95);
+            h.write_u32(self.bounces);
+            h.write_u64(self.bounce_value);
+            h.write_u64(self.bounce_tick.0);
+        }
+        if self.profile.army.harvester_threat {
+            h.write_u8(0x96);
+            h.write_u32(self.harv_seen.len() as u32);
+            for (id, (kind, cell, hp)) in &self.harv_seen {
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+                h.write_u32(u32::from(kind.0));
+                h.write_u32(cell.x);
+                h.write_u32(cell.y);
+                h.write_u32(*hp);
             }
         }
         h.finish()

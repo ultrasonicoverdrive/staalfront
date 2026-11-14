@@ -113,6 +113,12 @@
         // base weight says), and how many ticks a peak count of an enemy kind is remembered (read only with the rule on).
         counter_permille: 0,
         intel_ticks: 3000,
+        // WP9.3a-1 (docs/rules/ai.md "Escalation and the harvester threat (WP9.3a-1)"): R2, after a failed strike the next one must be worth
+        // `escalate_permille` thousandths more (at least one credit), at most `attack_value_max` (0 = no cap; read only with the rule on),
+        // and a hit on an own harvester is a threat like a hit on a structure. Built and measured; the shipped values are in the document.
+        escalate_permille: 0,
+        attack_value_max: 0,
+        harvester_threat: false,
     ),
     factions: [
         (

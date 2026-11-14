@@ -109,6 +109,12 @@ fn the_shipped_profile_is_pinned() {
     // WP9.2b-1: the counter mix (docs/rules/ai.md, "Counter mix (WP9.2b-1)"): the shipped value from the 96-game duels.
     assert_eq!((a.counter_permille, a.intel_ticks), (0, 3000));
     assert_eq!(a.counter_on(), a.counter_permille != 0);
+    // WP9.3a-1: escalation and the harvester threat (docs/rules/ai.md, "Escalation and the harvester threat (WP9.3a-1)").
+    assert_eq!(
+        (a.escalate_permille, a.attack_value_max, a.harvester_threat),
+        (0, 0, false)
+    );
+    assert_eq!(a.escalate_on(), a.escalate_permille != 0);
     assert_eq!(p.factions.len(), 2);
     let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
     let meridian = &p.factions[0];
@@ -256,6 +262,16 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
         ),
         ("counter_permille: 0", "counter_permille", ["2001", "65535"]),
         ("intel_ticks: 3000", "intel_ticks", ["99", "60001"]),
+        (
+            "escalate_permille: 0",
+            "escalate_permille",
+            ["2001", "65535"],
+        ),
+        (
+            "attack_value_max: 0",
+            "attack_value_max",
+            ["1000001", "4294967295"],
+        ),
     ];
     for (from, name, bad) in table {
         let key = from.split(':').next().unwrap();
@@ -662,4 +678,41 @@ fn a_profile_without_the_numbers_of_wp9_2b_1_reads_with_the_counter_mix_off() {
         p.army.intel_ticks = ticks;
         assert!(p.check(&UnitDefs::embedded()).is_ok(), "{permille} {ticks}");
     }
+}
+
+#[test]
+fn a_profile_without_the_numbers_of_wp9_3a_1_reads_with_both_rules_off() {
+    // The frozen profiles were written before escalation and the harvester threat: the numbers are absent and read as off.
+    for frozen in [
+        include_str!("../../../../tools/sf_headless/tests/fixtures/normal_old.ron"),
+        include_str!("../../../../tools/sf_headless/tests/fixtures/normal_9_2a2.ron"),
+    ] {
+        let a = AiProfile::from_ron(frozen).unwrap().army;
+        assert_eq!(
+            (a.escalate_permille, a.attack_value_max, a.harvester_threat),
+            (0, 0, false)
+        );
+        assert!(!a.escalate_on());
+    }
+}
+
+#[test]
+fn the_cap_may_not_sit_below_the_first_wave() {
+    let defs = UnitDefs::embedded();
+    let mut p = AiProfile::embedded();
+    let first = p.army.attack_value;
+    // Set: at least `attack_value`; equal is fine, one below is refused, 0 is no cap.
+    p.army.escalate_permille = 250;
+    p.army.attack_value_max = first;
+    assert!(p.check(&defs).is_ok());
+    p.army.attack_value_max = first - 1;
+    let e = p.check(&defs).unwrap_err().to_string();
+    assert!(e.contains("attack_value_max"), "{e}");
+    p.army.attack_value_max = 0;
+    assert!(p.check(&defs).is_ok());
+    // The limits themselves are fine.
+    p.army.escalate_permille = 2000;
+    p.army.attack_value_max = 1_000_000;
+    p.army.attack_value = 1_000_000;
+    assert!(p.check(&defs).is_ok());
 }
