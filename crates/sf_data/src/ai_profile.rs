@@ -255,6 +255,19 @@ pub struct ArmyRules {
     /// Left out: [`DEFAULT_INTEL_TICKS`]. Read only with `counter_permille` above 0.
     #[serde(default = "default_intel_ticks")]
     pub intel_ticks: u32,
+    /// WP9.3a-1, R2, escalation after a failed strike: the next strike must be worth at least this many thousandths more
+    /// than the one that failed (at least one credit more), 0 to 2000. Left out: 0, off (the frozen profiles and the pins
+    /// of the earlier phases keep their waves).
+    #[serde(default)]
+    pub escalate_permille: u16,
+    /// WP9.3a-1: the most an escalated launch value grows to (unit costs), 0 to 1,000,000; 0 is no cap. When set it is at
+    /// least `attack_value` (checked). Read only with `escalate_permille` above 0.
+    #[serde(default)]
+    pub attack_value_max: u32,
+    /// WP9.3a-1: a hit on an own harvester is a threat like a hit on a structure (the army defends the cell of the nearest
+    /// armed enemy seen). Left out: false, off.
+    #[serde(default)]
+    pub harvester_threat: bool,
 }
 
 impl ArmyRules {
@@ -277,6 +290,11 @@ impl ArmyRules {
     /// Whether the counter mix of WP9.2b-1 is on. Off, nothing is tallied and the digest keeps its layout.
     pub fn counter_on(&self) -> bool {
         self.counter_permille != 0
+    }
+
+    /// Whether the escalation of WP9.3a-1 is on. Off, no bounce is recorded and the digest keeps its layout.
+    pub fn escalate_on(&self) -> bool {
+        self.escalate_permille != 0
     }
 }
 
@@ -493,6 +511,14 @@ impl AiProfile {
         range("army.gather_refinery_gap", a.gather_refinery_gap, 0, 16)?;
         range("army.counter_permille", a.counter_permille, 0, 2000)?;
         range("army.intel_ticks", a.intel_ticks, 100, 60_000)?;
+        range("army.escalate_permille", a.escalate_permille, 0, 2000)?;
+        range("army.attack_value_max", a.attack_value_max, 0, 1_000_000)?;
+        if a.attack_value_max != 0 && a.attack_value_max < a.attack_value {
+            return err(format!(
+                "army.attack_value_max {} is below army.attack_value {}: the cap would sit under the first wave",
+                a.attack_value_max, a.attack_value
+            ));
+        }
         if p.factions.is_empty() {
             return err("no faction section");
         }

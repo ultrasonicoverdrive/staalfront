@@ -22,6 +22,7 @@ pub mod harvest;
 pub mod map;
 pub mod match_def;
 pub mod match_look;
+pub mod mission;
 pub mod money;
 pub mod money_look;
 pub mod movement;

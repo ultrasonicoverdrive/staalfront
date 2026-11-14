@@ -231,6 +231,16 @@ pub struct AiState {
     /// WP9.2b-1, the tally of the counter mix (`crate::counter`): per enemy kind the peak count of armed units seen at
     /// one think and the tick of it. Empty, and not hashed, while `counter_permille` is zero.
     pub intel: BTreeMap<Kind, (u32, Tick)>,
+    /// WP9.3a-1, R2, the bounce ledger: how many strikes failed since the last one that ended because its target was
+    /// gone. Always 0 while `escalate_permille` is zero; not hashed then.
+    pub bounces: u32,
+    /// The launch value of the strike that failed last (0 before the first).
+    pub bounce_value: u64,
+    /// The tick the last strike failed (0 before the first): the `max_wait` fallback counts from here.
+    pub bounce_tick: Tick,
+    /// WP9.3a-1, the harvester threat: every own harvester as the last think saw it, `(kind, cell, hp)`. Empty, and not
+    /// hashed, while `harvester_threat` is off.
+    pub harv_seen: BTreeMap<EntityId, HpSeen>,
 }
 
 fn write_cell(h: &mut Fnv1a64, c: Option<Cell>) {
@@ -308,6 +318,10 @@ impl AiState {
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
             intel: BTreeMap::new(),
+            bounces: 0,
+            bounce_value: 0,
+            bounce_tick: Tick(0),
+            harv_seen: BTreeMap::new(),
         }
     }
 
@@ -585,6 +599,25 @@ impl AiState {
                 h.write_u32(u32::from(kind.0));
                 h.write_u32(*n);
                 h.write_u64(tick.0);
+            }
+        }
+        // WP9.3a-1: the bounce ledger, only with the escalation on, and the harvesters seen, only with the threat on.
+        if self.profile.army.escalate_on() {
+            h.write_u8(0x95);
+            h.write_u32(self.bounces);
+            h.write_u64(self.bounce_value);
+            h.write_u64(self.bounce_tick.0);
+        }
+        if self.profile.army.harvester_threat {
+            h.write_u8(0x96);
+            h.write_u32(self.harv_seen.len() as u32);
+            for (id, (kind, cell, hp)) in &self.harv_seen {
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+                h.write_u32(u32::from(kind.0));
+                h.write_u32(cell.x);
+                h.write_u32(cell.y);
+                h.write_u32(*hp);
             }
         }
         h.finish()
@@ -976,6 +1009,77 @@ mod tests {
         s.profile.army.gather_refinery_gap = 0;
         s.profile.army.gather_everyone = false;
         assert_eq!(s.digest(), 0x8383_758e_5b5e_90e6);
+    }
+
+    #[test]
+    fn the_bounce_ledger_and_the_harvesters_seen_are_hashed_only_when_their_rules_are_on() {
+        // Off (the shipped profile): the ledger and the harvesters seen are not read, so not hashed; the base pin stands.
+        let d = base_state().digest();
+        assert_eq!(d, 0x4d0a_8207_c799_2fad);
+        let mut off = base_state();
+        off.bounces = 3;
+        off.bounce_value = 4000;
+        off.bounce_tick = Tick(9000);
+        off.harv_seen
+            .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 5), 80));
+        assert_eq!(off.digest(), d);
+        // Escalation on: the numbers and each part of the ledger move the digest, and so does switching it on.
+        let mut on = base_state();
+        on.profile.army.escalate_permille = 250;
+        on.profile.army.attack_value_max = 8000;
+        on.bounces = 2;
+        on.bounce_value = 3000;
+        on.bounce_tick = Tick(7000);
+        let e = on.digest();
+        assert_ne!(e, d);
+        // A literal, so that the tag (0x95) and the order of the fields are pinned.
+        assert_eq!(e, 0x8829_15b7_1a46_ca43, "escalation on");
+        for change in [
+            (|s: &mut AiState| s.bounces += 1) as fn(&mut AiState),
+            |s| s.bounce_value += 1,
+            |s| s.bounce_tick = Tick(s.bounce_tick.0 + 1),
+            |s| s.profile.army.escalate_permille += 1,
+            |s| s.profile.army.attack_value_max += 1,
+        ] {
+            let mut t = on.clone();
+            change(&mut t);
+            assert_ne!(t.digest(), e);
+        }
+        // The cap is read only with the rule on.
+        let mut capped = base_state();
+        capped.profile.army.attack_value_max = 8000;
+        assert_eq!(capped.digest(), d);
+        // The harvester threat on: the switch and each harvester seen move the digest.
+        let mut h = base_state();
+        h.profile.army.harvester_threat = true;
+        h.harv_seen
+            .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 5), 80));
+        let f = h.digest();
+        assert_ne!(f, d);
+        assert_eq!(f, 0x6da9_505f_7082_0c3f, "harvester threat on");
+        for change in [
+            (|s: &mut AiState| {
+                s.harv_seen
+                    .insert(EntityId::new(31, 0), (Kind(11), Cell::new(1, 1), 10));
+            }) as fn(&mut AiState),
+            |s| {
+                s.harv_seen
+                    .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 5), 79));
+            },
+            |s| {
+                s.harv_seen
+                    .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 6), 80));
+            },
+            |s| {
+                s.harv_seen
+                    .insert(EntityId::new(30, 1), (Kind(11), Cell::new(4, 5), 80));
+            },
+            |s| s.harv_seen.clear(),
+        ] {
+            let mut t = h.clone();
+            change(&mut t);
+            assert_ne!(t.digest(), f);
+        }
     }
 
     #[test]

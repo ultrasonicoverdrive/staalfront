@@ -138,6 +138,15 @@ impl Profile {
             h.write_u32(u32::from(a.counter_permille));
             h.write_u32(a.intel_ticks);
         }
+        // The numbers of WP9.3a-1, only when one is on (off keeps the digest). The cap is read only with the escalation on.
+        if a.escalate_on() {
+            h.write_u8(0x95);
+            h.write_u32(u32::from(a.escalate_permille));
+            h.write_u32(a.attack_value_max);
+        }
+        if a.harvester_threat {
+            h.write_u8(0x96);
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
@@ -344,5 +353,30 @@ mod tests {
         let mut p = on;
         p.army.intel_ticks += 1;
         assert_ne!(p.digest(), e);
+    }
+
+    #[test]
+    fn the_numbers_of_wp9_3a_1_are_hashed_only_when_their_rules_are_on() {
+        let base = resolved(Faction::Meridian);
+        let mut off = base.clone();
+        let d = off.digest();
+        // Off: the cap is not read, so it is not hashed.
+        off.army.attack_value_max = 8000;
+        assert_eq!(off.digest(), d);
+        // The escalation on: the permille and the cap move it, and so does switching it on.
+        let mut on = base.clone();
+        on.army.escalate_permille = 250;
+        let e = on.digest();
+        assert_ne!(e, d);
+        let mut p = on.clone();
+        p.army.escalate_permille += 1;
+        assert_ne!(p.digest(), e);
+        let mut p = on;
+        p.army.attack_value_max = 8000;
+        assert_ne!(p.digest(), e);
+        // The harvester threat is one switch, hashed when it is on.
+        let mut h = base;
+        h.army.harvester_threat = true;
+        assert_ne!(h.digest(), d);
     }
 }

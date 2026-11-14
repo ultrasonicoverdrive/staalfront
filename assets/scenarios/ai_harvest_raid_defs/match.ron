@@ -1,0 +1,43 @@
+// The match file of the scenario `ai_harvest_raid` (WP9.3a-1, docs/rules/ai.md "Escalation and the harvester threat (WP9.3a-1)"): player 0,
+// Meridian, is the AI, with a construction centre where the human of `assets/matches/m1.ron` starts, a power plant, a barracks, a
+// refinery, two harvesters and six riflemen standing at its gather cell, and no money; player 1, Veyran, is a lone static construction
+// centre where the opponent of m1 has its own and two riflemen far in the south-west corner (the raiders come from the script of the scenario). Read by sf_data::match_def like
+// assets/matches/m1.ron.
+//
+// Slots: 0 the AI's centre, 1 its power plant, 2 its barracks, 3 its refinery, 4 and 5 its harvesters, 6 to 11 its riflemen, 12 and 13 player 1's riflemen (the raiders, far from the AI's units), 14 player 1's centre.
+(
+    name: "ai_harvest_raid",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 0,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+                (role: "power_plant", cell: (18, 60)),
+                (role: "barracks", cell: (12, 60)),
+                (role: "refinery", cell: (18, 74)),
+                (role: "harvester", cell: (15, 80)),
+                (role: "harvester", cell: (16, 80)),
+                (role: "rifleman", cell: (24, 64)),
+                (role: "rifleman", cell: (25, 64)),
+                (role: "rifleman", cell: (26, 64)),
+                (role: "rifleman", cell: (27, 64)),
+                (role: "rifleman", cell: (28, 64)),
+                (role: "rifleman", cell: (29, 64)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "rifleman", cell: (6, 90)),
+                (role: "rifleman", cell: (7, 90)),
+                (role: "construction_center", cell: (72, 14)),
+            ],
+        ),
+    ],
+)
