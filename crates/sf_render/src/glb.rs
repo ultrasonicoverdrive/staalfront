@@ -729,8 +729,29 @@ impl Level {
                     "index out of range or not triangles".into(),
                 ));
             }
+            // COLOR_0 (glTF: linear, multiplies the base colour) carries baked shading such as
+            // ambient occlusion (WP11.6a). The team material ignores it: its weight must stay 1.
+            let shades: Option<Vec<[f32; 3]>> = if team {
+                None
+            } else {
+                reader.read_colors(0).map(|c| c.into_rgb_f32().collect())
+            };
+            if shades.as_ref().is_some_and(|s| s.len() != positions.len()) {
+                return Err(GlbError::Invalid(
+                    "COLOR_0 and POSITION counts differ".into(),
+                ));
+            }
             let base = out.vertices.len() as u32;
-            for (p, n) in positions.iter().zip(&normals) {
+            for (i, (p, n)) in positions.iter().zip(&normals).enumerate() {
+                let color = match &shades {
+                    Some(s) => [
+                        color[0] * s[i][0],
+                        color[1] * s[i][1],
+                        color[2] * s[i][2],
+                        0.0,
+                    ],
+                    None => color,
+                };
                 let p = m.transform_point3(Vec3::from(*p));
                 let n = (normal_m * Vec3::from(*n)).normalize_or_zero();
                 if !p.is_finite() {

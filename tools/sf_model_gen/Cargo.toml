@@ -1,0 +1,24 @@
+[package]
+name = "sf_model_gen"
+description = "Generates the vertex-colour GLB models of assets/set_v5 deterministically (integer millimetre geometry)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Library plus binary, like sf_sound_gen: `src/lib.rs` builds the models (testable), `src/main.rs`
+# writes or checks the files. The GLB container and its JSON are written by hand.
+[dependencies]
+# The palette lives in `assets/config/model_palette.ron` (presentation data in RON, PLAN §5 rule 6);
+# the same versions as the rest of the workspace.
+ron = "0.12"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# The tests judge every generated file with the same checker and engine loader the game uses.
+sf_asset_check = { path = "../sf_asset_check" }
+sf_render = { path = "../../crates/sf_render" }
