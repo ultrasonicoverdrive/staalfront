@@ -245,6 +245,16 @@ pub struct ArmyRules {
     /// stood at the factory exit). Left out: false, the old rule.
     #[serde(default)]
     pub gather_everyone: bool,
+    /// WP9.2b-1, the counter mix: how strongly the unit mix leans toward the kinds that do best, per credit, against
+    /// the enemy armed units the AI has seen, in thousandths of the base weight added at full share, 0 to 2000 (the
+    /// weight of a kind stops at twice its base). Left out: 0, off (the frozen profiles and the pins of the earlier
+    /// phases keep their mix).
+    #[serde(default)]
+    pub counter_permille: u16,
+    /// WP9.2b-1: how many ticks after it was seen the peak count of an enemy kind is forgotten, 100 to 60,000.
+    /// Left out: [`DEFAULT_INTEL_TICKS`]. Read only with `counter_permille` above 0.
+    #[serde(default = "default_intel_ticks")]
+    pub intel_ticks: u32,
 }
 
 impl ArmyRules {
@@ -263,6 +273,18 @@ impl ArmyRules {
     pub fn gather_rules_on(&self) -> bool {
         self.gather_refinery_gap != 0 || self.gather_everyone
     }
+
+    /// Whether the counter mix of WP9.2b-1 is on. Off, nothing is tallied and the digest keeps its layout.
+    pub fn counter_on(&self) -> bool {
+        self.counter_permille != 0
+    }
+}
+
+/// The intel memory of a profile that does not write one (WP9.2b-1). A placeholder like the staging patience: it is
+/// read, and hashed, only with `counter_permille` above 0.
+pub const DEFAULT_INTEL_TICKS: u32 = 3000;
+fn default_intel_ticks() -> u32 {
+    DEFAULT_INTEL_TICKS
 }
 
 /// The staging permille of a profile that does not write one.
@@ -469,6 +491,8 @@ impl AiProfile {
             900,
         )?;
         range("army.gather_refinery_gap", a.gather_refinery_gap, 0, 16)?;
+        range("army.counter_permille", a.counter_permille, 0, 2000)?;
+        range("army.intel_ticks", a.intel_ticks, 100, 60_000)?;
         if p.factions.is_empty() {
             return err("no faction section");
         }
@@ -598,6 +622,11 @@ impl AiProfile {
                 };
                 if in_mix && !seen.insert(role.as_str()) {
                     return err(format!("{here}: listed twice"));
+                }
+                // WP9.2b-1: the counter mix never tallies the AI's own scout kind, so a scout kind that is also a
+                // role of the mix would never be tallied (docs/rules/ai.md "Counter mix (WP9.2b-1)").
+                if !in_mix && seen.contains(role.as_str()) {
+                    return err(format!("{here}: the scout is also a role of the unit mix"));
                 }
                 if !def.factions.contains(&f.faction) {
                     return err(format!("{here}: the role is not open to {:?}", f.faction));

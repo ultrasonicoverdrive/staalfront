@@ -132,6 +132,12 @@ impl Profile {
             h.write_u8(a.gather_refinery_gap);
             h.write_u8(u8::from(a.gather_everyone));
         }
+        // The numbers of WP9.2b-1, only when the counter mix is on (off keeps the digest).
+        if a.counter_on() {
+            h.write_u8(0x94);
+            h.write_u32(u32::from(a.counter_permille));
+            h.write_u32(a.intel_ticks);
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
@@ -316,5 +322,27 @@ mod tests {
         let mut p = base;
         p.unit_mix[0].1 += 1;
         assert_ne!(digest, p.digest());
+    }
+
+    #[test]
+    fn the_counter_mix_numbers_are_hashed_only_when_it_is_on() {
+        let base = resolved(Faction::Meridian);
+        let mut off = base.clone();
+        off.army.counter_permille = 0;
+        let d = off.digest();
+        // Off: the memory is not read and not hashed.
+        off.army.intel_ticks += 1;
+        assert_eq!(off.digest(), d);
+        // On: the strength and the memory both move the digest, and so does switching it on.
+        let mut on = base;
+        on.army.counter_permille = 1000;
+        let e = on.digest();
+        assert_ne!(e, d);
+        let mut p = on.clone();
+        p.army.counter_permille += 1;
+        assert_ne!(p.digest(), e);
+        let mut p = on;
+        p.army.intel_ticks += 1;
+        assert_ne!(p.digest(), e);
     }
 }
