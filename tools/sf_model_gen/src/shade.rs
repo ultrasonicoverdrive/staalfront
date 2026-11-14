@@ -229,7 +229,7 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
         };
         let narrow = longest > 0.0 && area2 / longest < WEAR_WIDTH_MM;
         let bevel = narrow && n.iter().all(|c| c.abs() < HIGHLIGHT_MAX_UP);
-        let worn = bevel && hash(i as u32 ^ 0x55) % 3 != 0;
+        let worn = bevel && !hash(i as u32 ^ 0x55).is_multiple_of(3);
         let base = lin[usize::from(t.mat.0)];
         let fac = factor(base);
         for corner in t.v.map(v) {

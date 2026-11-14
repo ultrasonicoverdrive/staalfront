@@ -68,7 +68,7 @@ fn a_plain_open_face_is_exactly_the_palette_colour() {
             "{got} vs {COLOUR:?}"
         );
     }
-    assert!(NOMINAL < 1.0, "head room for the highlight");
+    const { assert!(NOMINAL < 1.0, "head room for the highlight") };
 }
 
 #[test]
