@@ -1,0 +1,87 @@
+// WP10.1a test fixture, not a shipped mission: every part of the format once (docs/rules/mission.md).
+// It is read by crates/sf_data/tests/mission_files.rs; the triggers and teams are format only (WP10.2).
+(
+    name: "example",
+    map: "m1",
+    seed: 7,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (12, 68), name: Some("hq")),
+                (role: "rifleman", cell: (16, 68)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            controller: Ai(profile: "normal"),
+            objects: [
+                (role: "construction_center", cell: (72, 14), name: Some("base")),
+                (role: "power_plant", cell: (76, 20), name: Some("plant")),
+                (role: "barracks", cell: (80, 14)),
+            ],
+            // Defeated when ANY holds; has won when ALL hold.
+            goals: (
+                defeat: [NoStanding(function: Anchor), NoStandingRoles(roles: ["power_plant", "barracks"])],
+                victory: [LastInMatch],
+            ),
+        ),
+    ],
+    zones: [
+        (name: "ford", min: (40, 40), max: (44, 46)),
+        (name: "hill", min: (60, 10), max: (70, 18)),
+    ],
+    variables: [
+        (name: "alarm", start: 0),
+        (name: "wave", start: 1),
+    ],
+    teams: [
+        (
+            name: "raid",
+            owner: 1,
+            members: [("light_tank", 2), ("rifleman", 4)],
+            orders: [
+                MoveTo(zone: "ford"),
+                Guard(ticks: 300),
+                AttackMove(zone: "hill"),
+                SetVariable(variable: "alarm", value: 1),
+                Loop(to: 0),
+            ],
+        ),
+    ],
+    triggers: [
+        (
+            name: "first_alarm",
+            owner: 0,
+            lifetime: Once,
+            events: [EnterZone(zone: "ford"), Destroyed(object: "plant")],
+            conditions: [VariableIs(variable: "alarm", value: 0), ObjectStanding(object: "hq")],
+            actions: [
+                SetVariable(variable: "alarm", value: 1),
+                SpawnTeam(team: "raid", zone: "hill"),
+                Message(text: "They have seen us."),
+                RevealZone(zone: "ford"),
+                CameraTo(zone: "ford"),
+            ],
+        ),
+        (
+            name: "time_up",
+            owner: 0,
+            lifetime: Persistent,
+            events: [Time(ticks: 36000), MoneyAbove(player: 0, credits: 9000)],
+            conditions: [VariableAtLeast(variable: "wave", value: 1), TeamAlive(team: "raid"), MoneyAtLeast(player: 0, credits: 1)],
+            actions: [AddVariable(variable: "wave", delta: 1), DisbandTeam(team: "raid"), ForceTrigger(trigger: "first_alarm"), Destroy(object: "base")],
+        ),
+        (
+            name: "give_up",
+            owner: 1,
+            lifetime: Once,
+            events: [AllDestroyed(player: 0), Built(player: 1, role: "light_tank"), PowerShortage(player: 1), Always],
+            actions: [Win(player: 1), Lose(player: 0)],
+        ),
+    ],
+)
