@@ -166,7 +166,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 43] = [
+    let table: [(&str, &str, [&str; 2]); 45] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",
@@ -698,21 +698,12 @@ fn a_profile_without_the_numbers_of_wp9_3a_1_reads_with_both_rules_off() {
 
 #[test]
 fn the_cap_may_not_sit_below_the_first_wave() {
-    let defs = UnitDefs::embedded();
-    let mut p = AiProfile::embedded();
-    let first = p.army.attack_value;
-    // Set: at least `attack_value`; equal is fine, one below is refused, 0 is no cap.
-    p.army.escalate_permille = 250;
-    p.army.attack_value_max = first;
-    assert!(p.check(&defs).is_ok());
-    p.army.attack_value_max = first - 1;
-    let e = p.check(&defs).unwrap_err().to_string();
-    assert!(e.contains("attack_value_max"), "{e}");
-    p.army.attack_value_max = 0;
-    assert!(p.check(&defs).is_ok());
-    // The limits themselves are fine.
-    p.army.escalate_permille = 2000;
-    p.army.attack_value_max = 1_000_000;
-    p.army.attack_value = 1_000_000;
-    assert!(p.check(&defs).is_ok());
+    // The shipped attack value is 2,000. Set, the cap is at least that: equal is fine, one below is refused, 0 is no cap.
+    assert_eq!(AiProfile::embedded().army.attack_value, 2000);
+    let with = |cap: u32| edited("attack_value_max: 0", &format!("attack_value_max: {cap}"));
+    AiProfile::from_ron(&with(2000)).unwrap();
+    AiProfile::from_ron(&with(1_000_000)).unwrap();
+    refused(&with(1999), "attack_value_max");
+    refused(&with(1), "attack_value_max");
+    AiProfile::from_ron(&with(0)).unwrap();
 }
