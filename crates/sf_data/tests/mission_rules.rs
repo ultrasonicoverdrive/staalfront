@@ -607,3 +607,61 @@ fn unknown_fields_and_the_match_file_checks_still_apply() {
         &["player 1", "ai profile"],
     );
 }
+
+#[test]
+fn unknown_fields_inside_a_variant_are_refused() {
+    let cases: [(String, &str); 5] = [
+        (
+            mission_with(
+                "goals: (defeat: [NoStanding(function: Anchor, roles: [\"power_plant\"])]),",
+                "",
+                "",
+                "",
+            ),
+            "roles",
+        ),
+        (
+            mission(&format!(
+                "{ZONE} teams: [(name: \"t1\", owner: 1, members: [(\"rifleman\", 1)], orders: [MoveTo(zone: \"z\", speed: 2)])],"
+            )),
+            "speed",
+        ),
+        (
+            mission(&trigger(
+                "events: [Time(ticks: 5, tocks: 9)], actions: [Lose(player: 0)]",
+            )),
+            "tocks",
+        ),
+        (
+            mission(&format!(
+                "{VAR} {}",
+                trigger(
+                    "events: [Always], conditions: [VariableIs(variable: \"v\", value: 1, extra: 2)], actions: [Lose(player: 0)]"
+                )
+            )),
+            "extra",
+        ),
+        (
+            mission(&trigger(
+                "events: [Always], actions: [Win(player: 0, zone: \"nope\")]",
+            )),
+            "zone",
+        ),
+    ];
+    for (text, field) in cases {
+        let e = refused(&text);
+        assert!(e.contains(field), "error should name {field:?}: {e}");
+    }
+}
+
+#[test]
+fn a_start_cell_at_u32_max_is_refused_as_outside_the_map() {
+    for cell in ["(4294967295, 60)", "(60, 4294967295)"] {
+        let m = MissionDef::from_ron(&mission("").replace("(60, 60)", cell)).unwrap();
+        let e = m
+            .check(&UnitDefs::embedded(), (384, 384))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("lies outside the 384x384 map"), "{e}");
+    }
+}

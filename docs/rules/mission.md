@@ -36,7 +36,7 @@ rule: `defeat: [NoStanding(function: Anchor)]`, `victory: [LastInMatch]` (`Goals
 |---|---|
 | `NoStanding(function: F)` | the player owns no standing structure with the building function `F` (`Anchor` is the construction centre) |
 | `NoStandingRoles(roles: [..])` | the player owns no standing structure of any of these roles |
-| `NothingLeft` | no standing structure and no armed unit (the rule before WP7.7) |
+| `NothingLeft` | no standing structure and no armed unit (the rule of WP7.6, replaced in WP7.7) |
 | `LastInMatch` | every other player is defeated; a victory goal only |
 
 The memo wrote `NoStanding(function)` and `NoStanding(roles)` as one variant; serde cannot have one variant
@@ -55,8 +55,9 @@ with two shapes, so the roles form is `NoStandingRoles`.
 * `check` (with the unit definitions): a role in a goal must exist and be a structure; and **a player must
   start with what its own defeat goals ask for**: `NoStanding(function: F)` needs a start structure with that
   function, `NoStandingRoles` needs one of the roles, else the player would be defeated before it began. With
-  the default goals that is the old rule "every player starts with a construction centre", with the old
-  message. A player whose defeat goals are something else, or empty, needs no construction centre
+  the default goals that is the old rule "every player starts with a construction centre", with a new
+  message ("starts without a structure of the function Anchor … (the default goals ask for a construction
+  center)"). A player whose defeat goals are something else, or empty, needs no construction centre
   (`a_player_must_start_with_what_its_defeat_goal_asks_for`).
 
 ## Zones, variables, teams, triggers
@@ -104,3 +105,16 @@ No runtime of any kind (see the line above). `match_def.rs`, `sf_sim`, `sf_bridg
 `sf_headless`, CI and every `.expected` are untouched. Start objects have no extras (hit points, facing: they
 need new sim commands). The vocabulary is untested against a runtime. A trigger's `owner` is checked as a
 player but its meaning ("units of the owner" in `EnterZone`) is WP10.2's to fix.
+Every enum of the format (`Goal`, `TeamOrder`, `Event`, `Condition`, `Action`) refuses unknown fields
+inside a variant (`unknown_fields_inside_a_variant_are_refused`), and a start cell near `u32::MAX` is
+refused as outside the map instead of overflowing (`a_start_cell_at_u32_max_is_refused_as_outside_the_map`).
+Left open, on purpose:
+
+* For 10.1c: `Controller` in `match_def.rs` has the same gap (`Ai(profile: .., x: 1)` is accepted), and
+  `MatchDef::check` has the same overflow on `cell + footprint`; `match_def.rs` is out of scope here.
+* `defeat: [NothingLeft]` for a player that starts with only unarmed units (or nothing) is accepted by
+  `check`, although that player would lose at once; the start rule covers only `NoStanding*`.
+* For 10.1b: a victory goal `NoStanding*` asks about the player's **own** structures, like a defeat goal;
+  "destroy the enemy's X" cannot be expressed with these goals.
+* Runtime questions for 10.2/10.3: a `Loop(to)` may point at its own step (a loop without progress), and a
+  `ForceTrigger` may name its own trigger.

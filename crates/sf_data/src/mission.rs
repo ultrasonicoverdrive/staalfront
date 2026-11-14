@@ -88,6 +88,7 @@ pub struct MissionObject {
 /// One thing a goal asks about a player. The four here are the ones the state scan of
 /// `sf_sim::outcome` can answer; more may be added.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum Goal {
     /// The player owns no standing structure with this building function (the default defeat rule is
     /// `NoStanding(function: Anchor)`: the construction centre).
@@ -100,7 +101,7 @@ pub enum Goal {
         /// The role ids (sorted and without doubles after reading).
         roles: Vec<String>,
     },
-    /// The player owns no standing structure and no armed unit (the rule of WP7.6).
+    /// The player owns no standing structure and no armed unit (the rule of WP7.6, replaced in WP7.7).
     NothingLeft,
     /// Every other player is defeated. A victory goal only.
     LastInMatch,
@@ -227,6 +228,7 @@ pub struct Variable {
 
 /// One step of a team's order list (provisional).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum TeamOrder {
     /// Move to the middle of a zone.
     MoveTo {
@@ -275,6 +277,7 @@ pub struct Team {
 
 /// What a trigger waits for (provisional; the runtime is WP10.2).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum Event {
     /// Always true when evaluated.
     Always,
@@ -321,6 +324,7 @@ pub enum Event {
 
 /// What must also hold when an event fires a trigger (provisional).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum Condition {
     /// A variable has exactly this value.
     VariableIs {
@@ -357,6 +361,7 @@ pub enum Condition {
 
 /// What a trigger does (provisional; the runtime is WP10.3).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub enum Action {
     /// The player wins.
     Win {
@@ -775,13 +780,19 @@ impl MissionDef {
                         started_functions.insert(b.function);
                     }
                 }
-                let (x1, y1) = (o.cell.0 + u32::from(w), o.cell.1 + u32::from(h));
-                if x1 > map_cells.0 || y1 > map_cells.1 {
-                    return err(format!(
-                        "{at}: cell {:?} with its footprint lies outside the {}x{} map",
-                        o.cell, map_cells.0, map_cells.1
-                    ));
-                }
+                let ends = (
+                    o.cell.0.checked_add(u32::from(w)),
+                    o.cell.1.checked_add(u32::from(h)),
+                );
+                let (x1, y1) = match ends {
+                    (Some(x1), Some(y1)) if x1 <= map_cells.0 && y1 <= map_cells.1 => (x1, y1),
+                    _ => {
+                        return err(format!(
+                            "{at}: cell {:?} with its footprint lies outside the {}x{} map",
+                            o.cell, map_cells.0, map_cells.1
+                        ));
+                    }
+                };
                 if def.category == Category::Structure {
                     for y in o.cell.1..y1 {
                         for x in o.cell.0..x1 {
