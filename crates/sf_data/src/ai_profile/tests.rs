@@ -82,6 +82,26 @@ fn the_shipped_profile_is_pinned() {
         (a.arrive_radius, a.attack_patience, a.army_floor_value),
         (6, 2400, 2000)
     );
+    // WP9.2a: the groups (docs/rules/ai.md "Groups"); the reinforcement is half an attack.
+    assert_eq!(
+        (
+            a.home_guard_permille,
+            a.stage_distance,
+            a.stage_permille,
+            a.stage_patience
+        ),
+        (0, 14, 700, 1800)
+    );
+    assert_eq!(
+        (
+            a.reinforce_value,
+            a.defend_ratio_permille,
+            a.timing_jitter_permille
+        ),
+        (1000, 1500, JITTER)
+    );
+    assert_eq!(a.reinforce_value, a.attack_value / 2);
+    assert!(a.groups_on());
     assert_eq!(p.factions.len(), 2);
     let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
     let meridian = &p.factions[0];
@@ -133,7 +153,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 33] = [
+    let table: [(&str, &str, [&str; 2]); 40] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",
@@ -199,6 +219,29 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
             ["(\"rifleman\", 0)", "(\"rifleman\", 1001)"],
         ),
         ("stagger: 3,", "stagger", ["stagger: 0,", "stagger: 5,"]),
+        (
+            "home_guard_permille: 0",
+            "home_guard_permille",
+            ["901", "901"],
+        ),
+        ("stage_distance: 14", "stage_distance", ["65", "65"]),
+        ("stage_permille: 700", "stage_permille", ["0", "1001"]),
+        ("stage_patience: 1800", "stage_patience", ["0", "72001"]),
+        (
+            "reinforce_value: 1000",
+            "reinforce_value",
+            ["1000001", "1000001"],
+        ),
+        (
+            "defend_ratio_permille: 1500",
+            "defend_ratio_permille",
+            ["100001", "100001"],
+        ),
+        (
+            "timing_jitter_permille: 0",
+            "timing_jitter_permille",
+            ["901", "901"],
+        ),
     ];
     for (from, name, bad) in table {
         let key = from.split(':').next().unwrap();
@@ -470,4 +513,77 @@ fn a_unit_needs_its_factory_and_what_it_requires_in_the_list() {
     meridian(&b, &[("light_tank", 1)])
         .check(&UnitDefs::embedded())
         .unwrap();
+}
+
+/// The timing jitter of the shipped profile (permille), chosen by measurement (docs/rules/ai.md "Groups").
+const JITTER: u16 = 0;
+
+#[test]
+fn a_profile_without_the_numbers_of_wp9_2a_reads_with_them_off() {
+    // The frozen profiles of the earlier scenarios were written before the groups: every number of WP9.2a is
+    // absent, and reads as the value that switches its rule off (the staging threshold and patience have
+    // defaults but act only with a staging distance).
+    for frozen in [
+        include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_vs_passive_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_raid_defs/normal.ron"),
+    ] {
+        let a = AiProfile::from_ron(frozen).unwrap().army;
+        assert_eq!(
+            (
+                a.home_guard_permille,
+                a.stage_distance,
+                a.reinforce_value,
+                a.defend_ratio_permille,
+                a.timing_jitter_permille
+            ),
+            (0, 0, 0, 0, 0)
+        );
+        assert_eq!(
+            (a.stage_permille, a.stage_patience),
+            (DEFAULT_STAGE_PERMILLE, DEFAULT_STAGE_PATIENCE)
+        );
+        assert_eq!((DEFAULT_STAGE_PERMILLE, DEFAULT_STAGE_PATIENCE), (700, 600));
+        assert!(!a.groups_on());
+    }
+    // Any one of them makes `groups_on` true.
+    let mut a = AiProfile::from_ron(include_str!(
+        "../../../../assets/scenarios/ai_fog_defs/normal.ron"
+    ))
+    .unwrap()
+    .army;
+    for set in [
+        |a: &mut ArmyRules| a.home_guard_permille = 1,
+        |a: &mut ArmyRules| a.stage_distance = 1,
+        |a: &mut ArmyRules| a.reinforce_value = 1,
+        |a: &mut ArmyRules| a.defend_ratio_permille = 1,
+        |a: &mut ArmyRules| a.timing_jitter_permille = 1,
+    ] {
+        let mut b = a;
+        set(&mut b);
+        assert!(b.groups_on());
+    }
+    a.stage_patience = 1;
+    assert!(!a.groups_on(), "the patience alone does nothing");
+}
+
+#[test]
+fn with_staging_on_the_stage_patience_must_be_below_the_attack_patience() {
+    // The shipped profile: staging on, 1800 below 2400.
+    let shipped = AiProfile::embedded().army;
+    assert!(shipped.stage_distance > 0 && shipped.stage_patience < shipped.attack_patience);
+    // Equal or above: refused, since the attack could end while it stages.
+    refused(
+        &edited("stage_patience: 1800", "stage_patience: 2400"),
+        "stage_patience",
+    );
+    refused(
+        &edited("stage_patience: 1800", "stage_patience: 5000"),
+        "stage_patience",
+    );
+    AiProfile::from_ron(&edited("stage_patience: 1800", "stage_patience: 2399")).unwrap();
+    // With staging off the patience is not read, so it is not compared.
+    let off = edited("stage_distance: 14", "stage_distance: 0")
+        .replace("stage_patience: 1800", "stage_patience: 5000");
+    AiProfile::from_ron(&off).unwrap();
 }

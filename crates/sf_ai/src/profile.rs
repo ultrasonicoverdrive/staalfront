@@ -115,6 +115,17 @@ impl Profile {
         h.write_u8(a.arrive_radius);
         h.write_u32(a.attack_patience);
         h.write_u32(a.army_floor_value);
+        // The numbers of WP9.2a, only when one is set: a profile with all of them 0 keeps the digest it had.
+        if a.groups_on() {
+            h.write_u8(0x92);
+            h.write_u32(u32::from(a.home_guard_permille));
+            h.write_u8(a.stage_distance);
+            h.write_u32(u32::from(a.stage_permille));
+            h.write_u32(a.stage_patience);
+            h.write_u32(a.reinforce_value);
+            h.write_u32(a.defend_ratio_permille);
+            h.write_u32(u32::from(a.timing_jitter_permille));
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
@@ -253,7 +264,7 @@ mod tests {
         p.army.gather_distance += 1;
         assert_ne!(digest, p.digest());
         // WP9.1c-1: every new number and the scout.
-        let changes: [fn(&mut Profile); 18] = [
+        let changes: [fn(&mut Profile); 25] = [
             |p| p.economy.max_queue += 1,
             |p| p.army.gather_radius += 1,
             |p| p.army.gather_group += 1,
@@ -273,6 +284,14 @@ mod tests {
             |p| p.army.min_units += 1,
             |p| p.army.first_attack_tick += 1,
             |p| p.army.defend_ticks += 1,
+            // WP9.2a (the base profile is the shipped one, which has them on).
+            |p| p.army.home_guard_permille += 1,
+            |p| p.army.stage_distance += 1,
+            |p| p.army.stage_permille += 1,
+            |p| p.army.stage_patience += 1,
+            |p| p.army.reinforce_value += 1,
+            |p| p.army.defend_ratio_permille += 1,
+            |p| p.army.timing_jitter_permille += 1,
         ];
         for (i, change) in changes.iter().enumerate() {
             let mut p = base.clone();

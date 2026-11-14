@@ -85,6 +85,27 @@
         // back only the reserve, while no attack has gone out yet or the army defends. (2000, measured on
         // `ai_vs_passive`; the start value 1000 wins at 26,387, docs/rules/ai.md "The army floor".)
         army_floor_value: 2000,
+        // WP9.2a (docs/rules/ai.md "Groups"). The numbers of the design memo of 12-11-2026 were measured in 96-game duels against
+        // the profile as it was before (48 games with each profile on each seat, start sites alternating, repair rate 1 on main; 13-11-2026, tables in ai.md),
+        // and two of them changed:
+        // G1, the home guard: the rule is built and tested, but every guard tried (100, 150, 250 permille) cut the duel to 25 to 37.5 percent of the
+        // decided games and the decided games from 26 to between 3 and 14 of 96; shipped at 0 (off).
+        home_guard_permille: 0,
+        // G2, staging: the strike first goes to a cell 14 cells short of the target, and leaves it when 70 percent of its living members
+        // stand idle within `arrive_radius` of it, or `stage_patience` ticks after the launch. 1800, was 600 in the memo: the way to the
+        // cell takes 800 to 1,000 ticks, so 600 only made the cell a waypoint (duel 72.7 percent of the decided games with 600 against 82.9 with 1800;
+        // with 1800: 16 : 5 as seat 0 and 18 : 2 as seat 1, but 31 : 1 from the south-west site and 3 : 6 from the north-east one).
+        // Must stay below `attack_patience` (checked).
+        stage_distance: 14,
+        stage_permille: 700,
+        stage_patience: 1800,
+        // G3, reinforcement: units at home worth half an attack (`attack_value` / 2) follow the strike as a second group.
+        reinforce_value: 1000,
+        // G4, partial defence: a threat gets units worth 1.5 times the armed enemy units seen near it, nearest first.
+        defend_ratio_permille: 1500,
+        // Timing jitter (decision of 13-11-2026): the permille `attack_value` and `max_wait` of a launch may deviate by. 0: measured
+        // 0 / 100 / 200 on `m1_duel` with this profile, the games diverge most with 0 (91 / 75 / 73 distinct coarse outcomes of 100) and are decided most often (76 / 56 / 51).
+        timing_jitter_permille: 0,
     ),
     factions: [
         (

@@ -1,12 +1,14 @@
-//! The army manager (`docs/rules/ai.md`, "The army in WP9.1c-1" and "The army in WP9.1c-2"): the gather
-//! cell, the scout, the gathering (WP9.1c-1), and the threat rule, the attack timing, the target, marching
-//! and finishing (WP9.1c-2). The rules write [`AiState::directive`]; [`operations_minimal`] turns it into
-//! orders (the seam that WP9.2 replaces).
+//! The army manager (`docs/rules/ai.md`, "The army in WP9.1c-1", "The army in WP9.1c-2" and "Groups"): the
+//! gather cell, the scout, the gathering (WP9.1c-1), the threat rule, the attack timing, the target, marching
+//! and finishing (WP9.1c-2), and since WP9.2a the army in groups ([`crate::state::Group`], at most
+//! `GROUPS_MAX`): the home guard, the staging cell, the reinforcement and its merge, the partial defence and
+//! the timing jitter. The rules write [`AiState::directive`] and the groups; [`operations`] turns them into
+//! orders. The army units that are in no group are the home.
 //!
 //! **Every think** ([`watch`], called by `Ai::think_with` before the manager of the turn): the own structures
 //! are compared with what the last think saw (`hp_seen`). One whose hit points fell, or that is gone without
 //! having been sold, is a hit: the posture becomes `Defend` at once, until `defend_ticks` after the last hit.
-//! A hit on the construction centre also calls the attackers back.
+//! A hit on the construction centre also calls every group out back (stage `Returning`).
 //!
 //! One army turn, every 40 ticks (one think in four), in order:
 //!
@@ -16,13 +18,17 @@
 //!    "only an idle unit is ordered": a waypoint on a structure is a `Move` that never ends); a lost scout is
 //!    noted and a replacement is bought by the production turn after `scout_retry` ticks, at most
 //!    `scouts_max` in a match.
-//! (3) **Decide** ([`decide`]): the start sites seen empty; with nothing to defend and no attack out, the
-//!    attack trigger (A4) on the units gathered; with an attack out, its end (no attacker left, no target, or
-//!    `attack_patience` without an attacker at the target).
-//! (4) **Orders** ([`operations_minimal`]): the defence, the march, the finishing `Attack`, the survivors
-//!    home, the gathering; at most [`ARMY_COMMANDS_PER_TURN`] commands in the turn, the scout's included. A
-//!    unit is ordered only when its observed order is `Idle` (or, once, when a defence began under its
-//!    `Move`), and not again within `resend_ticks`.
+//! (3) **Decide** ([`decide`]): the start sites seen empty; with nothing to defend and no group out, the
+//!    attack trigger (A4) on the units gathered that are no guard ([`hold_back`], G1: the strike that remains
+//!    must meet the trigger), which makes the strike, staging at a cell short of the target when
+//!    `stage_distance` is set ([`staging_cell`], G2); with a strike out, the staging exit, its end (no member
+//!    left, no target, or `attack_patience` without a member at the target) and the reinforcement
+//!    ([`reinforce`], G3: a second group that merges into the strike near its meeting point).
+//! (4) **Orders** ([`operations`]): the defence (G4: the units at home that [`defenders`] picks, to the
+//!    threat cell), then for each group out the staging, the march and the finishing `Attack`, the survivors
+//!    home, the gathering; at most [`ARMY_COMMANDS_PER_TURN`] commands in the turn, the scout's included, and
+//!    at most `gather_group` ids in one command. A unit is ordered only when its observed order is `Idle` (or,
+//!    once, when a defence began under its `Move`), and not again within `resend_ticks`.
 //!
 //! How the AI learns that an order had no effect is always the observation: a unit that is `Idle` again far
 //! from where it was sent was refused or gave the route up (`docs/rules/collision.md`, `replan_max`), and the
@@ -34,7 +40,7 @@ use sf_sim::{BuildingFunction, Cell, Command, EntityId, Kind, Order, gap};
 
 use crate::observe::{Lens, Observation, Own};
 use crate::placement;
-use crate::state::{AiState, Directive, HpSeen, Posture};
+use crate::state::{AiState, Directive, GROUPS_MAX, Group, GroupStage, HpSeen, Posture};
 
 /// The most gather commands one army turn sends (an anti-spam bound, not a tuning number: with
 /// `gather_group` 19 it is 38 units per turn, and the rest follow at the next turn).
@@ -65,13 +71,15 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
     // `obs.own` ascends by id, so a binary search finds the live units.
     let live = |id: &EntityId| obs.own.binary_search_by_key(id, |o| o.id).is_ok();
     state.sent.retain(|id, _| live(id));
-    state.attackers.retain(live);
-    state.recalled.retain(live);
-    state.closing.retain(live);
+    for g in &mut state.groups {
+        g.members.retain(live);
+        g.recalled.retain(live);
+        g.closing.retain(live);
+    }
     if let Some(gather) = gather {
         let home = decide(state, obs, lens, gather);
         let budget = ARMY_COMMANDS_PER_TURN.saturating_sub(out.len() - before);
-        operations_minimal(state, obs, lens, out, gather, &home, budget);
+        operations(state, obs, lens, out, gather, &home, budget);
     }
 }
 
@@ -176,16 +184,20 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
         let at = threat_cell(state, obs, lens, cell, w, h);
         state.threat = Some((at, now));
         state.defend_since.get_or_insert(now);
-        if anchor && !state.attackers.is_empty() {
-            // The construction centre is the match: the attack is called back. The former attackers get the
-            // defence order once whatever their order is (a wave on its `AttackMove` too): `recalled`.
-            let back = std::mem::take(&mut state.attackers);
-            state.recalled.extend(back);
-            state.recalled.sort();
-            state.recalled.dedup();
-            state.attack_target = None;
-            state.target_hp = None;
-            state.closing.clear();
+        if anchor {
+            // The construction centre is the match: every group out is called back (stage `Returning`). Its
+            // members get the defence order once whatever their order is (a wave on its `AttackMove` too):
+            // `recalled`.
+            for g in &mut state.groups {
+                if g.stage == GroupStage::Returning {
+                    continue;
+                }
+                g.recalled = g.members.clone();
+                g.stage = GroupStage::Returning;
+                g.since = now;
+                g.target_hp = None;
+                g.closing.clear();
+            }
         }
         state.directive = Directive {
             posture: Posture::Defend,
@@ -198,13 +210,18 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
     {
         state.threat = None;
         state.defend_since = None;
-        state.recalled.clear();
-        state.directive = match state.attack_target {
-            Some(t) if !state.attackers.is_empty() => Directive {
+        // The defence is over: the groups called back are dissolved, their members are home. With the WP9.2a
+        // rules on, a group that still has members to send home stays until they are sent (`operations`).
+        let on = state.profile.army.groups_on();
+        state
+            .groups
+            .retain(|g| g.stage != GroupStage::Returning || (on && !g.recalled.is_empty()));
+        state.directive = match state.strike().map(|g| g.goal) {
+            Some(t) => Directive {
                 posture: Posture::Attack,
                 target: Some(t),
             },
-            _ => Directive::default(),
+            None => Directive::default(),
         };
     }
 }
@@ -247,7 +264,7 @@ fn threat_cell(
 }
 
 /// The army units within `gather_radius` of the gather cell that are `Idle` (and those given up on after
-/// `gather_tries`, counted where they stand): who goes when an attack goes out (A4). Never an attacker.
+/// `gather_tries`, counted where they stand): who goes when an attack goes out (A4). Never a member of a group.
 pub fn gathered(
     state: &AiState,
     obs: &Observation,
@@ -259,7 +276,7 @@ pub fn gathered(
     obs.own
         .iter()
         .filter(|o| is_army(state.scout, lens, o) && o.order == Order::Idle)
-        .filter(|o| state.attackers.binary_search(&o.id).is_err())
+        .filter(|o| !in_a_group(state, o.id))
         .filter(|o| {
             cheb(o.cell, gather) <= radius
                 || state
@@ -288,8 +305,8 @@ pub fn attack_due(state: &AiState, now: sf_sim::Tick, value: u64, count: usize) 
     if now.0 < u64::from(a.first_attack_tick) || count == 0 {
         return false;
     }
-    value >= u64::from(a.attack_value)
-        || (now.0 >= state.last_attack_tick.0 + u64::from(a.max_wait)
+    value >= jittered(state, a.attack_value)
+        || (now.0 >= state.last_attack_tick.0 + jittered(state, a.max_wait)
             && count >= usize::from(a.min_units))
 }
 
@@ -373,18 +390,235 @@ fn clear_sites(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
     }
 }
 
-/// Step (3): the attack trigger and the attack's end. Returns the survivors of an attack that ended, to be
-/// sent home.
+/// Whether `id` is in any group, whatever its stage.
+fn in_a_group(state: &AiState, id: EntityId) -> bool {
+    state
+        .groups
+        .iter()
+        .any(|g| g.members.binary_search(&id).is_ok())
+}
+
+/// What the own unit `id` costs (`Lens::unit_cost`); 0 for an id that is not an own unit.
+fn cost_of(obs: &Observation, lens: &Lens<'_>, id: EntityId) -> u64 {
+    obs.own
+        .binary_search_by_key(&id, |o| o.id)
+        .ok()
+        .map_or(0, |i| {
+            u64::from(lens.unit_cost(obs.own[i].kind).unwrap_or(0))
+        })
+}
+
+/// The timing jitter (WP9.2a): once per launch the AI draws a number from minus to plus
+/// `timing_jitter_permille` from its own stream, and that launch's `attack_value` and `max_wait` are scaled by
+/// `(1000 + draw) / 1000`. The draw is made at the first army turn that checks the trigger after the last
+/// launch (the first one of the match too), and kept in [`AiState::jitter`] until the launch. With the number 0
+/// the stream is not touched.
+pub fn draw_jitter(state: &mut AiState) {
+    let spread = u32::from(state.profile.army.timing_jitter_permille);
+    if spread == 0 || state.jitter.is_some() {
+        return;
+    }
+    let draw = state.rng.below(2 * spread + 1);
+    state.jitter = Some(draw as i32 - spread as i32);
+}
+
+/// `value` scaled by the jitter drawn for the launch that comes next, at least 1 when the jitter is on. With
+/// `timing_jitter_permille` 0 it is `value` itself, so `attack_value` 0 still means "always" (fix round 1).
+fn jittered(state: &AiState, value: u32) -> u64 {
+    if state.profile.army.timing_jitter_permille == 0 {
+        return u64::from(value);
+    }
+    let permille = 1000 + i64::from(state.jitter.unwrap_or(0));
+    ((u64::from(value) * permille as u64) / 1000).max(1)
+}
+
+/// G1, the home guard: of the gathered units `ids` (ascending), the highest ids stay home until what they are
+/// worth reaches `home_guard_permille` of the value of all of them. Returns `(go, held)`, both ascending.
+pub fn hold_back(
+    state: &AiState,
+    obs: &Observation,
+    lens: &Lens<'_>,
+    ids: &[EntityId],
+) -> (Vec<EntityId>, Vec<EntityId>) {
+    let permille = u64::from(state.profile.army.home_guard_permille);
+    let total: u64 = ids.iter().map(|&id| cost_of(obs, lens, id)).sum();
+    let mut held: Vec<EntityId> = Vec::new();
+    let mut held_value = 0u64;
+    for &id in ids.iter().rev() {
+        if held_value * 1000 >= permille * total {
+            break;
+        }
+        held_value += cost_of(obs, lens, id);
+        held.push(id);
+    }
+    held.sort();
+    let go = ids
+        .iter()
+        .copied()
+        .filter(|id| held.binary_search(id).is_err())
+        .collect();
+    (go, held)
+}
+
+/// G2: the staging cell of a strike from `gather` to `target`: the integer point on the line between them
+/// `stage_distance` cells short of the target (steps on the larger axis), then, when that is not open
+/// ground, the nearest open ground to the gather cell in rings 1 to 3 round it ([`beside`]). `None` when
+/// staging is off (`stage_distance` 0), when the target is no further than the distance, or when there is no
+/// open ground.
+pub fn staging_cell(state: &AiState, lens: &Lens<'_>, gather: Cell, target: Cell) -> Option<Cell> {
+    let short = i64::from(state.profile.army.stage_distance);
+    if short == 0 {
+        return None;
+    }
+    let (dx, dy) = (
+        i64::from(target.x) - i64::from(gather.x),
+        i64::from(target.y) - i64::from(gather.y),
+    );
+    let len = dx.abs().max(dy.abs());
+    if len <= short {
+        return None;
+    }
+    let at = Cell::new(
+        (i64::from(gather.x) + dx * (len - short) / len) as u32,
+        (i64::from(gather.y) + dy * (len - short) / len) as u32,
+    );
+    let cell = if lens.ground(at) {
+        at
+    } else {
+        beside(lens, at, 1, 1, gather)
+    };
+    lens.ground(cell).then_some(cell)
+}
+
+/// The middle cell of the own units `members` that are seen; `None` when none is.
+fn mean_cell(obs: &Observation, members: &[EntityId]) -> Option<Cell> {
+    let (mut x, mut y, mut n) = (0u64, 0u64, 0u64);
+    for o in obs
+        .own
+        .iter()
+        .filter(|o| members.binary_search(&o.id).is_ok())
+    {
+        x += u64::from(o.cell.x);
+        y += u64::from(o.cell.y);
+        n += 1;
+    }
+    (n > 0).then(|| Cell::new((x / n) as u32, (y / n) as u32))
+}
+
+/// G4: what the armed units of another player that are seen within `gather_radius` of `at` cost. From
+/// `obs.visible` only.
+pub fn threat_value(state: &AiState, obs: &Observation, lens: &Lens<'_>, at: Cell) -> u64 {
+    let reach = u32::from(state.profile.army.gather_radius);
+    obs.visible
+        .iter()
+        .filter(|s| {
+            s.owner != state.player && s.footprint.is_none() && s.armed && cheb(s.cell, at) <= reach
+        })
+        .map(|s| u64::from(lens.unit_cost(s.kind).unwrap_or(0)))
+        .sum()
+}
+
+/// G4, partial defence: of the units at home (`pool`, ascending), the ones that go to a threat at `at`: the
+/// nearest first (squared distance, then the lowest id) until what they are worth reaches
+/// [`threat_value`] times `defend_ratio_permille` over 1000; all of them when the ratio is 0 or nothing armed is
+/// seen. Ascending.
+pub fn defenders(
+    state: &AiState,
+    obs: &Observation,
+    lens: &Lens<'_>,
+    at: Cell,
+    pool: &[&Own],
+) -> Vec<EntityId> {
+    let ratio = u64::from(state.profile.army.defend_ratio_permille);
+    let threat = threat_value(state, obs, lens, at);
+    let mut chosen: Vec<EntityId> = if ratio == 0 || threat == 0 {
+        pool.iter().map(|o| o.id).collect()
+    } else {
+        let mut order: Vec<(u64, EntityId, u64)> = pool
+            .iter()
+            .map(|o| {
+                (
+                    dist2(o.cell, at),
+                    o.id,
+                    u64::from(lens.unit_cost(o.kind).unwrap_or(0)),
+                )
+            })
+            .collect();
+        order.sort();
+        let mut sent = 0u64;
+        let mut ids = Vec::new();
+        for (_, id, cost) in order {
+            if sent * 1000 >= threat * ratio {
+                break;
+            }
+            sent += cost;
+            ids.push(id);
+        }
+        ids
+    };
+    chosen.sort();
+    chosen
+}
+
+/// The group that is the strike (`merge_into` none, out), as an index.
+fn strike_index(state: &AiState) -> Option<usize> {
+    state
+        .groups
+        .iter()
+        .position(|g| g.stage != GroupStage::Returning && g.merge_into.is_none())
+}
+
+/// Where a reinforcement for `strike` goes to meet it: the staging cell while the strike stages, else the
+/// middle cell of the strike's members.
+fn meeting_point(obs: &Observation, strike: &Group) -> Option<Cell> {
+    match (strike.stage, strike.staging) {
+        (GroupStage::Staging, Some(c)) => Some(c),
+        _ => mean_cell(obs, &strike.members),
+    }
+}
+
+/// Step (3): the attack trigger and the attack's end, the groups' stages, the reinforcement and its merge.
+/// Returns the survivors of an attack that ended, to be sent home.
 fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell) -> Vec<EntityId> {
     let now = obs.tick;
     clear_sites(state, obs, lens);
     let a = state.profile.army;
-    if !state.attackers.is_empty() {
+    let mut home: Vec<EntityId> = Vec::new();
+    if let Some(si) = strike_index(state)
+        && !state.groups[si].members.is_empty()
+    {
         let tgt = target(state, lens, gather);
-        // An attacker within `arrive_radius` of the target.
+        let strike_id = state.groups[si].id;
+        // The staging: the strike leaves its cell when enough of its members stand idle there, or when the
+        // patience is out.
+        if state.groups[si].stage == GroupStage::Staging {
+            let g = &state.groups[si];
+            let ready = match g.staging {
+                Some(cell) => {
+                    let idle_there = obs
+                        .own
+                        .iter()
+                        .filter(|o| g.members.binary_search(&o.id).is_ok())
+                        .filter(|o| {
+                            o.order == Order::Idle
+                                && cheb(o.cell, cell) <= u32::from(a.arrive_radius)
+                        })
+                        .count() as u64;
+                    idle_there * 1000 >= u64::from(a.stage_permille) * g.members.len() as u64
+                }
+                None => true,
+            };
+            if ready || now.0 >= g.since.0 + u64::from(a.stage_patience) {
+                let g = &mut state.groups[si];
+                g.stage = GroupStage::Advancing;
+                g.since = now;
+                state.attack_started = now;
+            }
+        }
+        // A member within `arrive_radius` of the target.
         let near = tgt.is_some_and(|t| {
             obs.own.iter().any(|o| {
-                state.attackers.binary_search(&o.id).is_ok()
+                state.groups[si].members.binary_search(&o.id).is_ok()
                     && cheb(o.cell, t) <= u32::from(a.arrive_radius)
             })
         });
@@ -397,66 +631,252 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
         if victim.is_some() {
             state.attack_started = now;
         }
-        state.target_hp = match (victim, state.target_hp) {
+        let old_hp = state.groups[si].target_hp;
+        state.groups[si].target_hp = match (victim, old_hp) {
             (Some((id, hp)), Some((old, seen, since))) if id == old && hp >= seen => {
                 Some((old, seen, since))
             }
             (Some((id, hp)), _) => Some((id, hp, now)),
             (None, _) => None,
         };
-        let stuck = state
+        let stuck = state.groups[si]
             .target_hp
             .is_some_and(|(_, _, since)| now.0 >= since.0 + u64::from(a.attack_patience));
         let patience_out = now.0 >= state.attack_started.0 + u64::from(a.attack_patience);
         if tgt.is_none() || patience_out || stuck {
-            let home = std::mem::take(&mut state.attackers);
-            end_attack(state);
-            return home;
+            home = state.groups[si].members.clone();
+            // A reinforcement on its way has nobody to join: it goes home too.
+            for g in &state.groups {
+                if g.stage != GroupStage::Returning && g.merge_into == Some(strike_id) {
+                    home.extend(g.members.iter().copied());
+                }
+            }
+            home.sort();
+            home.dedup();
+            return end_attack_with(state, now, gather, home);
         }
-        state.attack_target = tgt;
+        if let Some(t) = tgt {
+            let g = &mut state.groups[si];
+            g.goal = t;
+            let stage = if near {
+                GroupStage::Engaged
+            } else if g.stage == GroupStage::Staging {
+                GroupStage::Staging
+            } else {
+                GroupStage::Advancing
+            };
+            if stage != g.stage {
+                g.stage = stage;
+                g.since = now;
+            }
+        }
         if state.threat.is_none() {
             state.directive = Directive {
                 posture: Posture::Attack,
                 target: tgt,
             };
         }
-        return Vec::new();
+        reinforce(state, obs, lens, gather, strike_id, &mut home);
+        return homing(state, now, gather, home);
     }
-    if state.attack_target.is_some() {
-        // Every attacker is gone.
-        end_attack(state);
+    // No strike with units: a strike whose members are all gone ends, and so does a reinforcement for it.
+    if state
+        .groups
+        .iter()
+        .any(|g| g.stage != GroupStage::Returning)
+    {
+        for g in &state.groups {
+            if g.stage != GroupStage::Returning {
+                home.extend(g.members.iter().copied());
+            }
+        }
+        home.sort();
+        home.dedup();
+        home = end_attack_with(state, now, gather, home);
     }
     if state.threat.is_some() {
-        return Vec::new();
+        return home;
     }
     let ids = gathered(state, obs, lens, gather);
-    let value = value_of(obs, lens, &ids);
-    if !attack_due(state, now, value, ids.len()) {
-        return Vec::new();
+    draw_jitter(state);
+    let (go, _held) = hold_back(state, obs, lens, &ids);
+    let value = value_of(obs, lens, &go);
+    if !attack_due(state, now, value, go.len()) {
+        return home;
     }
     let Some(tgt) = target(state, lens, gather) else {
-        return Vec::new();
+        return home;
     };
-    state.attackers = ids;
-    state.attack_target = Some(tgt);
+    let staging = staging_cell(state, lens, gather, tgt);
+    let stage = if staging.is_some() {
+        GroupStage::Staging
+    } else {
+        GroupStage::Advancing
+    };
+    state.add_group(go, tgt, stage, now, value, staging, None);
     state.last_attack_tick = now;
     state.attack_started = now;
     state.attacks_launched += 1;
+    state.jitter = None;
     state.directive = Directive {
         posture: Posture::Attack,
         target: Some(tgt),
     };
-    Vec::new()
+    home
 }
 
+/// G3: the reinforcement of the strike `strike_id`. A group on its way to the strike merges into it when its
+/// middle cell is within `arrive_radius` of the meeting point ([`meeting_point`]); one that has nobody to
+/// meet goes home. When the strike is staging or marching, no reinforcement is out and nothing is defended,
+/// the gathered units that are no guard launch as one when they are worth `reinforce_value`.
+fn reinforce(
+    state: &mut AiState,
+    obs: &Observation,
+    lens: &Lens<'_>,
+    gather: Cell,
+    strike_id: u32,
+    home: &mut Vec<EntityId>,
+) {
+    let now = obs.tick;
+    let arrive = u32::from(state.profile.army.arrive_radius);
+    let Some(si) = state.groups.iter().position(|g| g.id == strike_id) else {
+        return;
+    };
+    let meet = meeting_point(obs, &state.groups[si]);
+    let mut merged: Vec<EntityId> = Vec::new();
+    let mut value = 0u64;
+    let mut i = 0;
+    while i < state.groups.len() {
+        if state.groups[i].merge_into != Some(strike_id)
+            || state.groups[i].stage == GroupStage::Returning
+        {
+            i += 1;
+            continue;
+        }
+        let Some(meet) = meet else {
+            home.extend(state.groups[i].members.iter().copied());
+            state.groups.remove(i);
+            continue;
+        };
+        state.groups[i].goal = meet;
+        let there =
+            mean_cell(obs, &state.groups[i].members).is_some_and(|c| cheb(c, meet) <= arrive);
+        if there {
+            let g = state.groups.remove(i);
+            merged.extend(g.members);
+            value += g.launch_value;
+        } else {
+            i += 1;
+        }
+    }
+    let si = state
+        .groups
+        .iter()
+        .position(|g| g.id == strike_id)
+        .unwrap_or(0);
+    if !merged.is_empty() {
+        let g = &mut state.groups[si];
+        g.members.extend(merged);
+        g.members.sort();
+        g.members.dedup();
+        g.launch_value += value;
+    }
+    home.sort();
+    home.dedup();
+    let on_the_way = matches!(
+        state.groups[si].stage,
+        GroupStage::Staging | GroupStage::Advancing
+    );
+    let reinforce_value = u64::from(state.profile.army.reinforce_value);
+    if reinforce_value == 0
+        || !on_the_way
+        || state.threat.is_some()
+        || state.groups.len() >= GROUPS_MAX
+        || state.groups.iter().any(|g| g.merge_into.is_some())
+    {
+        return;
+    }
+    let Some(meet) = meeting_point(obs, &state.groups[si]) else {
+        return;
+    };
+    let ids = gathered(state, obs, lens, gather);
+    let (go, _held) = hold_back(state, obs, lens, &ids);
+    let value = value_of(obs, lens, &go);
+    if go.is_empty() || value < reinforce_value {
+        return;
+    }
+    state.add_group(
+        go,
+        meet,
+        GroupStage::Advancing,
+        now,
+        value,
+        None,
+        Some(strike_id),
+    );
+}
+
+/// The strike ends: every group out is dissolved (a group called back stays until the threat is over).
 fn end_attack(state: &mut AiState) {
-    state.attackers.clear();
-    state.attack_target = None;
-    state.target_hp = None;
-    state.closing.clear();
+    state.groups.retain(|g| g.stage == GroupStage::Returning);
     if state.threat.is_none() {
         state.directive = Directive::default();
     }
+}
+
+/// The end of an attack with its survivors `home` (ascending). With the WP9.2a rules off they are returned to
+/// get one `Move` home this turn, as before. With them on they go into a Returning group whose `recalled`
+/// list is everyone still to be sent home, so none of them keeps marching on the old target when the budget
+/// or the chunk size leaves some unsent (fix round 1 of WP9.2a); the returned list is then empty.
+fn end_attack_with(
+    state: &mut AiState,
+    now: sf_sim::Tick,
+    gather: Cell,
+    home: Vec<EntityId>,
+) -> Vec<EntityId> {
+    end_attack(state);
+    homing(state, now, gather, home)
+}
+
+/// With the WP9.2a rules on, puts `home` (ascending) in a Returning group whose `recalled` list is who still
+/// has to be sent home, and returns nothing; with them off returns `home` unchanged. At [`GROUPS_MAX`] groups
+/// the units join the last Returning group instead of making one.
+fn homing(
+    state: &mut AiState,
+    now: sf_sim::Tick,
+    gather: Cell,
+    home: Vec<EntityId>,
+) -> Vec<EntityId> {
+    if !state.profile.army.groups_on() || home.is_empty() {
+        return home;
+    }
+    let existing = state
+        .groups
+        .iter()
+        .rposition(|g| g.stage == GroupStage::Returning);
+    let gi = match existing {
+        Some(i) if state.groups.len() >= GROUPS_MAX => i,
+        _ => {
+            let id = state.add_group(
+                Vec::new(),
+                gather,
+                GroupStage::Returning,
+                now,
+                0,
+                None,
+                None,
+            );
+            state.groups.iter().position(|g| g.id == id).unwrap_or(0)
+        }
+    };
+    let g = &mut state.groups[gi];
+    g.members.extend(home.iter().copied());
+    g.members.sort();
+    g.members.dedup();
+    g.recalled.extend(home);
+    g.recalled.sort();
+    g.recalled.dedup();
+    Vec::new()
 }
 
 /// Whether `o` may be given an order now: `Idle` and not ordered within `resend_ticks`, or on a `Move` and not
@@ -481,12 +901,14 @@ fn resent_ok(state: &AiState, o: &Own, now: sf_sim::Tick) -> bool {
         .is_none_or(|&(t, _)| now.0 >= t.0 + resend)
 }
 
-/// Step (4): the directive turned into orders, at most `budget` commands: the defence (`AttackMove` to the
-/// threat cell for the units at home), the march (`AttackMove` to the target for idle attackers away from it),
-/// the finishing `Attack` (idle attackers at the target, on a visible enemy structure: [`finishing_target`]),
-/// the survivors of an attack that ended (`home`, `Move` to the gather cell), then the gathering while nothing
-/// is defended. One command each (the gathering up to [`GATHER_COMMANDS_PER_TURN`]), many ids in it.
-pub fn operations_minimal(
+/// Step (4): the groups and the threat turned into orders, at most `budget` commands: the defence (`AttackMove`
+/// to the threat cell for the units at home that [`defenders`] picks), then for each group out the staging
+/// (`AttackMove` to the staging cell), the march (`AttackMove` to the goal for idle members away from it) and
+/// the finishing `Attack` (idle members at the target, on a visible enemy structure: [`finishing_target`]),
+/// the survivors of an attack that ended (`home`, `Move` to the gather cell), then the gathering while
+/// nothing is defended. A command carries at most `gather_group` ids (a longer list is several commands, and
+/// what the budget leaves unsent goes at the next turn); the gathering up to [`GATHER_COMMANDS_PER_TURN`].
+pub fn operations(
     state: &mut AiState,
     obs: &Observation,
     lens: &Lens<'_>,
@@ -497,54 +919,94 @@ pub fn operations_minimal(
 ) {
     let now = obs.tick;
     let arrive = u32::from(state.profile.army.arrive_radius);
+    let on = state.profile.army.groups_on();
+    // Chunking is a rule of WP9.2a: with its numbers off a list goes as one command, as before.
+    let chunk = if on {
+        usize::from(state.profile.army.gather_group).max(1)
+    } else {
+        usize::MAX
+    };
     let mut left = budget;
-    let mut send =
-        |state: &mut AiState, out: &mut Vec<Command>, ids: Vec<EntityId>, order: Order| {
-            if ids.is_empty() || left == 0 {
-                return;
+    // Sends `order` to `ids` in commands of at most `chunk` ids while the budget lasts; returns the ids sent.
+    let mut send = |state: &mut AiState,
+                    out: &mut Vec<Command>,
+                    ids: Vec<EntityId>,
+                    order: Order|
+     -> Vec<EntityId> {
+        let mut sent = Vec::new();
+        for part in ids.chunks(chunk) {
+            if left == 0 {
+                break;
             }
             left -= 1;
-            for id in &ids {
+            for id in part {
                 let n = state.sent.get(id).map_or(0, |&(_, n)| n);
                 state.sent.insert(*id, (now, n));
             }
+            sent.extend_from_slice(part);
             out.push(Command::Order {
-                ids,
+                ids: part.to_vec(),
                 order,
                 queued: false,
             });
-        };
-    // The defence: every army unit at home.
+        }
+        sent
+    };
+    // The defence: the units at home (those in no group out; a group called back counts as home).
     if let Some((cell, _)) = state.threat {
-        let ids: Vec<EntityId> = obs
+        let pool: Vec<&Own> = obs
             .own
             .iter()
-            .filter(|o| {
-                is_army(state.scout, lens, o) && state.attackers.binary_search(&o.id).is_err()
-            })
+            .filter(|o| is_army(state.scout, lens, o) && !state.in_field(o.id))
+            .collect();
+        let chosen = defenders(state, obs, lens, cell, &pool);
+        let recalled_now = |id: EntityId| {
+            state
+                .groups
+                .iter()
+                .any(|g| g.recalled.binary_search(&id).is_ok())
+        };
+        let ids: Vec<EntityId> = pool
+            .iter()
+            .filter(|o| chosen.binary_search(&o.id).is_ok() || recalled_now(o.id))
             .filter(|o| !(o.order == Order::Idle && cheb(o.cell, cell) <= arrive))
             .filter(|o| {
                 orderable(state, o, now, state.defend_since)
-                    || (state.recalled.binary_search(&o.id).is_ok() && resent_ok(state, o, now))
+                    || (recalled_now(o.id) && resent_ok(state, o, now))
             })
             .map(|o| o.id)
             .collect();
-        let before = out.len();
-        send(state, out, ids.clone(), Order::AttackMove(middle(cell)));
-        if out.len() > before {
-            state.recalled.retain(|id| ids.binary_search(id).is_err());
+        let sent = send(state, out, ids, Order::AttackMove(middle(cell)));
+        for g in &mut state.groups {
+            g.recalled.retain(|id| !sent.contains(id));
         }
     }
-    // The attack: march, then finish.
-    if let Some(t) = state.attack_target
-        && !state.attackers.is_empty()
-    {
+    // The groups out: stage, march, finish.
+    for gi in 0..state.groups.len() {
+        let g = state.groups[gi].clone();
+        if g.stage == GroupStage::Returning || g.members.is_empty() {
+            continue;
+        }
+        if g.stage == GroupStage::Staging
+            && let Some(cell) = g.staging
+        {
+            let ids: Vec<EntityId> = obs
+                .own
+                .iter()
+                .filter(|o| g.members.binary_search(&o.id).is_ok())
+                .filter(|o| orderable(state, o, now, None) && cheb(o.cell, cell) > arrive)
+                .map(|o| o.id)
+                .collect();
+            send(state, out, ids, Order::AttackMove(middle(cell)));
+            continue;
+        }
+        let t = g.goal;
         let mut march = Vec::new();
         let mut arrived = Vec::new();
         for o in obs
             .own
             .iter()
-            .filter(|o| state.attackers.binary_search(&o.id).is_ok())
+            .filter(|o| g.members.binary_search(&o.id).is_ok())
         {
             if !orderable(state, o, now, None) {
                 continue;
@@ -556,27 +1018,46 @@ pub fn operations_minimal(
             }
         }
         send(state, out, march, Order::AttackMove(middle(t)));
-        if !arrived.is_empty() {
-            if let Some(victim) = finishing_target(state, obs, lens, t) {
-                send(state, out, arrived, Order::Attack(victim));
-            } else if let Some(centre) = target_centre(state, lens, gather) {
-                // Fix round 2: nothing in sight from where they stand: one `AttackMove` onto the middle of the
-                // target structure (or start site), once per attacker per attack, so they close in and see it.
-                let ids: Vec<EntityId> = arrived
-                    .into_iter()
-                    .filter(|id| state.closing.binary_search(id).is_err())
-                    .collect();
-                let before = out.len();
-                send(state, out, ids.clone(), Order::AttackMove(middle(centre)));
-                if out.len() > before {
-                    state.closing.extend(ids);
-                    state.closing.sort();
-                }
-            }
+        // A reinforcement only walks to the strike; the merge makes its members part of it.
+        if g.merge_into.is_some() || arrived.is_empty() {
+            continue;
+        }
+        if let Some(victim) = finishing_target(state, obs, lens, t) {
+            send(state, out, arrived, Order::Attack(victim));
+        } else if let Some(centre) = target_centre(state, lens, gather) {
+            // Fix round 2: nothing in sight from where they stand: one `AttackMove` onto the middle of the
+            // target structure (or start site), once per member per attack, so they close in and see it.
+            let ids: Vec<EntityId> = arrived
+                .into_iter()
+                .filter(|id| g.closing.binary_search(id).is_err())
+                .collect();
+            let sent = send(state, out, ids, Order::AttackMove(middle(centre)));
+            let group = &mut state.groups[gi];
+            group.closing.extend(sent);
+            group.closing.sort();
         }
     }
-    // The survivors of an attack that ended.
-    send(state, out, home.to_vec(), Order::Move(middle(gather)));
+    // The survivors of an attack that ended. With the WP9.2a rules on, `decide` keeps them in a Returning group
+    // whose `recalled` list is who still has to be sent home (over several turns when the budget or the
+    // chunk size asks for it): without a threat they get the `Move` home here; a group with nobody left to
+    // send is dissolved.
+    if on {
+        if state.threat.is_none() {
+            for gi in 0..state.groups.len() {
+                if state.groups[gi].stage != GroupStage::Returning {
+                    continue;
+                }
+                let ids = state.groups[gi].recalled.clone();
+                let sent = send(state, out, ids, Order::Move(middle(gather)));
+                state.groups[gi].recalled.retain(|id| !sent.contains(id));
+            }
+            state
+                .groups
+                .retain(|g| g.stage != GroupStage::Returning || !g.recalled.is_empty());
+        }
+    } else {
+        send(state, out, home.to_vec(), Order::Move(middle(gather)));
+    }
     // The gathering, while nothing is defended.
     if state.threat.is_none() {
         gather_units(
@@ -877,11 +1358,16 @@ fn gather_units(
     );
     let scout = state.scout;
     let mut to_send = Vec::new();
-    for o in obs.own.iter().filter(|o| {
-        is_army(scout, lens, o)
-            && state.attackers.binary_search(&o.id).is_err()
-            && home.binary_search(&o.id).is_err()
-    }) {
+    let free: Vec<&Own> = obs
+        .own
+        .iter()
+        .filter(|o| {
+            is_army(scout, lens, o)
+                && !in_a_group(state, o.id)
+                && home.binary_search(&o.id).is_err()
+        })
+        .collect();
+    for o in free {
         if cheb(o.cell, gather) <= radius {
             state.sent.remove(&o.id);
             continue;

@@ -15,7 +15,8 @@ use sf_data::units::Faction;
 use sf_headless::cli::{EXIT_INVALID, EXIT_OK, run_cli};
 use sf_headless::tournament::{
     Ending, GAME_SPEED_RAW, GameRecord, Report, STALEMATE_WINDOW, factions_for, load_setup,
-    play_game, play_seeded, prepare, render_table, run_games, seeds_for,
+    play_game, play_seeded, prepare, prepare_sited, render_table, run_games, seeds_for,
+    sites_swapped,
 };
 
 /// The cap of the smoke games, in ticks. The AIs have built by then, but since WP9.1c-3's opening no attack has
@@ -386,5 +387,40 @@ fn a_bad_command_line_or_match_exits_two() {
         String::from_utf8(out)
             .unwrap()
             .contains("sf_headless tournament <match.ron>")
+    );
+}
+
+/// The site swap reaches the world: whoever owns the construction centre on the south-west site (12, 68) in
+/// game `k` does not own it in game `k + 4`, and the faction on that site changes with it (WP9.2a fix round,
+/// the 8-cycle). Pins the cycle on the shipped duel.
+#[test]
+fn the_start_sites_swap_in_the_world_every_four_games() {
+    let setup = load_setup(&assets(), &duel_path()).unwrap();
+    let file = setup.file_factions();
+    let owner_sw = |index: u32| {
+        let p = prepare_sited(
+            &setup,
+            factions_for(file, index),
+            sites_swapped(index),
+            1,
+            2,
+        )
+        .unwrap();
+        let id = p.world.occupant_at(sf_sim::Cell::new(12, 68)).unwrap();
+        p.world.get(id).unwrap().owner
+    };
+    for k in 0..4 {
+        let (a, b) = (owner_sw(k), owner_sw(k + 4));
+        assert_eq!(a.0, 0, "game {k}: seat 0 starts on the south-west site");
+        assert_ne!(a, b, "game {k} and {}: the site changes hands", k + 4);
+        assert_eq!(owner_sw(k + 8), a, "game {}", k + 8);
+    }
+    // A played game records the swap.
+    let r = play_game(&setup, 1, 5, 50, STALEMATE_WINDOW).unwrap();
+    assert!(r.sites_swapped);
+    assert!(
+        !play_game(&setup, 1, 1, 50, STALEMATE_WINDOW)
+            .unwrap()
+            .sites_swapped
     );
 }

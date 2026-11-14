@@ -1,0 +1,137 @@
+// FROZEN VARIANT (WP9.2a, for the scenario `ai_raid_guard`) of the shipped `assets/ai/normal.ron`, not a copy of it: it differs in
+// the attack timing, shortened so that the army that stands at home at the start marches at once: `attack_value` 800,
+// `first_attack_tick` 100, and the numbers of WP9.2a with the guard ON (guard 250, staging 14 with patience 600, reinforcement 1000, defence 1500), where the shipped profile has guard 0 and patience 1800 (docs/rules/ai.md "Groups").
+// The goal list is the power plant and the barracks the match gives the AI, so it builds nothing and the gather cell stays free (the unit mix
+// is riflemen: the barracks is all it has).
+// Editing the shipped profile never moves this scenario.
+//
+// The computer opponent's profile "normal" (WP9.1a, docs/rules/ai.md). Read and checked by
+// sf_data::ai_profile against unit_defs.ron; sf_ai::Profile turns the roles into kinds. Every number is a
+// placeholder (design memo 10-11-2026) that WP9.1b and WP9.1c tune against measured matches. Acting since
+// WP9.1b-1 (the base): the schedule numbers, power_margin, max_parallel_builds, silo_percent (the most a
+// build saves up), blocked_ticks, placement_cap, lane and the two aprons; the others from WP9.1b-2 and WP9.1c.
+//
+// The build order is a goal list: (role, count) means "have at least `count` of the role". The AI walks the
+// list from the top and builds the first entry it does not satisfy, so the order is the opening, the tech
+// choice and the rebuild order at once. An entry whose prerequisite (`requires` in unit_defs.ron) is not
+// earlier in the list is refused. The shipyard and vessels are out of this profile; the ore silo is a rule
+// of the economy (`silo_percent`), not a list entry.
+(
+    name: "normal",
+    // A think runs every `think_interval` ticks: when (tick + stagger * player) % interval == 0, so two
+    // players never think on the same tick (checked: interval / gcd(interval, stagger) >= 8 players).
+    think_interval: 10,
+    stagger: 3,
+    economy: (
+        // Spare power kept above what the structures use before the next one starts.
+        power_margin: 20,
+        harvesters_per_refinery: 2,
+        // Credits kept back before units are queued while a structure goal is open.
+        reserve: 300,
+        max_parallel_builds: 1,
+        // Build a silo when the ore store is at least this many percent full.
+        silo_percent: 90,
+        // Repair a structure below this many percent of its hit points.
+        repair_below_percent: 70,
+        // A role with no place found is skipped for this many ticks.
+        blocked_ticks: 600,
+        // The most placement previews one think may ask for. 32 since WP9.1b-1 (was 256): a think whose every
+        // preview fails, with 5,000 entities on the map, took 2.4 to 4.9 ms at 256 and 0.36 to 0.82 ms at 32
+        // (tools/sf_headless/tests/ai_perf.rs), and a think may take 1 ms.
+        placement_cap: 32,
+        // Free cells kept between a new structure and every own structure (traffic between them).
+        lane: 1,
+        // Cells in front of the exit kept free of structures, (width centred on the exit cell, depth out
+        // from the side): a refinery's harvesters park 4 cells out, a factory's units come out one by one.
+        refinery_apron: (3, 5),
+        factory_apron: (1, 3),
+        // WP9.1c-1: the most items kept in one factory's queue (the one being built included).
+        max_queue: 2,
+    ),
+    army: (
+        // Attack when the army's value (sum of unit costs) reaches this ...
+        // (WP9.1c-3: 2000, was 3000: equal to `army_floor_value`, so the first wave leaves as soon as the floor's worth of units
+        // stands gathered, in every seat; `max_wait` is then the fallback. Measured, docs/rules/ai.md "The opening".)
+        attack_value: 800,
+        // ... or after this many ticks since the last attack with at least `min_units` units ...
+        // (WP9.1c-3: 12000, was 6000. The vehicle factory now comes second in the goal list, so the army floor (2,000) is
+        // reached at about 10,700 in `ai_vs_passive` and 9,400 in `m1_ai`, and the first wave leaves on `attack_value` (11,150
+        // and 9,717). `max_wait` ends the floor and is the fallback: a wave that leaves on `max_wait` alone carries 2,000
+        // only from 12,000 on (1,900 at 11,000, 1,200 at 10,000). Measured, docs/rules/ai.md "The opening".)
+        max_wait: 12000,
+        min_units: 4,
+        // ... but never before this tick.
+        first_attack_tick: 100,
+        // How long the army defends after a structure was hit (WP9.1c-2: 400, was 200: ten army turns, as the
+        // army may still be walking after five; decision of 12-11-2026).
+        defend_ticks: 400,
+        // Cells from the base towards the map centre where the army gathers (WP9.1c-1: 10, was 6: the anchor is
+        // 4 x 4 and the build radius 8, so 6 lies inside the base).
+        gather_distance: 10,
+        // WP9.1c-1: a unit within this many cells (Chebyshev) of the gather cell has arrived.
+        gather_radius: 8,
+        // The most units one gather order carries (the largest formation of the simulation settings).
+        gather_group: 19,
+        // Gather orders a unit gets without arriving before it is left where it is.
+        gather_tries: 3,
+        // A unit is not ordered again within this many ticks.
+        resend_ticks: 120,
+        // The scout: bought from tick `scout_tick` (the first unit made), a replacement `scout_retry` ticks after
+        // the last was lost, at most `scouts_max` in a match; it goes on to the next waypoint after
+        // `scout_patience` ticks.
+        scouts_max: 2,
+        scout_tick: 600,
+        scout_patience: 1200,
+        scout_retry: 3000,
+        // WP9.1c-2: an attacker within this many cells of its target has arrived and is given the finishing
+        // Attack on a visible enemy structure.
+        arrive_radius: 6,
+        // WP9.1c-2: an attack ends after this many ticks with no attacker within arrive_radius of its target.
+        attack_patience: 2400,
+        // WP9.1c-2, the army floor (decision of 12-11-2026): below this army value (unit costs) production holds
+        // back only the reserve, while no attack has gone out yet or the army defends. (2000, measured on
+        // `ai_vs_passive`; the start value 1000 wins at 26,387, docs/rules/ai.md "The army floor".)
+        army_floor_value: 2000,
+        // WP9.2a (docs/rules/ai.md "Groups"; the numbers of the design memo of 12-11-2026, the jitter by measurement).
+        // G1, the home guard: a quarter of the gathered value stays home at a launch, the highest ids first.
+        home_guard_permille: 250,
+        // G2, staging: the strike first goes to a cell 14 cells short of the target, and leaves it when 70 percent of its
+        // living members stand idle within `arrive_radius` of it, or after 600 ticks.
+        stage_distance: 14,
+        stage_permille: 700,
+        stage_patience: 600,
+        // G3, reinforcement: units at home worth half an attack (`attack_value` / 2) follow the strike as a second group.
+        reinforce_value: 1000,
+        // G4, partial defence: a threat gets units worth 1.5 times the armed enemy units seen near it, nearest first.
+        defend_ratio_permille: 1500,
+        // Timing jitter (decision of 13-11-2026): the permille `attack_value` and `max_wait` of a launch may deviate by.
+        timing_jitter_permille: 0,
+    ),
+    factions: [
+        (
+            faction: Meridian,
+            // WP9.1c-3, the opening: the vehicle factory (and with it the second harvester) comes right after the
+            // refinery, before the barracks. One harvester earns about 0.27 credits per tick, so every 100 credits
+            // spent before the second harvester costs it about 370 ticks. Cost: no barracks before about tick 2,900
+            // and the first unit queued at 4,460, existing at 4,621 (docs/rules/ai.md "The opening").
+            // The second refinery comes before the first tower (WP9.1c-3: measured, the list completes earlier and the floor is
+            // reached sooner, docs/rules/ai.md "The opening").
+            build_order: [
+                ("power_plant", 1),
+                ("barracks", 1),
+            ],
+            // (role, weight): the share of the army each role aims at.
+            unit_mix: [("rifleman", 1)],
+            scout: Some("scout"),
+        ),
+        (
+            faction: Veyran,
+            build_order: [
+                ("power_plant", 1),
+                ("barracks", 1),
+            ],
+            unit_mix: [("rifleman", 1)],
+            scout: Some("scout"),
+        ),
+    ],
+)

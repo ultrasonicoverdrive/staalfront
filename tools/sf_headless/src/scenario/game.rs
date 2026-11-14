@@ -95,10 +95,12 @@ impl LoadedGame {
     /// The same match with the players given other factions (`factions[i]` for the i-th player of the file)
     /// and the starting commands made again for them: the seat swap of the tournament. The objects stay
     /// where the file puts them (a faction sits on a start site), so the roles must exist for the new
-    /// faction; the match is checked again against the definitions.
+    /// faction; the match is checked again against the definitions. With `swap_sites`
+    /// the two players start on each other's site (their `objects` lists are swapped).
     pub(crate) fn with_factions(
         &self,
         factions: &[sf_data::units::Faction],
+        swap_sites: bool,
         cells: (u32, u32),
     ) -> Result<LoadedGame, String> {
         let mut def = self.def.clone();
@@ -111,6 +113,11 @@ impl LoadedGame {
         }
         for (player, faction) in def.players.iter_mut().zip(factions) {
             player.faction = *faction;
+        }
+        // A tournament plays every seat from both start sites: swap what the two players start with.
+        if swap_sites && def.players.len() == 2 {
+            let first = std::mem::take(&mut def.players[0].objects);
+            def.players[0].objects = std::mem::replace(&mut def.players[1].objects, first);
         }
         def.check(&self.defs, cells).map_err(|e| e.to_string())?;
         let commands = sf_bridge::match_commands(&def, &self.defs)?;

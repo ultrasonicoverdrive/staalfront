@@ -148,6 +148,7 @@ fn record(
         ai_seed: u64::from(index) + 100,
         factions,
         ai_factions: factions,
+        sites_swapped: sites_swapped(index),
         ending,
         defeat_tick: ending.decided().then_some(ticks),
         ticks,
@@ -158,11 +159,15 @@ fn record(
                 player: 0,
                 digest: 1,
                 attacks: 2,
+                commands: 0,
+                profile: String::new(),
             },
             AiRecord {
                 player: 1,
                 digest: 3,
                 attacks: 4,
+                commands: 0,
+                profile: String::new(),
             },
         ],
     }
@@ -185,6 +190,9 @@ fn the_summary_counts_wins_draws_durations_and_distinct_checksums() {
     assert_eq!(s.games, 6);
     // Seat 0 won games 0 and 1, seat 1 won game 2.
     assert_eq!(s.seat_wins, [2, 1]);
+    // Games 0 to 3 are on the file's sites, 4 and 5 swapped (draws), so the sites match the seats.
+    assert_eq!(s.site_wins, [2, 1]);
+    assert_eq!(s.site_games, [4, 2]);
     assert_eq!((s.mutual, s.stalemates, s.capped), (1, 1, 1));
     assert_eq!(s.draws(), 3);
     // Faction rows: only the four games between different factions (0, 1, 4, 5). Game 0: M won (seat 0).
@@ -527,4 +535,23 @@ fn the_asset_directory_is_two_levels_above_the_match_file_unless_given() {
     let a = args(&["m1_duel.ron", "--assets", "elsewhere"]);
     assert_eq!(assets_for(&a).unwrap(), PathBuf::from("elsewhere"));
     assert!(assets_for(&args(&["m1_duel.ron"])).is_err());
+}
+
+#[test]
+fn the_sites_swap_in_the_second_half_of_an_8_cycle() {
+    let swapped: Vec<bool> = (0..8).map(sites_swapped).collect();
+    assert_eq!(
+        swapped,
+        [false, false, false, false, true, true, true, true]
+    );
+    for i in 0..64 {
+        assert_eq!(sites_swapped(i + 8), sites_swapped(i));
+        assert_ne!(sites_swapped(i + 4), sites_swapped(i));
+        // Game k and k + 4 have the same factions on the seats and opposite sites.
+        assert_eq!(factions_for([M, V], i + 4), factions_for([M, V], i));
+    }
+    // A win counts for the site the winner stood on.
+    let mut r = record(4, [M, V], Ending::Won(0), 9000, 1);
+    r.sites_swapped = true;
+    assert_eq!(summarize(&[r]).site_wins, [0, 1]);
 }

@@ -35,7 +35,7 @@ pub struct Known {
 }
 
 /// What the army manager wants the army to do (`docs/rules/ai.md`, "The army"): written by the army rules
-/// (threat, timing, target) and turned into orders by `army::operations_minimal`, the seam that WP9.2 replaces.
+/// (threat, timing, target) and turned into orders by `army::operations` together with the groups.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Directive {
     /// What the army does.
@@ -56,6 +56,67 @@ pub enum Posture {
     /// WP9.1c-2: a structure was hit; the units at home go there.
     Defend = 2,
 }
+
+/// What a group of the army is for. The numbers are hashed, so they are permanent. WP9.2a has the strike only;
+/// the raid of WP9.3b is the next number.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum GroupRole {
+    /// A wave that goes for the target of the attack (rule A5).
+    #[default]
+    Strike = 0,
+}
+
+/// Where a group is in its operation. The numbers are hashed, so they are permanent.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum GroupStage {
+    /// Walking to, or waiting at, the staging cell.
+    #[default]
+    Staging = 0,
+    /// Marching on its goal.
+    Advancing = 1,
+    /// A member is within `arrive_radius` of the goal.
+    Engaged = 2,
+    /// Called back by a hit on the construction centre: the members defend, and the group is dissolved when
+    /// the threat is over.
+    Returning = 3,
+}
+
+/// A group of army units on an operation (WP9.2a, `docs/rules/ai.md`, "Groups"). The army units that are in
+/// no group are the home.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Group {
+    /// The number of the group: from 0, ascending in the order the groups were made, never reused.
+    pub id: u32,
+    /// What it is for.
+    pub role: GroupRole,
+    /// Its units, ascending by id; pruned to the live ones every army turn.
+    pub members: Vec<EntityId>,
+    /// The target cell of its operation (rule A5), worked out again every army turn; for a reinforcement the
+    /// cell it is marching to meet the strike at.
+    pub goal: Cell,
+    /// Where it is.
+    pub stage: GroupStage,
+    /// The tick it entered `stage`.
+    pub since: Tick,
+    /// What its members were worth when it went out (unit costs).
+    pub launch_value: u64,
+    /// The staging cell, fixed when the group went out; `None` without staging.
+    pub staging: Option<Cell>,
+    /// The group this one is a reinforcement for, until it merges into it.
+    pub merge_into: Option<u32>,
+    /// The structure the members at the target finish, its hit points when last seen to drop and that tick;
+    /// the operation ends when they have not dropped for `attack_patience`.
+    pub target_hp: Option<(EntityId, u32, Tick)>,
+    /// Members called back by a hit on the construction centre that have not had the defence order yet,
+    /// ascending; they get it whatever their order is.
+    pub recalled: Vec<EntityId>,
+    /// Members at the target that saw no enemy structure and got the one `AttackMove` onto the middle of the
+    /// target structure (or start site) of this operation, ascending.
+    pub closing: Vec<EntityId>,
+}
+
+/// The most groups at one time.
+pub const GROUPS_MAX: usize = 4;
 
 /// An own structure as the threat rule last saw it: `(kind, anchor cell, hit points)`.
 pub type HpSeen = (Kind, Cell, u32);
@@ -147,26 +208,20 @@ pub struct AiState {
     pub defend_since: Option<Tick>,
     /// What the army does now (above).
     pub directive: Directive,
-    /// The units sent on the attack going on, ascending by id; pruned to the live ones every army turn.
-    pub attackers: Vec<EntityId>,
-    /// The target cell of the attack going on.
-    pub attack_target: Option<Cell>,
+    /// WP9.2a: the groups out, ascending by id, at most [`GROUPS_MAX`] (replaces the single wave of WP9.1c-2).
+    pub groups: Vec<Group>,
+    /// The id the next group gets.
+    pub next_group: u32,
     /// The tick the last attack went out (0 before the first).
     pub last_attack_tick: Tick,
-    /// The tick the attack going on went out, or the last army turn an attacker stood within `arrive_radius`
-    /// of its target: `attack_patience` counts from here.
+    /// The tick the strike went out, or the last army turn a member of it stood within `arrive_radius` of its
+    /// target: `attack_patience` counts from here (fix round 2 of WP9.1c-2).
     pub attack_started: Tick,
     /// How many attacks went out in the match.
     pub attacks_launched: u32,
-    /// Fix round 1: the structure the attackers at the target finish, its hit points when last seen to drop
-    /// and that tick; the attack ends when they have not dropped for `attack_patience`.
-    pub target_hp: Option<(EntityId, u32, Tick)>,
-    /// Fix round 1: former attackers called back by a hit on the construction centre that have not had the
-    /// defence order yet, ascending; they get it whatever their order is.
-    pub recalled: Vec<EntityId>,
-    /// Fix round 2: attackers at the target that saw no enemy structure and got the one `AttackMove` onto the
-    /// middle of the target structure (or start site) of this attack, ascending; cleared when the attack ends.
-    pub closing: Vec<EntityId>,
+    /// WP9.2a, the timing jitter: the permille drawn (minus to plus `timing_jitter_permille`) for the launch
+    /// that comes next; `None` until the first army turn that needs it, and again after every launch.
+    pub jitter: Option<i32>,
     /// The other players whose start site the AI has seen empty (no construction centre on its cell),
     /// ascending.
     pub sites_cleared: Vec<PlayerId>,
@@ -241,14 +296,12 @@ impl AiState {
             threat: None,
             defend_since: None,
             directive: Directive::default(),
-            attackers: Vec::new(),
-            attack_target: None,
+            groups: Vec::new(),
+            next_group: 0,
             last_attack_tick: Tick(0),
             attack_started: Tick(0),
             attacks_launched: 0,
-            target_hp: None,
-            recalled: Vec::new(),
-            closing: Vec::new(),
+            jitter: None,
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
         }
@@ -422,16 +475,20 @@ impl AiState {
         write_tick(&mut h, self.defend_since);
         h.write_u8(self.directive.posture as u8);
         write_cell(&mut h, self.directive.target);
-        h.write_u32(self.attackers.len() as u32);
-        for id in &self.attackers {
+        // The wave of WP9.1c-2, in its old layout, as the groups show it: a profile with no number of WP9.2a
+        // set has at most one group and hashes as before.
+        let attackers = self.attackers();
+        h.write_u32(attackers.len() as u32);
+        for id in &attackers {
             h.write_u32(id.index());
             h.write_u32(id.generation());
         }
-        write_cell(&mut h, self.attack_target);
+        let strike = self.strike();
+        write_cell(&mut h, strike.map(|g| g.goal));
         h.write_u64(self.last_attack_tick.0);
         h.write_u64(self.attack_started.0);
         h.write_u32(self.attacks_launched);
-        match self.target_hp {
+        match strike.and_then(|g| g.target_hp) {
             Some((id, hp, t)) => {
                 h.write_u8(1);
                 h.write_u32(id.index());
@@ -441,13 +498,15 @@ impl AiState {
             }
             None => h.write_u8(0),
         }
-        h.write_u32(self.recalled.len() as u32);
-        for id in &self.recalled {
+        let recalled = self.union_of(|g| &g.recalled, true);
+        h.write_u32(recalled.len() as u32);
+        for id in &recalled {
             h.write_u32(id.index());
             h.write_u32(id.generation());
         }
-        h.write_u32(self.closing.len() as u32);
-        for id in &self.closing {
+        let closing = self.union_of(|g| &g.closing, false);
+        h.write_u32(closing.len() as u32);
+        for id in &closing {
             h.write_u32(id.index());
             h.write_u32(id.generation());
         }
@@ -462,7 +521,138 @@ impl AiState {
             h.write_u64(tick.0);
             h.write_u8(*tries);
         }
+        // WP9.2a: the whole of every group and the jitter, only for a profile with a number of WP9.2a set.
+        if self.profile.army.groups_on() {
+            h.write_u8(0x92);
+            h.write_u32(self.next_group);
+            match self.jitter {
+                Some(j) => {
+                    h.write_u8(1);
+                    h.write_i32(j);
+                }
+                None => h.write_u8(0),
+            }
+            h.write_u32(self.groups.len() as u32);
+            for g in &self.groups {
+                h.write_u32(g.id);
+                h.write_u8(g.role as u8);
+                h.write_u32(g.members.len() as u32);
+                for id in &g.members {
+                    h.write_u32(id.index());
+                    h.write_u32(id.generation());
+                }
+                h.write_u32(g.goal.x);
+                h.write_u32(g.goal.y);
+                h.write_u8(g.stage as u8);
+                h.write_u64(g.since.0);
+                h.write_u64(g.launch_value);
+                write_cell(&mut h, g.staging);
+                match g.merge_into {
+                    Some(id) => {
+                        h.write_u8(1);
+                        h.write_u32(id);
+                    }
+                    None => h.write_u8(0),
+                }
+                match g.target_hp {
+                    Some((id, hp, t)) => {
+                        h.write_u8(1);
+                        h.write_u32(id.index());
+                        h.write_u32(id.generation());
+                        h.write_u32(hp);
+                        h.write_u64(t.0);
+                    }
+                    None => h.write_u8(0),
+                }
+                for list in [&g.recalled, &g.closing] {
+                    h.write_u32(list.len() as u32);
+                    for id in list {
+                        h.write_u32(id.index());
+                        h.write_u32(id.generation());
+                    }
+                }
+            }
+        }
         h.finish()
+    }
+
+    /// The units of the groups out, ascending: those of every group that is not [`GroupStage::Returning`].
+    /// What `attackers` was before WP9.2a.
+    pub fn attackers(&self) -> Vec<EntityId> {
+        let mut all: Vec<EntityId> = self
+            .groups
+            .iter()
+            .filter(|g| g.stage != GroupStage::Returning)
+            .flat_map(|g| g.members.iter().copied())
+            .collect();
+        all.sort();
+        all.dedup();
+        all
+    }
+
+    /// Whether `id` is in a group that is out (not [`GroupStage::Returning`]): such a unit is not at home.
+    pub fn in_field(&self, id: EntityId) -> bool {
+        self.groups
+            .iter()
+            .any(|g| g.stage != GroupStage::Returning && g.members.binary_search(&id).is_ok())
+    }
+
+    /// The strike: the first group that is out and is no reinforcement.
+    pub fn strike(&self) -> Option<&Group> {
+        self.groups
+            .iter()
+            .find(|g| g.stage != GroupStage::Returning && g.merge_into.is_none())
+    }
+
+    /// Makes a group of `members` (ascending) with the next id and returns the id. The recall and closing lists
+    /// start empty. The one place a group is made, for the army rules and for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_group(
+        &mut self,
+        members: Vec<EntityId>,
+        goal: Cell,
+        stage: GroupStage,
+        now: Tick,
+        launch_value: u64,
+        staging: Option<Cell>,
+        merge_into: Option<u32>,
+    ) -> u32 {
+        let id = self.next_group;
+        self.next_group += 1;
+        self.groups.push(Group {
+            id,
+            role: GroupRole::Strike,
+            members,
+            goal,
+            stage,
+            since: now,
+            launch_value,
+            staging,
+            merge_into,
+            target_hp: None,
+            recalled: Vec::new(),
+            closing: Vec::new(),
+        });
+        id
+    }
+
+    /// The target cell of the attack going on: the goal of the strike. What `attack_target` was before WP9.2a.
+    pub fn attack_target(&self) -> Option<Cell> {
+        self.strike().map(|g| g.goal)
+    }
+
+    /// The units on `list` of every group when `returning` is set, or of the groups that are not Returning only when it
+    /// is not, ascending.
+    fn union_of(&self, list: impl Fn(&Group) -> &Vec<EntityId>, returning: bool) -> Vec<EntityId> {
+        let mut all: Vec<EntityId> = self
+            .groups
+            .iter()
+            .filter(|g| returning || g.stage != GroupStage::Returning)
+            .flat_map(|g| list(g).iter().copied())
+            .collect();
+        all.sort();
+        all.dedup();
+        all
     }
 }
 
@@ -529,17 +719,39 @@ mod tests {
         s.defend_since = Some(Tick(1450));
         s.directive.posture = Posture::Defend;
         s.directive.target = Some(Cell::new(60, 20));
-        s.attackers.push(EntityId::new(20, 0));
-        s.attackers.push(EntityId::new(21, 1));
-        s.attack_target = Some(Cell::new(71, 16));
+        s.groups.push(Group {
+            id: 3,
+            role: GroupRole::Strike,
+            members: vec![EntityId::new(20, 0), EntityId::new(21, 1)],
+            goal: Cell::new(71, 16),
+            stage: GroupStage::Advancing,
+            since: Tick(1310),
+            launch_value: 2100,
+            staging: Some(Cell::new(60, 30)),
+            merge_into: None,
+            target_hp: Some((EntityId::new(11, 0), 1500, Tick(1450))),
+            recalled: vec![EntityId::new(22, 0), EntityId::new(23, 1)],
+            closing: vec![EntityId::new(24, 0), EntityId::new(25, 1)],
+        });
+        s.groups.push(Group {
+            id: 4,
+            role: GroupRole::Strike,
+            members: vec![EntityId::new(30, 0), EntityId::new(31, 0)],
+            goal: Cell::new(60, 30),
+            stage: GroupStage::Advancing,
+            since: Tick(1320),
+            launch_value: 1000,
+            staging: None,
+            merge_into: Some(3),
+            target_hp: None,
+            recalled: Vec::new(),
+            closing: Vec::new(),
+        });
+        s.next_group = 5;
+        s.jitter = Some(-40);
         s.last_attack_tick = Tick(1200);
         s.attack_started = Tick(1300);
         s.attacks_launched = 1;
-        s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1450)));
-        s.recalled.push(EntityId::new(22, 0));
-        s.recalled.push(EntityId::new(23, 1));
-        s.closing.push(EntityId::new(24, 0));
-        s.closing.push(EntityId::new(25, 1));
         s.sites_cleared.push(PlayerId(1));
         s.sites_cleared.push(PlayerId(2));
         s.sent.insert(EntityId::new(12, 0), (Tick(1500), 1));
@@ -551,8 +763,8 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well (WP9.1c-3: 0x392b1f3256aa3c19 ->
-        // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`).
-        assert_eq!(base_state().digest(), 0xaa33_3a1f_d36c_b5a9);
+        // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`; WP9.2a: -> 0x8383_758e_5b5e_90e6, the numbers of the groups in the shipped profile and the group state; with them off and one group the old value comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin`).
+        assert_eq!(base_state().digest(), 0x8383_758e_5b5e_90e6);
     }
 
     #[test]
@@ -660,14 +872,14 @@ mod tests {
     fn every_part_of_the_threat_and_attack_state_moves_the_digest() {
         let d = base_state().digest();
         let changes: [fn(&mut AiState); 32] = [
-            |s| s.closing.reverse(),
-            |s| s.closing.clear(),
-            |s| s.target_hp = None,
-            |s| s.target_hp = Some((EntityId::new(11, 1), 1500, Tick(1450))),
-            |s| s.target_hp = Some((EntityId::new(11, 0), 1499, Tick(1450))),
-            |s| s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1451))),
-            |s| s.recalled.reverse(),
-            |s| s.recalled.clear(),
+            |s| s.groups[0].closing.reverse(),
+            |s| s.groups[0].closing.clear(),
+            |s| s.groups[0].target_hp = None,
+            |s| s.groups[0].target_hp = Some((EntityId::new(11, 1), 1500, Tick(1450))),
+            |s| s.groups[0].target_hp = Some((EntityId::new(11, 0), 1499, Tick(1450))),
+            |s| s.groups[0].target_hp = Some((EntityId::new(11, 0), 1500, Tick(1451))),
+            |s| s.groups[0].recalled.reverse(),
+            |s| s.groups[0].recalled.clear(),
             |s| {
                 s.hp_seen.remove(&EntityId::new(0, 0));
             },
@@ -690,11 +902,11 @@ mod tests {
             |s| s.defend_since = Some(Tick(1451)),
             |s| s.directive.posture = Posture::Attack,
             |s| s.directive.posture = Posture::Gather,
-            |s| s.attackers.clear(),
-            |s| s.attackers.reverse(),
-            |s| s.attackers[1] = EntityId::new(21, 2),
-            |s| s.attack_target = None,
-            |s| s.attack_target = Some(Cell::new(71, 17)),
+            |s| s.groups.clear(),
+            |s| s.groups[0].members.reverse(),
+            |s| s.groups[0].members[1] = EntityId::new(21, 2),
+            |s| s.groups[0].goal = Cell::new(71, 15),
+            |s| s.groups[0].goal = Cell::new(71, 17),
             |s| s.last_attack_tick = Tick(1201),
             |s| s.attack_started = Tick(1301),
             |s| s.attacks_launched = 2,
@@ -720,6 +932,92 @@ mod tests {
             ),
             (0, 1, 2)
         );
+    }
+
+    #[test]
+    fn the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin() {
+        // The cause of the move of the pin above, as a test: the shipped profile with the numbers of WP9.2a
+        // (guard, staging, reinforcement, partial defence, jitter) set to 0, one group and no jitter drawn hashes
+        // to the pin WP9.1c-3 left, so the new layout adds nothing for a profile that does not use it.
+        let mut s = base_state();
+        let a = &mut s.profile.army;
+        a.home_guard_permille = 0;
+        a.stage_distance = 0;
+        a.reinforce_value = 0;
+        a.defend_ratio_permille = 0;
+        a.timing_jitter_permille = 0;
+        s.groups.truncate(1);
+        s.next_group = 0;
+        s.jitter = None;
+        assert_eq!(s.digest(), 0xaa33_3a1f_d36c_b5a9);
+    }
+
+    #[test]
+    fn every_part_of_the_groups_moves_the_digest() {
+        let d = base_state().digest();
+        let changes: [fn(&mut AiState); 24] = [
+            |s| s.groups[0].id = 2,
+            |s| s.groups[0].stage = GroupStage::Engaged,
+            |s| s.groups[0].stage = GroupStage::Returning,
+            |s| s.groups[0].since = Tick(1311),
+            |s| s.groups[0].launch_value = 2101,
+            |s| s.groups[0].staging = None,
+            |s| s.groups[0].staging = Some(Cell::new(60, 31)),
+            |s| s.groups[0].merge_into = Some(4),
+            |s| s.groups[1].id = 5,
+            |s| {
+                s.groups[1].members.pop();
+            },
+            |s| s.groups[1].goal = Cell::new(60, 31),
+            |s| s.groups[1].stage = GroupStage::Staging,
+            |s| s.groups[1].since = Tick(1321),
+            |s| s.groups[1].launch_value = 1001,
+            |s| s.groups[1].staging = Some(Cell::new(1, 1)),
+            |s| s.groups[1].merge_into = None,
+            |s| s.groups[1].merge_into = Some(2),
+            |s| s.groups[1].recalled.push(EntityId::new(30, 0)),
+            |s| s.groups[1].closing.push(EntityId::new(31, 0)),
+            |s| s.groups.reverse(),
+            |s| s.next_group = 6,
+            |s| s.jitter = None,
+            |s| s.jitter = Some(-41),
+            |s| s.groups.truncate(1),
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut s = base_state();
+            change(&mut s);
+            assert_ne!(s.digest(), d, "change {i}");
+        }
+        // The numbers are hashed: the permanent values.
+        assert_eq!(GroupRole::Strike as u8, 0);
+        assert_eq!(
+            (
+                GroupStage::Staging as u8,
+                GroupStage::Advancing as u8,
+                GroupStage::Engaged as u8,
+                GroupStage::Returning as u8
+            ),
+            (0, 1, 2, 3)
+        );
+        assert_eq!(GROUPS_MAX, 4);
+    }
+
+    #[test]
+    fn the_legacy_view_of_the_groups_is_what_the_single_wave_was() {
+        let s = base_state();
+        // Both groups are out: the units of both, the target of the strike (the first group).
+        assert_eq!(
+            s.attackers(),
+            [(20, 0), (21, 1), (30, 0), (31, 0)].map(|(i, g)| EntityId::new(i, g))
+        );
+        assert_eq!(s.strike().map(|g| g.id), Some(3));
+        let mut t = s.clone();
+        t.groups[0].stage = GroupStage::Returning;
+        // A group called back is no longer out: the second group is the strike now, and the first one's units are
+        // home (only its `recalled` list is left in the legacy view).
+        assert_eq!(t.attackers().len(), 2);
+        assert!(!t.in_field(EntityId::new(20, 0)));
+        assert!(t.in_field(EntityId::new(30, 0)));
     }
 
     #[test]

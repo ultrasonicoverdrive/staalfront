@@ -94,6 +94,12 @@ fn scratch_assets(dir: &TempDir) -> PathBuf {
         ("attack_value", 800),
         ("max_wait", 300),
         ("first_attack_tick", 100),
+        // WP9.2a: the fixture is about a decided game in a few thousand ticks, not about the groups: staging, reinforcement and
+        // partial defence are switched off here (re-measured at repair rate 1 in fix round 1: with them on the strong seat 0 wins at 1,345
+        // instead of 1,224 and seat 1 at 1,439 instead of 2,885).
+        ("stage_distance", 0),
+        ("reinforce_value", 0),
+        ("defend_ratio_permille", 0),
     ] {
         text = set_number(&text, key, value);
     }

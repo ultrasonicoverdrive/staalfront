@@ -1597,14 +1597,14 @@ fn the_managers_stay_off_for_the_frozen_profiles_and_the_old_mix_would_move_ever
             (
                 &s0.hp_seen,
                 s0.threat,
-                &s0.attackers,
+                &s0.groups,
                 s0.attacks_launched,
                 &s0.sites_cleared
             ),
             (
                 &fresh.hp_seen,
                 fresh.threat,
-                &fresh.attackers,
+                &fresh.groups,
                 fresh.attacks_launched,
                 &fresh.sites_cleared
             ),
