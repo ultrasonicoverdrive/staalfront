@@ -17,6 +17,9 @@ workspace = true
 # the same versions as the rest of the workspace.
 ron = "0.12"
 serde = { version = "1", features = ["derive"] }
+# The restyled cutscene parts (WP11.6a) take the rig's part names, shapes and colours from the
+# shipped briefing through the cutscene crate's own loader, so they cannot drift from the scene.
+sf_cutscene = { path = "../../crates/sf_cutscene" }
 
 [dev-dependencies]
 # The tests judge every generated file with the same checker and engine loader the game uses.

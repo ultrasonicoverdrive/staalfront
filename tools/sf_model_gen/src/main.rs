@@ -49,6 +49,25 @@ fn main() -> ExitCode {
             println!("wrote {}", path.display());
         }
     }
+    // The restyled cutscene parts go under assets/ (only with the default output folder).
+    if dir == PathBuf::from("assets/set_v5") {
+        for (rel, bytes) in sf_model_gen::cutout_files() {
+            let path = PathBuf::from("assets").join(&rel);
+            if check {
+                if std::fs::read(&path).ok().as_deref() != Some(bytes.as_slice()) {
+                    println!("out of date: {}", path.display());
+                    stale += 1;
+                }
+            } else if let Err(e) = path
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(&path, &bytes))
+            {
+                eprintln!("{}: {e}", path.display());
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     if stale > 0 {
         ExitCode::FAILURE
     } else {

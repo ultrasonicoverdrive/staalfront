@@ -2558,6 +2558,7 @@ dependencies = [
  "ron",
  "serde",
  "sf_asset_check",
+ "sf_cutscene",
  "sf_render",
 ]
 
