@@ -26,6 +26,7 @@ pub mod ai;
 pub mod army;
 pub mod base;
 pub mod budget;
+pub mod counter;
 pub mod economy;
 pub mod memory;
 pub mod observe;

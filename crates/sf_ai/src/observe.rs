@@ -272,6 +272,30 @@ impl<'w> Lens<'w> {
             .map(|u| u.cost)
     }
 
+    /// WP9.2b-1: how well the unit `role` hurts the unit `enemy`: the largest [`sf_sim::weapons::weapon_score`] over the
+    /// weapons of the role's loadout, each against the armour the enemy kind wears (public tables: the weapon
+    /// table, the armour table). 0 for a role with no weapon. A raw score, to be compared **per credit** by the
+    /// caller (`counter::best_role`), never between roles of different cost. A kind the armour table does not list,
+    /// or a world without an armour table, takes a hundred percent, as the simulation's own targeting reads it.
+    pub fn counter_score(&self, role: Kind, enemy: Kind) -> u64 {
+        let table = self.world.weapon_table();
+        let armor = table.armor();
+        let armor_type = armor.and_then(|a| a.armor_of(enemy));
+        table
+            .loadout(role)
+            .iter()
+            .filter_map(|&w| table.weapon(w))
+            .map(|w| {
+                let percent = match (armor, armor_type) {
+                    (Some(a), Some(t)) => a.percent(w.damage_type, t).unwrap_or(100),
+                    _ => 100,
+                };
+                sf_sim::weapons::weapon_score(w, percent)
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     /// What one standing structure of `kind` stores (public rules); zero for a kind that stores nothing.
     pub fn storage_of(&self, kind: Kind) -> u32 {
         self.world.storage_of_kind(kind)

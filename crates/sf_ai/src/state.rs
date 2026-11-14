@@ -228,6 +228,9 @@ pub struct AiState {
     /// Per army unit: the tick of the last order (gather, attack or defence) and how many gather orders it got
     /// without arriving; pruned to the live units every army turn.
     pub sent: BTreeMap<EntityId, (Tick, u8)>,
+    /// WP9.2b-1, the tally of the counter mix (`crate::counter`): per enemy kind the peak count of armed units seen at
+    /// one think and the tick of it. Empty, and not hashed, while `counter_permille` is zero.
+    pub intel: BTreeMap<Kind, (u32, Tick)>,
 }
 
 fn write_cell(h: &mut Fnv1a64, c: Option<Cell>) {
@@ -304,6 +307,7 @@ impl AiState {
             jitter: None,
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
+            intel: BTreeMap::new(),
         }
     }
 
@@ -573,6 +577,16 @@ impl AiState {
                 }
             }
         }
+        // WP9.2b-1: the tally, only with the counter mix on.
+        if self.profile.army.counter_on() {
+            h.write_u8(0x94);
+            h.write_u32(self.intel.len() as u32);
+            for (kind, (n, tick)) in &self.intel {
+                h.write_u32(u32::from(kind.0));
+                h.write_u32(*n);
+                h.write_u64(tick.0);
+            }
+        }
         h.finish()
     }
 
@@ -764,7 +778,28 @@ mod tests {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well (WP9.1c-3: 0x392b1f3256aa3c19 ->
         // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`; WP9.2a: -> 0x8383_758e_5b5e_90e6, the numbers of the groups in the shipped profile and the group state; with them off and one group the old value comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin`; WP9.2a-2: 0x8383_758e_5b5e_90e6 -> 0x4d0a_8207_c799_2fad, `gather_refinery_gap` 2 and `gather_everyone` true in the shipped profile; with both off, 0x8383_758e_5b5e_90e6 comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin` covers the older pin).
-        assert_eq!(base_state().digest(), 0x4d0a_8207_c799_2fad);
+        assert_eq!(base_state().digest(), 0x5057_42d7_c905_864d);
+    }
+
+    /// The shipped mix of WP9.2a-2 (rocket trooper weight 2): WP9.2b-1 shipped 4, which moves every digest of the
+    /// shipped profile; the older pins below are the digests with the old mix put back.
+    fn with_the_mix_of_wp9_2a_2(s: &mut AiState) {
+        for (kind, w) in &mut s.profile.unit_mix {
+            if kind.0 == 13 {
+                assert_eq!(*w, 4, "the shipped rocket trooper weight");
+                *w = 2;
+            }
+        }
+    }
+
+    #[test]
+    fn the_digest_of_the_base_state_with_the_mix_of_wp9_2a_2_is_the_old_pin() {
+        // The cause of the move of the pin above (WP9.2b-1), as a test: the rocket trooper weight back to 2 is the
+        // pin WP9.2a-2 left. The counter mix is off in the shipped profile and not in the digest.
+        let mut s = base_state();
+        assert!(!s.profile.army.counter_on());
+        with_the_mix_of_wp9_2a_2(&mut s);
+        assert_eq!(s.digest(), 0x4d0a_8207_c799_2fad);
     }
 
     #[test]
@@ -951,6 +986,7 @@ mod tests {
         s.groups.truncate(1);
         s.next_group = 0;
         s.jitter = None;
+        with_the_mix_of_wp9_2a_2(&mut s);
         assert_eq!(s.digest(), 0xaa33_3a1f_d36c_b5a9);
     }
 
@@ -961,6 +997,7 @@ mod tests {
         let mut s = base_state();
         s.profile.army.gather_refinery_gap = 0;
         s.profile.army.gather_everyone = false;
+        with_the_mix_of_wp9_2a_2(&mut s);
         assert_eq!(s.digest(), 0x8383_758e_5b5e_90e6);
     }
 

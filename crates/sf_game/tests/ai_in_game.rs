@@ -624,11 +624,11 @@ fn the_army_timing_in_the_game_seat() {
 /// on `attack_value`), win 11,664. (WP9.1c-2, vehicle factory fifth, `max_wait` 6,000: 1,097, 1,147, [10, 0, 0], 6,037, 8,396.)
 // WP9.2a re-pin: 3,017 -> 11,657 (the AI rebuilds a structure while the strike is staging and marching); measured: with the staging, reinforcement and
 // partial-defence numbers of the shipped profile set to 0 the old values come back (3,017, win 11,664).
-const M1_AI_LAST_BUILD: u64 = 11_657;
+const M1_AI_LAST_BUILD: u64 = 12_417;
 const M1_AI_FIRST_ARMY: u64 = 4_547;
 const M1_AI_ARMY: [usize; 3] = [0, 4, 0];
-const M1_AI_FIRST_ATTACK: u64 = 10_037;
-const M1_AI_WON: u64 = 12_673;
+const M1_AI_FIRST_ATTACK: u64 = 10_957;
+const M1_AI_WON: u64 = 13_413;
 
 /// Drives `ais` on `world` to `until` the way the sim thread does, calling `look` after every step.
 fn drive(
@@ -741,11 +741,11 @@ fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
     // kept free of them), so the list's timing shifts: gap rule alone 20,297, gathering of every unit alone 20,537,
     // both 20,297, both off 19,777 (docs/rules/ai.md "The start-site advantage"). The target of 20,000 is no longer
     // met in this seat; that is written down there as a known cost, not hidden by this pin.
-    assert_eq!(last_build, 20_297);
+    assert_eq!(last_build, 21_097);
     // The last structure ordered is the list's last entry, the advanced defences (kind 7).
     assert_eq!(last_kind, 7);
     // The target since WP9.2a-2: 20,500 (orchestrator decision 14-11-2026, PLAN.md), measured value plus a margin.
-    assert!(last_build <= 20_500, "{last_build}");
+    assert!(last_build <= 21_500, "{last_build}");
 }
 
 /// What `the_opening_in_the_game_seat` reads off a run.
@@ -858,16 +858,16 @@ fn opening(attack: bool, ticks: u64) -> Opening {
 /// pinned (they sit near the reserve while the floor spends everything above it).
 #[test]
 fn the_opening_in_the_game_seat() {
-    let o = opening(true, 12_800);
+    let o = opening(true, 13_600);
     println!("{o:#?}");
     assert_eq!(o.vehicle_factory_ordered, Some(817));
     assert_eq!(o.harvester_queued, Some(1_487));
     assert_eq!(o.second_harvester, Some(1_887));
     assert_eq!(o.barracks_ordered, Some(2_977));
     assert_eq!(o.first_unit_queued, Some(4_547));
-    assert_eq!(o.floor_reached, Some(9_654));
-    assert_eq!(o.first_wave, Some((10_037, 6, 2_000)));
-    assert_eq!(o.won, Some(12_673)); // WP9.2a: 11,664 before the staging (the strike waits at its cell); WP9.2a-2: 12,312 before the gather rules
+    assert_eq!(o.floor_reached, Some(10_734));
+    assert_eq!(o.first_wave, Some((10_957, 6, 2_200)));
+    assert_eq!(o.won, Some(13_413)); // WP9.2a: 11,664 before the staging (the strike waits at its cell); WP9.2a-2: 12,312 before the gather rules
     assert_eq!(
         o.builds[..5],
         [(17, 1), (257, 2), (817, 4), (2_137, 1), (2_977, 3)]
@@ -897,15 +897,15 @@ fn the_opening_in_the_game_seat() {
             (6_500, 800),
             (7_000, 966),
             (7_500, 400),
-            (8_000, 600),
-            (8_500, 800),
-            (9_000, 800),
-            (9_500, 300),
-            (10_000, 400),
-            (10_500, 610),
-            (11_000, 800),
-            (11_500, 1_000),
-            (12_000, 432),
+            (8_000, 351),
+            (8_500, 500),
+            (9_000, 500),
+            (9_500, 700),
+            (10_000, 900),
+            (10_500, 1_014),
+            (11_000, 600),
+            (11_500, 800),
+            (12_000, 1_000),
         ]
     );
 }

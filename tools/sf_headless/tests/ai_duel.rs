@@ -96,6 +96,15 @@ fn the_frozen_profile_is_the_shipped_one_with_the_numbers_of_wp9_2a_off() {
     a.gather_everyone = false;
     a.stage_permille = old.army.stage_permille;
     a.stage_patience = old.army.stage_patience;
+    // WP9.2b-1 ships the rocket trooper at weight 4; the frozen profile keeps the 2 it had.
+    for f in &mut new.factions {
+        for (role, w) in &mut f.unit_mix {
+            if role == "rocket_trooper" {
+                assert_eq!(*w, 4);
+                *w = 2;
+            }
+        }
+    }
     assert_eq!(old, new);
 }
 

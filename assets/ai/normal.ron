@@ -108,6 +108,11 @@
         timing_jitter_permille: 0,
         gather_refinery_gap: 2,
         gather_everyone: true,
+        // WP9.2b-1, the counter mix (docs/rules/ai.md "Counter mix (WP9.2b-1)"): how far the unit mix leans toward the roles that do
+        // best, per credit, against the armed enemy units seen (0 = off, at most 2000; a role is never made more than twice as often as its
+        // base weight says), and how many ticks a peak count of an enemy kind is remembered (read only with the rule on).
+        counter_permille: 0,
+        intel_ticks: 3000,
     ),
     factions: [
         (
@@ -131,7 +136,8 @@
                 ("advanced_defences", 1),
             ],
             // (role, weight): the share of the army each role aims at.
-            unit_mix: [("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)],
+            // WP9.2b-1: the rocket trooper weight 4, was 2 (measured, docs/rules/ai.md "Counter mix (WP9.2b-1)": 49.0 % of the games played from either site, site-balanced, against 22.9 % with 2).
+            unit_mix: [("rifleman", 4), ("rocket_trooper", 4), ("light_tank", 3)],
             scout: Some("scout"),
         ),
         (
@@ -149,7 +155,7 @@
                 ("defence_tower", 2),
                 ("advanced_defences", 1),
             ],
-            unit_mix: [("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)],
+            unit_mix: [("rifleman", 4), ("rocket_trooper", 4), ("light_tank", 3)],
             scout: Some("scout"),
         ),
     ],
