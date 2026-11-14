@@ -106,6 +106,9 @@ fn the_shipped_profile_is_pinned() {
     // (measured, docs/rules/ai.md "The start-site advantage").
     assert_eq!((a.gather_refinery_gap, a.gather_everyone), (2, true));
     assert!(a.gather_rules_on());
+    // WP9.2b-1: the counter mix (docs/rules/ai.md, "Counter mix (WP9.2b-1)"): the shipped value from the 96-game duels.
+    assert_eq!((a.counter_permille, a.intel_ticks), (0, 3000));
+    assert_eq!(a.counter_on(), a.counter_permille != 0);
     assert_eq!(p.factions.len(), 2);
     let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
     let meridian = &p.factions[0];
@@ -157,7 +160,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 41] = [
+    let table: [(&str, &str, [&str; 2]); 43] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",
@@ -251,6 +254,8 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
             "gather_refinery_gap",
             ["17", "255"],
         ),
+        ("counter_permille: 0", "counter_permille", ["2001", "65535"]),
+        ("intel_ticks: 3000", "intel_ticks", ["99", "60001"]),
     ];
     for (from, name, bad) in table {
         let key = from.split(':').next().unwrap();
@@ -413,16 +418,24 @@ fn the_scout_is_checked_like_a_unit_of_the_mix() {
     };
     with("scout").check(&UnitDefs::embedded()).unwrap();
     refused_check(&with("no_such_role"), "scout (no_such_role): no such role");
+    // WP9.2b-1: the scout kind is never tallied by the counter mix, so it may not be a role of the mix too.
+    refused_check(
+        &with("rifleman"),
+        "scout (rifleman): the scout is also a role of the unit mix",
+    );
     refused_check(&with("power_plant"), "only infantry and vehicles");
     refused_check(&with("harvester"), "harvesters");
     // The scout comes out of a barracks, which the list must have.
     let mut p = meridian(&[("power_plant", 1)], &[]);
     p.factions[0].scout = Some("scout".to_string());
     refused_check(&p, "InfantryFactory missing");
-    // It may also be a role of the mix.
+    // It may not also be a role of the mix (WP9.2b-1; it was allowed before).
     let mut p = meridian(&BASE, &[("scout", 1)]);
     p.factions[0].scout = Some("scout".to_string());
-    p.check(&UnitDefs::embedded()).unwrap();
+    refused_check(
+        &p,
+        "scout (scout): the scout is also a role of the unit mix",
+    );
 }
 
 #[test]
@@ -622,4 +635,31 @@ fn with_staging_on_the_stage_patience_must_be_below_the_attack_patience() {
     let off = edited("stage_distance: 14", "stage_distance: 0")
         .replace("stage_patience: 1800", "stage_patience: 5000");
     AiProfile::from_ron(&off).unwrap();
+}
+
+#[test]
+fn a_profile_without_the_numbers_of_wp9_2b_1_reads_with_the_counter_mix_off() {
+    // The frozen profiles were written before the counter mix: the numbers are absent and read as off, with the
+    // default memory, which is read (and hashed) only with the rule on.
+    for frozen in [
+        include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_vs_passive_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_raid_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_raid_guard_defs/normal.ron"),
+    ] {
+        let a = AiProfile::from_ron(frozen).unwrap().army;
+        assert_eq!(
+            (a.counter_permille, a.intel_ticks),
+            (0, DEFAULT_INTEL_TICKS)
+        );
+        assert!(!a.counter_on());
+    }
+    assert_eq!(DEFAULT_INTEL_TICKS, 3000);
+    // The limits themselves are fine.
+    let mut p = AiProfile::embedded();
+    for (permille, ticks) in [(0u16, 100u32), (2000, 60_000), (1, 3000)] {
+        p.army.counter_permille = permille;
+        p.army.intel_ticks = ticks;
+        assert!(p.check(&UnitDefs::embedded()).is_ok(), "{permille} {ticks}");
+    }
 }

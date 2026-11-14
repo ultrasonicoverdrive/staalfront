@@ -753,3 +753,160 @@ fn the_launch_step_of_a_wave_of_45_units_in_one_command_and_in_chunks_of_19() {
     .unwrap();
     assert_eq!(f.ais[0].state().groups[0].members.len(), 45);
 }
+
+/// The observation of seat 0 of `m1_duel` (shipped definitions) with 200 armed units of player 1 added to what it sees
+/// (clones of one real `Seen`, kinds cycling over rifleman, rocket trooper, light and heavy tank), its AI with the
+/// counter mix on, and the world.
+fn counter_setup() -> (sf_ai::Ai, sf_ai::Observation, Box<sf_sim::World>) {
+    let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+    let setup =
+        sf_headless::tournament::load_setup(&assets, &assets.join("matches/m1_duel.ron")).unwrap();
+    let prepared = sf_headless::tournament::prepare(
+        &setup,
+        [
+            sf_data::units::Faction::Meridian,
+            sf_data::units::Faction::Veyran,
+        ],
+        458_758,
+        1,
+    )
+    .unwrap();
+    // A real `Seen` to clone: an engineer in the scout's sight in `ai_fog`.
+    let mut fog = Scenario::load(&scenario_path("ai_fog.ron")).unwrap();
+    fog.commands
+        .retain(|c| !matches!(c.command, sf_headless::scenario::Action::SpawnUnit { .. }));
+    fog.commands.push(sf_headless::scenario::TimedCommand {
+        tick: 0,
+        player: 1,
+        command: sf_headless::scenario::Action::SpawnUnit {
+            kind: 14,
+            owner: 1,
+            cell: (34, 55),
+        },
+    });
+    let f = run_full(
+        &fog,
+        &RunOptions {
+            ticks: 400,
+            every: 100,
+        },
+    )
+    .unwrap();
+    let seen_fog = sf_ai::Observation::build(&f.world, sf_sim::PlayerId(0), &Default::default());
+    let template = seen_fog
+        .visible
+        .iter()
+        .find(|e| e.kind == sf_sim::Kind(14))
+        .cloned()
+        .expect("an engineer in sight");
+    let old = prepared.ais[0].state().clone();
+    let mut profile = old.profile.clone();
+    profile.army.counter_permille = 1000;
+    let ai = sf_ai::Ai::new(old.player, profile, 1, old.start_sites.clone());
+    let mut obs = sf_ai::Observation::build(
+        &prepared.world,
+        sf_sim::PlayerId(0),
+        &ai.state().known_structures,
+    );
+    let kinds = [12u16, 13, 19, 20];
+    for i in 0..200u32 {
+        let mut s = template.clone();
+        s.id = sf_sim::EntityId::new(5000 + i, 0);
+        s.kind = sf_sim::Kind(kinds[(i % 4) as usize]);
+        s.owner = sf_sim::PlayerId(1);
+        s.footprint = None;
+        s.armed = true;
+        obs.visible.push(s);
+    }
+    (ai, obs, prepared.world)
+}
+
+#[test]
+fn what_the_counter_mix_costs_with_a_visible_army_of_200_units() {
+    // WP9.2b-1: a think with 200 armed enemy units in sight and the counter mix on (the tally runs every think; the
+    // weights once per production turn), 4,000 thinks on a copy of the AI (each the fastest of five), the clone outside
+    // the clock. Mean and worst think as in the design memo's budget: mean at most 20 microseconds, worst at most 1
+    // millisecond, asserted in release (the worst is the worst of the fastest-of-five, so its bound is weak). The weights alone are timed on a state whose tally holds all four kinds.
+    let (ai, obs, world) = counter_setup();
+    let player = sf_sim::PlayerId(0);
+    let runs = 4_000u32;
+    // Every think is timed five times on fresh copies and the fastest counts: a spike of the container (a preemption
+    // costs 0.5 ms or more) is then not mistaken for the cost of the code, a cost of the code is in all five.
+    let best_of_five = |f: &mut dyn FnMut() -> Duration| (0..5).map(|_| f()).min().unwrap();
+    let mut out = Vec::new();
+    let (mut total, mut worst) = (Duration::ZERO, Duration::ZERO);
+    let mut tallied = ai.clone();
+    for i in 0..runs {
+        let mut a = ai.clone();
+        // The think number picks the manager: rotate through all four.
+        for _ in 0..(i % 4) {
+            let mut lens = sf_ai::Lens::new(&world, player);
+            out.clear();
+            a.think_with(&obs, &mut lens, &mut out);
+        }
+        let spent = best_of_five(&mut || {
+            let mut b = a.clone();
+            let mut lens = sf_ai::Lens::new(&world, player);
+            out.clear();
+            let started = Instant::now();
+            b.think_with(&obs, &mut lens, &mut out);
+            started.elapsed()
+        });
+        total += spent;
+        worst = worst.max(spent);
+        a.think_with(&obs, &mut sf_ai::Lens::new(&world, player), &mut out);
+        tallied = a;
+    }
+    println!(
+        "one think with 200 visible armed enemy units and counter_permille 1000 (fastest of five per think): mean {:.2} us, worst {:.1} us; the tally holds {} kinds, {} units",
+        total.as_secs_f64() * 1e6 / f64::from(runs),
+        worst.as_secs_f64() * 1e6,
+        tallied.state().intel.len(),
+        tallied.state().intel.values().map(|v| v.0).sum::<u32>()
+    );
+    assert_eq!(tallied.state().intel.len(), 4);
+    assert_eq!(
+        tallied.state().intel.values().map(|v| v.0).sum::<u32>(),
+        200
+    );
+    // The tally alone, and the weights alone (the part of a production turn).
+    let lens = sf_ai::Lens::new(&world, player);
+    let (mut ttotal, mut tworst) = (Duration::ZERO, Duration::ZERO);
+    let (mut wtotal, mut wworst) = (Duration::ZERO, Duration::ZERO);
+    for _ in 0..runs {
+        let tspent = best_of_five(&mut || {
+            let mut st = tallied.state().clone();
+            let started = Instant::now();
+            sf_ai::counter::tally(&mut st, &obs);
+            started.elapsed()
+        });
+        ttotal += tspent;
+        tworst = tworst.max(tspent);
+        let wspent = best_of_five(&mut || {
+            let started = Instant::now();
+            let w = sf_ai::counter::weights(tallied.state(), &lens);
+            let spent = started.elapsed();
+            assert_eq!(w.len(), 3);
+            spent
+        });
+        wtotal += wspent;
+        wworst = wworst.max(wspent);
+    }
+    println!(
+        "the tally alone: mean {:.2} us, worst {:.1} us; the weights of one production turn: mean {:.2} us, worst {:.1} us",
+        ttotal.as_secs_f64() * 1e6 / f64::from(runs),
+        tworst.as_secs_f64() * 1e6,
+        wtotal.as_secs_f64() * 1e6 / f64::from(runs),
+        wworst.as_secs_f64() * 1e6
+    );
+    if !cfg!(debug_assertions) {
+        assert!(
+            total / runs <= Duration::from_micros(20),
+            "mean think {:?}",
+            total / runs
+        );
+        assert!(worst <= Duration::from_millis(1), "worst think {worst:?}");
+        assert!(ttotal / runs <= Duration::from_micros(20) && tworst <= Duration::from_millis(1));
+        assert!(wtotal / runs <= Duration::from_micros(20) && wworst <= Duration::from_millis(1));
+    }
+}

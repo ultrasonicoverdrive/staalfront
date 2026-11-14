@@ -26,6 +26,7 @@ use sf_sim::{BuildingFunction, Cell, Command, EntityId, Kind, Tick};
 use crate::army;
 use crate::base;
 use crate::budget;
+use crate::counter;
 use crate::economy::{self, complete, function_of};
 use crate::observe::{Lens, Observation};
 use crate::state::{AiState, Posture};
@@ -150,7 +151,7 @@ fn rally(
 /// one furthest below its share of the army (`have * weight` against the others, by cross-multiplication),
 /// the earlier in the list among equals. `have` is the player's count per entry of `mix`.
 pub fn pick_kind(
-    mix: &[(Kind, u16)],
+    mix: &[(Kind, u32)],
     have: &[u32],
     usable: impl Fn(Kind) -> bool,
 ) -> Option<usize> {
@@ -222,7 +223,8 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
         0
     };
     let max_queue = usize::from(e.max_queue);
-    let mix = state.profile.unit_mix.clone();
+    // WP9.2b-1: the base weights in thousandths, leaned toward the counter of what was seen when the rule is on.
+    let mix = counter::weights(state, lens);
     let mut have_k: Vec<u32> = mix.iter().map(|&(k, _)| have(obs, k)).collect();
     let mut free = budget::free(obs, lens);
     let mut used: Vec<EntityId> = Vec::new();
