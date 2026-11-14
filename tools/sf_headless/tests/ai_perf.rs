@@ -910,3 +910,86 @@ fn what_the_counter_mix_costs_with_a_visible_army_of_200_units() {
         assert!(wtotal / runs <= Duration::from_micros(20) && wworst <= Duration::from_millis(1));
     }
 }
+
+#[test]
+fn what_the_harvester_threat_costs_with_200_own_units_and_the_ledger_with_a_strike_out() {
+    // WP9.3a-1: `army::watch` runs at every think. With `harvester_threat` on it also looks at the own units (a kind test per unit
+    // and a map of the harvesters); timed on 200 own units (12 of them harvesters) with the switch off and on, alternating, each the
+    // fastest of five on a fresh copy of the state so that a spike of the container is not read as the cost of the code. The
+    // escalation adds one comparison to `attack_due` (timed too). Mean at most 20 microseconds, worst at most 1 millisecond, asserted
+    // in release.
+    let (ai, mut obs, world) = counter_setup();
+    let player = sf_sim::PlayerId(0);
+    // 200 own units: clones of the first own entity of the observation (the construction centre), made units without a footprint,
+    // the first twelve of them harvesters, ids ascending after the real ones.
+    let template = obs.own[0].clone();
+    let harvester = sf_sim::Kind(11);
+    let rifleman = sf_sim::Kind(12);
+    for i in 0..200u32 {
+        let mut o = template.clone();
+        o.id = sf_sim::EntityId::new(6000 + i, 0);
+        o.footprint = None;
+        o.kind = if i < 12 { harvester } else { rifleman };
+        o.mobile = true;
+        o.armed = i >= 12;
+        obs.own.push(o);
+    }
+    obs.own.sort_by_key(|o| o.id);
+    let mut base = ai.state().clone();
+    base.profile.army.escalate_permille = 250;
+    base.profile.army.attack_value_max = 8000;
+    base.bounces = 2;
+    base.bounce_value = 3000;
+    base.bounce_tick = sf_sim::Tick(500);
+    let best_of_five = |f: &mut dyn FnMut() -> Duration| (0..5).map(|_| f()).min().unwrap();
+    let runs = 4_000u32;
+    let lens = sf_ai::Lens::new(&world, player);
+    let mut rows = Vec::new();
+    for on in [false, true] {
+        let mut st = base.clone();
+        st.profile.army.harvester_threat = on;
+        // One watch first, so that the state holds the units seen as the second think on sees them.
+        sf_ai::army::watch(&mut st, &obs, &lens);
+        let (mut total, mut worst) = (Duration::ZERO, Duration::ZERO);
+        for _ in 0..runs {
+            let spent = best_of_five(&mut || {
+                let mut s = st.clone();
+                let started = Instant::now();
+                sf_ai::army::watch(&mut s, &obs, &lens);
+                started.elapsed()
+            });
+            total += spent;
+            worst = worst.max(spent);
+        }
+        assert_eq!(st.harv_seen.len(), if on { 12 } else { 0 });
+        rows.push((on, total / runs, worst));
+    }
+    let (mut dtotal, mut dworst) = (Duration::ZERO, Duration::ZERO);
+    for _ in 0..runs {
+        let spent = best_of_five(&mut || {
+            let started = Instant::now();
+            let due = sf_ai::army::attack_due(&base, sf_sim::Tick(9000), 2500, 8);
+            let spent = started.elapsed();
+            assert!(!due);
+            spent
+        });
+        dtotal += spent;
+        dworst = dworst.max(spent);
+    }
+    println!(
+        "army::watch with 200 own units: switch off mean {:?} worst {:?}; switch on mean {:?} worst {:?}; attack_due with the ledger: mean {:?} worst {:?}",
+        rows[0].1,
+        rows[0].2,
+        rows[1].1,
+        rows[1].2,
+        dtotal / runs,
+        dworst
+    );
+    if !cfg!(debug_assertions) {
+        for (_, mean, worst) in &rows {
+            assert!(*mean <= Duration::from_micros(20), "mean {mean:?}");
+            assert!(*worst <= Duration::from_millis(1), "worst {worst:?}");
+        }
+        assert!(dtotal / runs <= Duration::from_micros(20) && dworst <= Duration::from_millis(1));
+    }
+}

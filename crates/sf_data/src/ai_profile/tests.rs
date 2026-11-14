@@ -109,6 +109,12 @@ fn the_shipped_profile_is_pinned() {
     // WP9.2b-1: the counter mix (docs/rules/ai.md, "Counter mix (WP9.2b-1)"): the shipped value from the 96-game duels.
     assert_eq!((a.counter_permille, a.intel_ticks), (0, 3000));
     assert_eq!(a.counter_on(), a.counter_permille != 0);
+    // WP9.3a-1: escalation and the harvester threat (docs/rules/ai.md, "Escalation and the harvester threat (WP9.3a-1)").
+    assert_eq!(
+        (a.escalate_permille, a.attack_value_max, a.harvester_threat),
+        (0, 0, false)
+    );
+    assert_eq!(a.escalate_on(), a.escalate_permille != 0);
     assert_eq!(p.factions.len(), 2);
     let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
     let meridian = &p.factions[0];
@@ -160,7 +166,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 43] = [
+    let table: [(&str, &str, [&str; 2]); 45] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",
@@ -256,6 +262,16 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
         ),
         ("counter_permille: 0", "counter_permille", ["2001", "65535"]),
         ("intel_ticks: 3000", "intel_ticks", ["99", "60001"]),
+        (
+            "escalate_permille: 0",
+            "escalate_permille",
+            ["2001", "65535"],
+        ),
+        (
+            "attack_value_max: 0",
+            "attack_value_max",
+            ["1000001", "4294967295"],
+        ),
     ];
     for (from, name, bad) in table {
         let key = from.split(':').next().unwrap();
@@ -662,4 +678,32 @@ fn a_profile_without_the_numbers_of_wp9_2b_1_reads_with_the_counter_mix_off() {
         p.army.intel_ticks = ticks;
         assert!(p.check(&UnitDefs::embedded()).is_ok(), "{permille} {ticks}");
     }
+}
+
+#[test]
+fn a_profile_without_the_numbers_of_wp9_3a_1_reads_with_both_rules_off() {
+    // The frozen profiles were written before escalation and the harvester threat: the numbers are absent and read as off.
+    for frozen in [
+        include_str!("../../../../tools/sf_headless/tests/fixtures/normal_old.ron"),
+        include_str!("../../../../tools/sf_headless/tests/fixtures/normal_9_2a2.ron"),
+    ] {
+        let a = AiProfile::from_ron(frozen).unwrap().army;
+        assert_eq!(
+            (a.escalate_permille, a.attack_value_max, a.harvester_threat),
+            (0, 0, false)
+        );
+        assert!(!a.escalate_on());
+    }
+}
+
+#[test]
+fn the_cap_may_not_sit_below_the_first_wave() {
+    // The shipped attack value is 2,000. Set, the cap is at least that: equal is fine, one below is refused, 0 is no cap.
+    assert_eq!(AiProfile::embedded().army.attack_value, 2000);
+    let with = |cap: u32| edited("attack_value_max: 0", &format!("attack_value_max: {cap}"));
+    AiProfile::from_ron(&with(2000)).unwrap();
+    AiProfile::from_ron(&with(1_000_000)).unwrap();
+    refused(&with(1999), "attack_value_max");
+    refused(&with(1), "attack_value_max");
+    AiProfile::from_ron(&with(0)).unwrap();
 }

@@ -184,6 +184,14 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
         .filter(|o| o.footprint.is_some() && !o.selling)
         .map(|o| (o.id, (o.kind, o.cell, o.hp)))
         .collect();
+    // WP9.3a-1: a hit on an own harvester is a threat too, when no structure was hit and no defence is running (so
+    // a harvester being shot raises one defence call per `defend_ticks`, not one per think).
+    if let Some(h) = harvester_hit(state, obs, lens)
+        && hit.is_none()
+        && state.threat.is_none()
+    {
+        hit = Some((h, false));
+    }
     if let Some(((kind, cell, _), anchor)) = hit {
         let (w, h) = size_of(lens, kind);
         let at = threat_cell(state, obs, lens, cell, w, h);
@@ -229,6 +237,34 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
             None => Directive::default(),
         };
     }
+}
+
+/// WP9.3a-1, the harvester threat: with `harvester_threat` on, the first own harvester (lowest id) whose hit points
+/// fell since the last think, or that is gone (a harvester leaves the observation only by dying), as `(kind, cell,
+/// hp)` with the cell where it was hit (the stale one for a dead harvester). Also refreshes `harv_seen`, from the
+/// AI's own `obs.own` only. With the switch off it reads nothing and keeps `harv_seen` empty.
+fn harvester_hit(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) -> Option<HpSeen> {
+    if !state.profile.army.harvester_threat {
+        return None;
+    }
+    let mut hit: Option<HpSeen> = None;
+    for (&id, &(kind, cell, hp)) in &state.harv_seen {
+        let was_hit = match obs.own.binary_search_by_key(&id, |o| o.id) {
+            Ok(i) => (obs.own[i].hp < hp).then(|| (kind, obs.own[i].cell, hp)),
+            Err(_) => Some((kind, cell, hp)),
+        };
+        if hit.is_none() {
+            hit = was_hit;
+        }
+    }
+    let kinds = lens.harvester_kinds();
+    state.harv_seen = obs
+        .own
+        .iter()
+        .filter(|o| o.footprint.is_none() && kinds.contains(&o.kind))
+        .map(|o| (o.id, (o.kind, o.cell, o.hp)))
+        .collect();
+    hit
 }
 
 /// Where the defence goes for a structure hit at `(at, w, h)`: the cell of the nearest armed unit of another
@@ -305,16 +341,58 @@ pub fn value_of(obs: &Observation, lens: &Lens<'_>, ids: &[EntityId]) -> u64 {
 }
 
 /// The attack trigger (A4) at `now` for `count` gathered units worth `value`: never before
-/// `first_attack_tick`; then at `attack_value`, or `max_wait` ticks after the last attack with at least
-/// `min_units`.
+/// `first_attack_tick`; then at [`need_value`], or `max_wait` ticks after the last attack (with the escalation on:
+/// after the last attack or the last failed strike, whichever is later) with at least `min_units`.
 pub fn attack_due(state: &AiState, now: sf_sim::Tick, value: u64, count: usize) -> bool {
     let a = &state.profile.army;
     if now.0 < u64::from(a.first_attack_tick) || count == 0 {
         return false;
     }
-    value >= jittered(state, a.attack_value)
-        || (now.0 >= state.last_attack_tick.0 + jittered(state, a.max_wait)
-            && count >= usize::from(a.min_units))
+    let since = if a.escalate_on() {
+        state.last_attack_tick.0.max(state.bounce_tick.0)
+    } else {
+        state.last_attack_tick.0
+    };
+    value >= need_value(state)
+        || (now.0 >= since + jittered(state, a.max_wait) && count >= usize::from(a.min_units))
+}
+
+/// WP9.3a-1, R2: the value a launch needs. `attack_value` (jittered); with the escalation on and a strike failed, at
+/// least `escalate_permille` thousandths over the value of the strike that failed last, and one credit more at the
+/// least, never above `attack_value_max` (when that is above 0).
+pub fn need_value(state: &AiState) -> u64 {
+    let a = &state.profile.army;
+    let base = jittered(state, a.attack_value);
+    if !a.escalate_on() || state.bounces == 0 {
+        return base;
+    }
+    let b = state.bounce_value;
+    let need = base
+        .max(b * (1000 + u64::from(a.escalate_permille)) / 1000)
+        .max(b + 1);
+    if a.attack_value_max > 0 {
+        need.min(u64::from(a.attack_value_max))
+    } else {
+        need
+    }
+}
+
+/// R2: a strike failed (stuck, patience out or every member dead) with the launch value `launch_value`. Recorded once
+/// per strike: the strike ends here, so no later turn sees it again. A no-op with the escalation off.
+fn record_bounce(state: &mut AiState, now: sf_sim::Tick, launch_value: u64) {
+    if !state.profile.army.escalate_on() {
+        return;
+    }
+    state.bounces += 1;
+    state.bounce_value = launch_value;
+    state.bounce_tick = now;
+}
+
+/// R2: the strike ended because its target is gone (not a failure): the ledger starts again.
+fn reset_bounces(state: &mut AiState) {
+    state.bounces = 0;
+    state.bounce_value = 0;
+    state.bounce_tick = sf_sim::Tick(0);
 }
 
 /// The target cell (A5): beside ([`beside`], facing the gather cell) the construction centre of another
@@ -651,6 +729,13 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
             .is_some_and(|(_, _, since)| now.0 >= since.0 + u64::from(a.attack_patience));
         let patience_out = now.0 >= state.attack_started.0 + u64::from(a.attack_patience);
         if tgt.is_none() || patience_out || stuck {
+            // R2: a gone target resets the ledger; any other end is a failed strike (read before `end_attack`).
+            if tgt.is_none() {
+                reset_bounces(state);
+            } else {
+                let value = state.groups[si].launch_value;
+                record_bounce(state, now, value);
+            }
             home = state.groups[si].members.clone();
             // A reinforcement on its way has nobody to join: it goes home too.
             for g in &state.groups {
@@ -692,6 +777,17 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
         .iter()
         .any(|g| g.stage != GroupStage::Returning)
     {
+        // R2: every member of the strike is dead: a failed strike, unless its target is gone too.
+        if state.profile.army.escalate_on()
+            && let Some(si) = strike_index(state)
+        {
+            if target(state, lens, gather).is_none() {
+                reset_bounces(state);
+            } else {
+                let value = state.groups[si].launch_value;
+                record_bounce(state, now, value);
+            }
+        }
         for g in &state.groups {
             if g.stage != GroupStage::Returning {
                 home.extend(g.members.iter().copied());
@@ -1452,5 +1548,136 @@ fn gather_units(
             order: Order::Move(middle(gather)),
             queued: false,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Profile;
+    use crate::observe::{Seen, open_world};
+    use crate::state::Known;
+    use sf_data::ai_profile::AiProfile;
+    use sf_data::units::{Faction, UnitDefs};
+    use sf_sim::{Footprint, PlayerId, Tick};
+
+    fn obs(tick: u64, member: EntityId, enemy: EntityId, at: Cell) -> Observation {
+        Observation {
+            tick: Tick(tick),
+            player: PlayerId(0),
+            map: (32, 32),
+            credits: 0,
+            ore_stored: 0,
+            storage_capacity: 0,
+            power: None,
+            own: vec![Own {
+                id: member,
+                kind: Kind(1),
+                cell: Cell::new(at.x, at.y + 2),
+                footprint: None,
+                hp: 100,
+                order: Order::Idle,
+                standing: true,
+                max_hp: 100,
+                building: None,
+                repairing: false,
+                factory: None,
+                selling: false,
+                armed: true,
+                mobile: true,
+            }],
+            // The victim keeps its hit points: the strike does no damage.
+            visible: vec![Seen {
+                id: enemy,
+                kind: Kind(2),
+                owner: PlayerId(1),
+                cell: at,
+                footprint: Some(Footprint {
+                    width: 2,
+                    height: 2,
+                }),
+                hp: 500,
+                armed: false,
+            }],
+            gone: Vec::new(),
+            out_of_play: false,
+        }
+    }
+
+    /// R2: a strike in reach of a victim it cannot hurt ends by `stuck` (the victim in sight keeps
+    /// `attack_started` moving, so the patience never runs out) and that is one bounce with its launch value.
+    #[test]
+    fn a_strike_that_ends_stuck_records_one_bounce() {
+        let profile = Profile::resolve(
+            &AiProfile::embedded(),
+            Faction::Meridian,
+            &UnitDefs::embedded(),
+        )
+        .unwrap();
+        let mut state = AiState::new(PlayerId(0), profile, 5, Vec::new());
+        state.profile.army.escalate_permille = 500;
+        state.profile.army.attack_value_max = 3000;
+        let patience = u64::from(state.profile.army.attack_patience);
+        let (member, enemy, at, gather) = (
+            EntityId::new(1, 0),
+            EntityId::new(2, 0),
+            Cell::new(20, 10),
+            Cell::new(5, 25),
+        );
+        state.known_structures.insert(
+            enemy,
+            Known {
+                kind: Kind(2),
+                owner: PlayerId(1),
+                anchor: at,
+                width: 2,
+                height: 2,
+                seen_tick: Tick(0),
+            },
+        );
+        let w = open_world(32, 32);
+        let lens = Lens::new(&w, PlayerId(0));
+        let goal = target(&state, &lens, gather).unwrap();
+        state.add_group(
+            vec![member],
+            goal,
+            GroupStage::Engaged,
+            Tick(10),
+            800,
+            None,
+            None,
+        );
+        state.attack_started = Tick(10);
+        assert!(decide(&mut state, &obs(10, member, enemy, at), &lens, gather).is_empty());
+        assert_eq!(state.bounces, 0);
+        // One tick short of the patience: still on.
+        let t = 10 + patience - 1;
+        assert!(decide(&mut state, &obs(t, member, enemy, at), &lens, gather).is_empty());
+        assert_eq!(state.bounces, 0);
+        assert!(
+            state.attack_started.0 + patience > t + 1,
+            "patience_out is not the cause"
+        );
+        assert!(
+            decide(
+                &mut state,
+                &obs(10 + patience, member, enemy, at),
+                &lens,
+                gather,
+            )
+            .is_empty()
+        );
+        // The groups are on: the survivor goes into a Returning group instead of the returned list.
+        assert!(
+            state
+                .groups
+                .iter()
+                .any(|g| g.stage == GroupStage::Returning && g.recalled == [member])
+        );
+        assert_eq!(
+            (state.bounces, state.bounce_value, state.bounce_tick),
+            (1, 800, Tick(10 + patience))
+        );
+        assert!(state.strike().is_none());
     }
 }

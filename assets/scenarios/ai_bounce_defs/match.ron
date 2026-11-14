@@ -1,0 +1,48 @@
+// The match file of the scenario `ai_bounce` (WP9.3a-1, docs/rules/ai.md "Escalation and the harvester threat (WP9.3a-1)"): player 0,
+// Meridian, is the AI, with a construction centre where the human of `assets/matches/m1.ron` starts, a power plant, a barracks and
+// 1200 credits (it makes riflemen only); player 1, Veyran, is a static strong defence round its construction centre: a power plant and
+// six defence towers, six riflemen and a light tank. Nothing of player 1 builds, produces or attacks. Read by sf_data::match_def like
+// assets/matches/m1.ron.
+//
+// Slots: 0 the AI's centre, 1 its power plant (x 18..19, y 60..61), 2 its barracks, 6 to 19 player 1's objects in the order below.
+(
+    name: "ai_bounce",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 1200,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+                (role: "power_plant", cell: (18, 60)),
+                (role: "barracks", cell: (12, 60)),
+                (role: "refinery", cell: (18, 74)),
+                (role: "harvester", cell: (15, 80)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "power_plant", cell: (76, 20)),
+                (role: "defence_tower", cell: (66, 22)),
+                (role: "defence_tower", cell: (68, 24)),
+                (role: "defence_tower", cell: (66, 26)),
+                (role: "defence_tower", cell: (64, 22)),
+                (role: "defence_tower", cell: (68, 20)),
+                (role: "defence_tower", cell: (64, 26)),
+                (role: "rifleman", cell: (64, 24)),
+                (role: "rifleman", cell: (66, 24)),
+                (role: "rifleman", cell: (66, 28)),
+                (role: "rifleman", cell: (68, 22)),
+                (role: "rifleman", cell: (68, 26)),
+                (role: "rifleman", cell: (70, 24)),
+                (role: "light_tank", cell: (62, 22)),
+                (role: "construction_center", cell: (72, 14)),
+            ],
+        ),
+    ],
+)

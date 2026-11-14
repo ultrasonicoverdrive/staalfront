@@ -1694,3 +1694,448 @@ fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
         "each seat launched"
     );
 }
+
+// ---- WP9.3a-1, R2: the bounce ledger and the escalated trigger --------------------------------------------------
+
+/// A state with the escalation on (`permille`, cap `max`), the base attack value 2,000, a failed strike on the ledger
+/// (`bounce_value`, one bounce at tick 5,000) and the last attack at tick 1,000; `max_wait` 3,000, `min_units` 4.
+fn escalated(permille: u16, max: u32, bounce_value: u64) -> AiState {
+    let (_, mut s) = army_state();
+    let a = &mut s.profile.army;
+    a.attack_value = 2000;
+    a.first_attack_tick = 0;
+    a.max_wait = 3000;
+    a.min_units = 4;
+    a.escalate_permille = permille;
+    a.attack_value_max = max;
+    s.bounces = 1;
+    s.bounce_value = bounce_value;
+    s.bounce_tick = Tick(5000);
+    s.last_attack_tick = Tick(1000);
+    s
+}
+
+/// The least value that launches at tick 3,999 (before the `max_wait` fallback, which needs 4,000 with the rule off and 8,000 with it on):
+/// the smallest `v` in `0..=20000` for which `attack_due` says yes.
+fn least_launch_value(s: &AiState) -> u64 {
+    (0..=20_000)
+        .find(|&v| army::attack_due(s, Tick(3999), v, 8))
+        .expect("some value launches")
+}
+
+#[test]
+fn the_launch_needs_the_failed_value_plus_the_escalation_and_not_one_credit_less() {
+    // 3,000 failed, 250 permille: 3,750 launches, 3,749 does not.
+    let s = escalated(250, 0, 3000);
+    assert_eq!(least_launch_value(&s), 3750);
+    assert!(army::attack_due(&s, Tick(3999), 3751, 8));
+    assert_eq!(army::need_value(&s), 3750);
+    // The attack value dominates a small ledger: 500 failed, 250 permille is 625, under 2,000.
+    assert_eq!(least_launch_value(&escalated(250, 0, 500)), 2000);
+    // At least one credit more than the failed strike, whatever the permille: 1,000 failed at 1 permille is 1,001; 100 at 1
+    // permille would be 100.1, but must be 101 (the base value is lowered to 1 so that the ledger decides).
+    let mut s = escalated(1, 0, 1000);
+    s.profile.army.attack_value = 1;
+    assert_eq!(least_launch_value(&s), 1001);
+    let mut s = escalated(1, 0, 100);
+    s.profile.army.attack_value = 1;
+    assert_eq!(least_launch_value(&s), 101);
+    // Nothing failed yet: the ledger is not read, even with a value on it.
+    let mut s = escalated(250, 0, 3000);
+    s.bounces = 0;
+    assert_eq!(least_launch_value(&s), 2000);
+    // The rule off: the ledger is not read.
+    assert_eq!(least_launch_value(&escalated(0, 0, 3000)), 2000);
+}
+
+#[test]
+fn the_cap_stops_the_growth_and_a_launch_at_the_cap_is_always_possible() {
+    // 7,000 failed, 250 permille is 8,750; the cap 8,000 makes it 8,000 (one credit less does not launch).
+    let s = escalated(250, 8000, 7000);
+    assert_eq!(least_launch_value(&s), 8000);
+    // A failed strike already above the cap: the need is the cap, so the AI never waits for more than it can gather.
+    assert_eq!(least_launch_value(&escalated(250, 8000, 20_000)), 8000);
+    // Without the cap it keeps growing.
+    assert_eq!(least_launch_value(&escalated(250, 0, 7000)), 8750);
+    // The cap is read only with the rule on.
+    assert_eq!(least_launch_value(&escalated(0, 8000, 7000)), 2000);
+}
+
+#[test]
+fn the_max_wait_fallback_counts_from_the_failed_strike_when_that_is_later() {
+    // The last attack at 1,000, the failed strike ended at 5,000, `max_wait` 3,000: a value of 1 launches at 8,000, not 4,000.
+    let s = escalated(250, 0, 3000);
+    assert!(!army::attack_due(&s, Tick(7999), 1, 8));
+    assert!(army::attack_due(&s, Tick(8000), 1, 8));
+    // Still needs `min_units` (4).
+    assert!(!army::attack_due(&s, Tick(8000), 1, 3));
+    assert!(army::attack_due(&s, Tick(8000), 1, 4));
+    // The rule off: the time counts from the last attack, as before.
+    let off = escalated(0, 0, 3000);
+    assert!(army::attack_due(&off, Tick(4000), 1, 8));
+    assert!(!army::attack_due(&off, Tick(3999), 1, 8));
+    // A failed strike before the last attack does not delay it (cannot happen in a run, but the later of the two counts).
+    let mut early = escalated(250, 0, 3000);
+    early.bounce_tick = Tick(500);
+    assert!(army::attack_due(&early, Tick(4000), 1, 8));
+    assert!(!army::attack_due(&early, Tick(3999), 1, 8));
+}
+
+/// A strike of six riflemen out (launched at 3,000 with the attack value at six), `permille` escalation; the world and the
+/// own units.
+fn strike_out(permille: u16) -> (World, AiState, Vec<Own>) {
+    let (world, s, _, own) = launched(6, 6, |a| a.escalate_permille = permille);
+    assert_eq!(s.groups.len(), 1);
+    assert_eq!(s.groups[0].launch_value, 6 * rifleman_cost(&world));
+    (world, s, own)
+}
+
+#[test]
+fn a_strike_that_runs_out_of_patience_is_a_bounce_recorded_once() {
+    let (world, mut s, own) = strike_out(250);
+    let c = rifleman_cost(&world);
+    let patience = u64::from(s.profile.army.attack_patience);
+    // Before the patience is out nothing is recorded.
+    army_turn(
+        &world,
+        &mut s,
+        &observation(&world, 3000 + patience - 40, own.clone()),
+    );
+    assert_eq!(s.bounces, 0);
+    // At the turn it runs out: one bounce, with the value the strike was launched with, at that tick.
+    army_turn(
+        &world,
+        &mut s,
+        &observation(&world, 3000 + patience, own.clone()),
+    );
+    assert_eq!(
+        (s.bounces, s.bounce_value, s.bounce_tick),
+        (1, 6 * c, Tick(3000 + patience))
+    );
+    // The turns after it (the survivors are on their way home) record nothing more.
+    for k in 1..4 {
+        army_turn(
+            &world,
+            &mut s,
+            &observation(&world, 3000 + patience + 40 * k, own.clone()),
+        );
+    }
+    assert_eq!((s.bounces, s.bounce_tick), (1, Tick(3000 + patience)));
+}
+
+#[test]
+fn a_strike_whose_members_are_all_dead_is_a_bounce_recorded_once() {
+    let (world, mut s, own) = strike_out(250);
+    let c = rifleman_cost(&world);
+    // Everybody of the strike is gone from the observation (the base stays).
+    let base_only = base(&world);
+    let _ = own;
+    army_turn(
+        &world,
+        &mut s,
+        &observation(&world, 3400, base_only.clone()),
+    );
+    assert_eq!(
+        (s.bounces, s.bounce_value, s.bounce_tick),
+        (1, 6 * c, Tick(3400))
+    );
+    assert!(s.groups.is_empty());
+    for k in 1..4 {
+        army_turn(
+            &world,
+            &mut s,
+            &observation(&world, 3400 + 40 * k, base_only.clone()),
+        );
+    }
+    assert_eq!((s.bounces, s.bounce_tick), (1, Tick(3400)));
+}
+
+#[test]
+fn with_the_rule_off_nothing_is_recorded_and_the_ledger_is_not_read_or_hashed() {
+    let (world, mut s, own) = strike_out(0);
+    let patience = u64::from(s.profile.army.attack_patience);
+    let before = s.digest();
+    army_turn(&world, &mut s, &observation(&world, 3000 + patience, own));
+    assert_eq!((s.bounces, s.bounce_value, s.bounce_tick), (0, 0, Tick(0)));
+    // A ledger put on it by hand changes neither the trigger nor the digest.
+    let mut t = s.clone();
+    t.bounces = 3;
+    t.bounce_value = 9999;
+    t.bounce_tick = Tick(4242);
+    assert_eq!(t.digest(), s.digest());
+    assert_ne!(before, s.digest(), "the strike ended: the state moved");
+    // And the trigger does not read it: a state with a ledger on it launches exactly where one without does.
+    let (_, mut f, _) = strike_out(0);
+    let fresh = army::attack_due(&f, Tick(9000), 2000, 8);
+    f.bounces = 3;
+    f.bounce_value = 1_000_000;
+    assert_eq!(army::attack_due(&f, Tick(9000), 2000, 8), fresh);
+}
+
+#[test]
+fn a_target_that_is_gone_ends_the_strike_without_a_bounce_and_clears_the_ledger() {
+    let (world, mut s, own) = strike_out(250);
+    // Two earlier failures on the ledger; then the enemy's start site is seen empty and nothing else of it is known.
+    s.bounces = 2;
+    s.bounce_value = 5000;
+    s.bounce_tick = Tick(2500);
+    s.sites_cleared = vec![P1];
+    s.known_structures.clear();
+    assert!(army::target(&s, &Lens::new(&world, P0), gather()).is_none());
+    army_turn(&world, &mut s, &observation(&world, 3040, own));
+    assert!(s.groups.is_empty() || s.groups.iter().all(|g| g.stage == GroupStage::Returning));
+    assert_eq!((s.bounces, s.bounce_value, s.bounce_tick), (0, 0, Tick(0)));
+    // The same when every member is dead and the target is gone too.
+    let (world, mut s, _) = strike_out(250);
+    s.bounces = 2;
+    s.bounce_value = 5000;
+    s.bounce_tick = Tick(2500);
+    s.sites_cleared = vec![P1];
+    s.known_structures.clear();
+    army_turn(&world, &mut s, &observation(&world, 3040, base(&world)));
+    assert_eq!((s.bounces, s.bounce_value, s.bounce_tick), (0, 0, Tick(0)));
+}
+
+#[test]
+fn a_recall_by_a_hit_on_the_centre_is_no_bounce() {
+    let (world, mut s, own) = strike_out(250);
+    // The centre (slot 0) is hit: every group out is called back (stage Returning).
+    watch(&world, &mut s, &observation(&world, 3010, own.clone()));
+    let mut centre = own.clone();
+    centre[0].hp = 10;
+    watch(&world, &mut s, &observation(&world, 3020, centre.clone()));
+    assert_eq!(s.groups[0].stage, GroupStage::Returning);
+    // Later turns, whether the recalled members live or die, record nothing.
+    army_turn(&world, &mut s, &observation(&world, 3040, centre));
+    assert_eq!(s.bounces, 0);
+    army_turn(&world, &mut s, &observation(&world, 3080, base(&world)));
+    assert_eq!((s.bounces, s.bounce_value, s.bounce_tick), (0, 0, Tick(0)));
+}
+
+#[test]
+fn the_escalated_trigger_holds_a_gathered_wave_back_that_the_old_rule_would_send() {
+    // The wiring in the army turn: six riflemen are gathered (worth 6 c), the failed strike was 5 c, 500 permille makes the need
+    // 7.5 c; the old rule (trigger 6 c) launches, the escalated one waits.
+    let run = |permille: u16| {
+        let (world, mut s) = army_state();
+        let c = rifleman_cost(&world);
+        s.profile.army.attack_value = (6 * c) as u32;
+        s.profile.army.escalate_permille = permille;
+        s.bounces = 1;
+        s.bounce_value = 5 * c;
+        s.bounce_tick = Tick(2900);
+        let mut own = base(&world);
+        own.extend(gathered_soldiers(6));
+        army_turn(&world, &mut s, &observation(&world, 3000, own));
+        s.attacks_launched
+    };
+    assert_eq!(run(0), 1);
+    assert_eq!(run(500), 0);
+}
+
+// ---- WP9.3a-1: a hit on an own harvester is a threat -------------------------------------------------------------
+
+/// A state with the harvester threat on, the base and six riflemen gathered (ids 20 to 25), the observation of tick 3,000 taken
+/// (`watch`ed once, so that the hit points are known); returns the world, the state and the own units.
+fn harvest_state() -> (World, AiState, Vec<Own>) {
+    let (world, mut s) = army_state();
+    s.profile.army.harvester_threat = true;
+    s.profile.army.attack_value = 1_000_000;
+    let mut own = base(&world);
+    own.extend(gathered_soldiers(6));
+    watch(&world, &mut s, &observation(&world, 3000, own.clone()));
+    (world, s, own)
+}
+
+/// `own` with the hit points of the unit `id` set to `hp`.
+fn hurt(own: &[Own], id: u32, hp: u32) -> Vec<Own> {
+    let mut v = own.to_vec();
+    v.iter_mut().find(|o| o.id.index() == id).unwrap().hp = hp;
+    v
+}
+
+#[test]
+fn a_hit_on_an_own_harvester_is_a_threat_at_the_cell_of_the_nearest_armed_enemy_seen() {
+    let (world, mut s, own) = harvest_state();
+    assert_eq!(s.threat, None);
+    // Harvester 10 loses hit points; two raiders are seen, the nearer one to the harvester at (15, 80) wins.
+    let mut o = observation(&world, 3010, hurt(&own, 10, 60));
+    o.visible = vec![seen_raider(60, 30, 80, true), seen_raider(61, 19, 81, true)];
+    watch(&world, &mut s, &o);
+    assert_eq!(s.threat, Some((Cell::new(19, 81), Tick(3010))));
+    assert_eq!(s.defend_since, Some(Tick(3010)));
+    assert_eq!(s.directive.posture, sf_ai::state::Posture::Defend);
+    assert_eq!(s.directive.target, Some(Cell::new(19, 81)));
+}
+
+#[test]
+fn a_harvester_that_is_gone_is_a_hit_too() {
+    let (world, mut s, own) = harvest_state();
+    let mut gone = own.clone();
+    gone.retain(|o| o.id.index() != 10);
+    let mut o = observation(&world, 3010, gone);
+    o.visible = vec![seen_raider(60, 17, 80, true)];
+    watch(&world, &mut s, &o);
+    assert_eq!(s.threat, Some((Cell::new(17, 80), Tick(3010))));
+}
+
+#[test]
+fn a_hit_on_a_unit_that_is_no_harvester_is_not_a_threat() {
+    let (world, mut s, own) = harvest_state();
+    // A rifleman at home loses hit points, another one dies: nothing is defended.
+    let mut o = observation(&world, 3010, hurt(&own, 20, 40));
+    o.visible = vec![seen_raider(60, 22, 64, true)];
+    watch(&world, &mut s, &o);
+    assert_eq!(s.threat, None);
+    let mut dead = own.clone();
+    dead.retain(|o| o.id.index() != 21);
+    let mut o = observation(&world, 3020, dead);
+    o.visible = vec![seen_raider(60, 22, 64, true)];
+    watch(&world, &mut s, &o);
+    assert_eq!(s.threat, None);
+    assert_eq!(s.directive.posture, sf_ai::state::Posture::Gather);
+}
+
+#[test]
+fn with_the_switch_off_a_hit_on_a_harvester_is_nothing() {
+    let (world, mut s) = army_state();
+    s.profile.army.attack_value = 1_000_000;
+    let mut own = base(&world);
+    own.extend(gathered_soldiers(6));
+    assert!(!s.profile.army.harvester_threat);
+    watch(&world, &mut s, &observation(&world, 3000, own.clone()));
+    let mut o = observation(&world, 3010, hurt(&own, 10, 60));
+    o.visible = vec![seen_raider(60, 19, 81, true)];
+    watch(&world, &mut s, &o);
+    assert_eq!(s.threat, None);
+    assert!(
+        s.harv_seen.is_empty(),
+        "nothing is remembered with the switch off"
+    );
+}
+
+#[test]
+fn a_harvester_being_shot_raises_one_threat_per_defend_ticks_and_not_one_per_think() {
+    let (world, mut s, own) = harvest_state();
+    let d = u64::from(s.profile.army.defend_ticks);
+    let raider = vec![seen_raider(60, 19, 81, true)];
+    let hit = |tick: u64, hp: u32| {
+        let mut o = observation(&world, tick, hurt(&own, 10, hp));
+        o.visible = raider.clone();
+        o
+    };
+    // The first hit raises the threat.
+    watch(&world, &mut s, &hit(3010, 90));
+    assert_eq!(s.threat, Some((Cell::new(19, 81), Tick(3010))));
+    // The harvester keeps losing hit points every think: the threat stays the one of 3,010 (no new tick, no new call).
+    for k in 1..d / 10 {
+        watch(&world, &mut s, &hit(3010 + 10 * k, 90 - k as u32));
+        assert_eq!(s.threat, Some((Cell::new(19, 81), Tick(3010))), "think {k}");
+    }
+    // `defend_ticks` after the call it is over (the hit of that very think does not renew it).
+    watch(&world, &mut s, &hit(3010 + d, 10));
+    assert_eq!(s.threat, None);
+    // The next hit raises a new one.
+    watch(&world, &mut s, &hit(3020 + d, 5));
+    assert_eq!(s.threat, Some((Cell::new(19, 81), Tick(3020 + d))));
+}
+
+#[test]
+fn a_structure_hit_in_the_same_think_comes_first() {
+    let (world, mut s, own) = harvest_state();
+    // Plant (slot 1) and harvester hit in the same think: the structure's threat cell is used.
+    let mut hit = hurt(&own, 10, 60);
+    hit[1].hp = 900;
+    let mut o = observation(&world, 3010, hit);
+    o.visible = vec![seen_raider(60, 20, 62, true), seen_raider(61, 19, 81, true)];
+    watch(&world, &mut s, &o);
+    assert_eq!(s.threat, Some((Cell::new(20, 62), Tick(3010))));
+}
+
+#[test]
+fn the_harvester_threat_calls_the_units_at_home_to_the_raider() {
+    let (world, mut s, own) = harvest_state();
+    s.profile.army.defend_ratio_permille = 1500;
+    let mut o = observation(&world, 3010, hurt(&own, 10, 60));
+    o.visible = vec![seen_raider(60, 19, 81, true)];
+    watch(&world, &mut s, &o);
+    let out = army_turn(&world, &mut s, &o);
+    let moves = attack_moves(&out);
+    assert_eq!(moves.len(), 1, "{out:?}");
+    assert_eq!(moves[0].1, middle(Cell::new(19, 81)));
+    // One raider worth c, ratio 1500: units worth 1.5 c, two riflemen, the two nearest to the raider.
+    assert_eq!(moves[0].0.len(), 2, "{moves:?}");
+    // No structure was hit: every structure is whole.
+    assert!(
+        own.iter()
+            .filter(|o| o.footprint.is_some())
+            .all(|o| o.hp == 1000)
+    );
+}
+
+#[test]
+fn a_raider_that_is_not_seen_changes_nothing_until_it_is() {
+    // The twin of the fence tests: two worlds that differ only by a raider of player 1 in the far corner, out of sight. The AI's
+    // observations are equal; the same hit on a harvester gives the same state in both; the threat cell is beside the harvester, facing
+    // the gather cell. The same hit with the raider put in sight gives its cell.
+    let build = |hidden: bool| {
+        let mut sc = load("ai_vs_passive");
+        if hidden {
+            sc.commands.push(sf_headless::scenario::TimedCommand {
+                tick: 0,
+                player: 1,
+                command: sf_headless::scenario::Action::SpawnUnit {
+                    kind: 12,
+                    owner: 1,
+                    cell: (90, 90),
+                },
+            });
+        }
+        let f = go(&sc, 5);
+        let mut s = f.ais[0].state().clone();
+        s.gather = Some(gather());
+        s.profile.scout = None;
+        s.profile.army.harvester_threat = true;
+        (*f.world, s)
+    };
+    let (wa, mut sa) = build(true);
+    let (wb, mut sb) = build(false);
+    let mut oa = observation(&wa, 3000, {
+        let mut o = base(&wa);
+        o.extend(gathered_soldiers(4));
+        o
+    });
+    let mut ob = oa.clone();
+    // The real observations of the two worlds have the same entities in sight.
+    let real_a = Observation::build(&wa, P0, &BTreeMap::new());
+    let real_b = Observation::build(&wb, P0, &BTreeMap::new());
+    assert_eq!(
+        real_a.visible, real_b.visible,
+        "the hidden raider is not seen"
+    );
+    oa.visible = real_a.visible.clone();
+    ob.visible = real_b.visible.clone();
+    watch(&wa, &mut sa, &oa);
+    watch(&wb, &mut sb, &ob);
+    let mut ha = oa.clone();
+    ha.tick = Tick(3010);
+    ha.own.iter_mut().find(|o| o.id.index() == 10).unwrap().hp = 50;
+    let mut hb = ob.clone();
+    hb.tick = Tick(3010);
+    hb.own.iter_mut().find(|o| o.id.index() == 10).unwrap().hp = 50;
+    watch(&wa, &mut sa, &ha);
+    watch(&wb, &mut sb, &hb);
+    assert!(sa.threat.is_some());
+    assert_eq!(sa.threat, sb.threat);
+    assert_eq!(sa.digest(), sb.digest());
+    // With the raider in sight the threat cell is its cell.
+    let (wc, mut sc) = build(false);
+    let mut oc = ob.clone();
+    watch(&wc, &mut sc, &oc);
+    oc.tick = Tick(3010);
+    oc.own.iter_mut().find(|o| o.id.index() == 10).unwrap().hp = 50;
+    oc.visible = vec![seen_raider(60, 19, 81, true)];
+    watch(&wc, &mut sc, &oc);
+    assert_eq!(sc.threat.unwrap().0, Cell::new(19, 81));
+    assert_ne!(sc.threat, sb.threat);
+}
