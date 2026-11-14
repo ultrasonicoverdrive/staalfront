@@ -23,6 +23,34 @@ fn assets() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets")
 }
 
+#[test]
+fn the_baked_shade_reaches_the_vertices_and_the_team_colour_stays_whole() {
+    // COLOR_0 multiplies the material colour (the glb loader, WP11.6a): a model of five plain
+    // materials gets far more than five colours; the team vertices keep weight 1 untouched.
+    for file in FILES {
+        let m = load(file);
+        let verts: Vec<[f32; 4]> = m.levels[0]
+            .parts
+            .iter()
+            .flat_map(|p| p.mesh.vertices.iter().map(|v| v.color))
+            .collect();
+        let team: Vec<[f32; 4]> = verts.iter().copied().filter(|c| c[3] > 0.0).collect();
+        assert!(!team.is_empty(), "{file}");
+        assert!(
+            team.iter().all(|c| *c == sf_render::mesh::Vertex::TEAM),
+            "{file}: a team vertex was shaded"
+        );
+        let mut shades: Vec<[u32; 3]> = verts
+            .iter()
+            .filter(|c| c[3] == 0.0)
+            .map(|c| [c[0].to_bits(), c[1].to_bits(), c[2].to_bits()])
+            .collect();
+        shades.sort_unstable();
+        shades.dedup();
+        assert!(shades.len() > 50, "{file}: {} colours", shades.len());
+    }
+}
+
 /// The six models, sorted by file name.
 const FILES: [&str; 6] = [
     "meridian_construction_center.glb",

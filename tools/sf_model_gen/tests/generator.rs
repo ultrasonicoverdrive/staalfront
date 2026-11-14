@@ -8,12 +8,16 @@ use sf_model_gen::files;
 
 /// (file, byte length, FNV-1a 64 of the bytes), pinned as literals, sorted by file name.
 const PINNED: [(&str, usize, u64); 6] = [
-    ("meridian_construction_center.glb", 0, 0),
-    ("meridian_harvester.glb", 0, 0),
-    ("meridian_light_tank.glb", 0, 0),
-    ("veyran_defence_tower.glb", 0, 0),
-    ("veyran_light_tank.glb", 0, 0),
-    ("veyran_power_plant.glb", 0, 0),
+    (
+        "meridian_construction_center.glb",
+        311532,
+        0xe10017629a126140,
+    ),
+    ("meridian_harvester.glb", 245640, 0xb0906761beed1116),
+    ("meridian_light_tank.glb", 261504, 0x1ffa2bb4720ce1c9),
+    ("veyran_defence_tower.glb", 132364, 0xb2244ce5d2175dd2),
+    ("veyran_light_tank.glb", 223384, 0xd24d42ce98ab8d32),
+    ("veyran_power_plant.glb", 188340, 0x37e789954ba4d2cd),
 ];
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -34,8 +38,11 @@ fn two_runs_give_the_same_bytes_and_every_file_is_pinned() {
     let second = files();
     assert_eq!(first, second, "two runs differ");
     assert_eq!(first.len(), PINNED.len());
-    for ((name, bytes), (pin_name, len, hash)) in first.iter().zip(PINNED) {
+    // Print the whole table first, so a deliberate change can be pasted in one go.
+    for (name, bytes) in &first {
         println!("    (\"{name}\", {}, {:#018x}),", bytes.len(), fnv1a(bytes));
+    }
+    for ((name, bytes), (pin_name, len, hash)) in first.iter().zip(PINNED) {
         assert_eq!(name, pin_name);
         assert_eq!(bytes.len(), len, "{name} length");
         assert_eq!(
