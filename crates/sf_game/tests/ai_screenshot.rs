@@ -256,7 +256,7 @@ fn ai_units_near(snap: &SimSnapshot, x: i64, y: i64, r: i64) -> usize {
 fn an_ai_attack_wave_in_the_games_picture() {
     // WP9.1c-2: the same match on the sim thread to the AI's win over the idle human (measured in
     // `ai_in_game.rs`; WP9.1c-3: the first wave of 6 leaves at tick 10,037 (9,717 before WP9.2a-2) on `attack_value`, the match is decided at
-    // 11,664; it was 12 units at 6,037 and 8,396). Pictures, the camera on the middle of the AI's army: gathered beside
+    // 12,673 (11,664 before WP9.2a); it was 12 units at 6,037 and 8,396). Pictures, the camera on the middle of the AI's army: gathered beside
     // its base (9,600), on the march (10,600), at the human's construction centre (12,400); and the whole map at 10,600.
     let assets = assets();
     let file = matchplay::file_path(Some(std::path::Path::new("m1_ai")), &assets);

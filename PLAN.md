@@ -496,6 +496,7 @@ Layered (analysis §12, §22G):
   about tick 2,900, so an early infantry rush by a human beats the opening. The target "goal list complete by 20,000 with the attack off" is met in `m1_ai` (19,777) and missed in
   `ai_vs_passive` (22,730); decision: the miss is accepted, its cause is the map's ore (174 cells in six fields of 3,480; the near field is mined out at about 9,000 to 10,000). Numbers and
   tables: `docs/rules/ai.md`, "The opening (WP9.1c-3)".*
+  *14-11-2026 (orchestrator decision, open to Tijmen's objection): superseded, 20,297 since WP9.2a-2, see "The start-site advantage" in `docs/rules/ai.md`. The target becomes "goal list complete by 20,500 since WP9.2a-2 (measured 20,297)"; the bound in `crates/sf_game/tests/ai_in_game.rs` is 20,500, the exact pin 20,297 stays.*
   *12-11-2026 (orchestrator; design memo `wp9.2-9.5-ontwerp`): **the rest of phase 9 is built in the order 9.5a, 9.2a, 9.2b, 9.3a [xhigh], 9.3b [xhigh], 9.4, 9.5b.**
   9.5 is split: **9.5a** the AI-vs-AI tournament runner (`sf_headless tournament`, the match `m1_duel`, built first because every later WP changes army
   behaviour and today the only evidence is two scenarios against a passive opponent) and **9.5b** the 100-game report and tuning. The tournament runs

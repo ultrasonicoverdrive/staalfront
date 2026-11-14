@@ -1777,6 +1777,7 @@ fn the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks() {
     // a third power plant for the radar included); the army floor is reached at 10,687 (pinned in
     // `the_vehicle_factory_comes_before_...`). The target of 20,000 is NOT met here (met in the game seat, 19,777): the
     // ore of the map is the limit (docs/rules/ai.md "The opening").
+    // 14-11-2026 (WP9.2a-2): superseded, 20,297 since WP9.2a-2, see "The start-site advantage"; target now 20,500.
     assert_eq!(
         builds,
         [

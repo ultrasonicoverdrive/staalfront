@@ -622,7 +622,7 @@ fn the_army_timing_in_the_game_seat() {
 /// `max_wait` 12,000): last build 3,017 (the barracks; the list then waits for the second refinery while the floor takes
 /// the money), first army unit 4,587, army at the gather cell 0, 4, 0 (the wave of 6, value 2,000, leaves at 9,717
 /// on `attack_value`), win 11,664. (WP9.1c-2, vehicle factory fifth, `max_wait` 6,000: 1,097, 1,147, [10, 0, 0], 6,037, 8,396.)
-// WP9.2a re-pin: 3,017 -> 12,097 (the AI rebuilds a structure while the strike is staging and marching); measured: with the staging, reinforcement and
+// WP9.2a re-pin: 3,017 -> 11,657 (the AI rebuilds a structure while the strike is staging and marching); measured: with the staging, reinforcement and
 // partial-defence numbers of the shipped profile set to 0 the old values come back (3,017, win 11,664).
 const M1_AI_LAST_BUILD: u64 = 11_657;
 const M1_AI_FIRST_ARMY: u64 = 4_547;
@@ -744,7 +744,8 @@ fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
     assert_eq!(last_build, 20_297);
     // The last structure ordered is the list's last entry, the advanced defences (kind 7).
     assert_eq!(last_kind, 7);
-    assert!(last_build <= 21_000, "{last_build}");
+    // The target since WP9.2a-2: 20,500 (orchestrator decision 14-11-2026, PLAN.md), measured value plus a margin.
+    assert!(last_build <= 20_500, "{last_build}");
 }
 
 /// What `the_opening_in_the_game_seat` reads off a run.

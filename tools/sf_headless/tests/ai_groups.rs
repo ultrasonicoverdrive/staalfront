@@ -1646,6 +1646,9 @@ fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
     let mut out = [false, false];
     // The most groups each seat had out at one time (a strike and its reinforcement make two).
     let mut most = [0usize, 0];
+    // Whether each seat had a real reinforcement out (a group with `merge_into` set; `most` also counts a
+    // `Returning` group, review nit of WP9.2a-2).
+    let mut reinforced = [false, false];
     let mut wanted = Vec::new();
     while world.tick().0 < 30_000 {
         for ai in &mut ais {
@@ -1664,6 +1667,7 @@ fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
                 watch_groups(&world, st, world.tick().0, &mut watched[seat]);
                 out[seat] |= !st.groups.is_empty();
                 most[seat] = most[seat].max(st.groups.len());
+                reinforced[seat] |= st.groups.iter().any(|g| g.merge_into.is_some());
             }
         }
         if world.match_result().is_some() {
@@ -1682,8 +1686,8 @@ fn a_long_duel_with_the_shipped_numbers_loses_no_unit() {
     // this a later change of the profile could make the game stop covering the two-groups case and the test would
     // still pass.
     assert!(
-        most.iter().any(|&n| n >= 2),
-        "no seat had a strike and a reinforcement out together: {most:?}"
+        reinforced.iter().any(|&r| r),
+        "no seat had a reinforcement out: most groups at once {most:?}"
     );
     assert!(
         ais.iter().all(|a| a.state().attacks_launched > 0),

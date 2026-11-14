@@ -249,3 +249,67 @@ fn with_the_rules_off_the_south_west_wave_starts_seven_cells_from_the_gather_cel
     assert_eq!(launch_spread(0, true), [7, 4], "game 0: seat 0 is on SW");
     assert_eq!(launch_spread(4, true), [4, 7], "game 4: seat 0 is on NE");
 }
+
+/// How far from the staging cell the live members of the first strike of each seat stand at the staging exit
+/// (the first army turn the strike is no longer `Staging`): `[seat]`, `None` when that seat's first strike has
+/// no staging cell or does not leave it before tick 20,000.
+fn exit_spread(game: u32, rules_off: bool) -> [Option<u32>; 2] {
+    let (mut world, mut ais) = duel(game, rules_off);
+    let mut wanted = Vec::new();
+    let mut spread = [None; 2];
+    let mut done = [false; 2];
+    while world.tick().0 < 20_000 && done.iter().any(|d| !d) {
+        step(&mut world, &mut ais, &mut wanted);
+        for (seat, ai) in ais.iter().enumerate() {
+            let st = ai.state();
+            if done[seat] {
+                continue;
+            }
+            let Some(g) = st.groups.iter().find(|g| g.id == 0) else {
+                continue;
+            };
+            let Some(cell) = g.staging else {
+                done[seat] = true;
+                continue;
+            };
+            if g.stage == sf_ai::state::GroupStage::Staging {
+                continue;
+            }
+            let obs = Observation::build(&world, st.player, &BTreeMap::new());
+            spread[seat] = obs
+                .own
+                .iter()
+                .filter(|o| g.members.binary_search(&o.id).is_ok())
+                .map(|o| cheb(o.cell, cell))
+                .max();
+            done[seat] = true;
+        }
+    }
+    spread
+}
+
+/// The staging-exit spread, pinned exactly per game (`[seat 0, seat 1]`, `None` = that seat's first strike does
+/// not leave a staging cell before tick 20,000). Only one seat of each game gets there, so three games are used:
+/// game 0 (seat 0 on SW), game 4 (seat 0 on NE) and game 3 (seat 1 on NE, the north-east game with a rules-off
+/// exit; in games 0 and 4 the north-east seat has none with the rules off). With the rules on: SW 0, NE 1 and 1;
+/// with them off: SW 3 (game 0) and 4 (game 4), NE 4 (game 3).
+const EXIT_SPREAD: [(u32, [Option<u32>; 2], [Option<u32>; 2]); 3] = [
+    (0, [Some(0), None], [Some(3), None]),
+    (4, [Some(1), None], [None, Some(4)]),
+    (3, [None, Some(1)], [None, Some(4)]),
+];
+
+#[test]
+fn the_wave_leaves_the_staging_cell_in_one_body_on_both_start_sites() {
+    for (game, on, _) in EXIT_SPREAD {
+        assert_eq!(exit_spread(game, false), on, "game {game}, rules on");
+    }
+}
+
+#[test]
+fn with_the_rules_off_the_wave_leaves_the_staging_cell_spread_out() {
+    // The control: both 9.2a-2 numbers at 0; the test above fails on these.
+    for (game, _, off) in EXIT_SPREAD {
+        assert_eq!(exit_spread(game, true), off, "game {game}, rules off");
+    }
+}
