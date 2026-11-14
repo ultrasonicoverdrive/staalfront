@@ -31,7 +31,7 @@ CLAUDE.md or an agent file.
 4. **Review gate:** the `reviewer` agent checks out the PR, runs the checks itself,
    assesses it against the WP's acceptance criteria, §5 and §12.4, and posts
    `APPROVE` or `CHANGES REQUESTED` as a PR comment. The orchestrator merges only
-   after `APPROVE`; on `CHANGES REQUESTED` a fix round of `bouwer-opus-medium`
+   after `APPROVE`; on `CHANGES REQUESTED` a fix round of `bouwer-opus-low`
    (§3) fixes the findings on the same branch and the reviewer reviews again.
 5. After each phase: a short playable build and a report in `docs/progress.md`.
 
@@ -49,7 +49,7 @@ Agent definitions live in `.claude/agents/`.
 |---|---|---|
 | `bouwer-sonnet` | sonnet, medium | Default for every WP; works through the done-checklist in its agent file. |
 | `bouwer-sonnet` with per-call `model: opus`, effort low | opus, low | WPs marked **[xhigh]** in PLAN.md §3 (since 25-10-2026); same instructions and checklist. |
-| `bouwer-opus-medium` | opus, low | Every fix round, started at effort low. |
+| `bouwer-opus-low` | opus, low | Every fix round, started at effort low. |
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |
 
@@ -58,7 +58,7 @@ By default, a WP is built by `bouwer-sonnet` at effort medium, which works throu
 frozen copies untouched, performance numbers, licence lines, green CI on both OSes, parallel
 work, in-game screenshots for visible changes, the basics, time split from timestamps,
 presentation data in RON, tests that call the production code, numbers pinned: literals for checksum-only values, the shipped RON against literals, and both sides of a data-to-sim mapping). Every fix round after
-`CHANGES REQUESTED` runs on `bouwer-opus-medium` at effort low and continues on the WP's own
+`CHANGES REQUESTED` runs on `bouwer-opus-low` at effort low and continues on the WP's own
 branch. The reviewer stays on Opus at effort medium (decision Tijmen 24-10-2026, replacing
 Sonnet high and the two fix-round levels of 21-10-2026). A WP marked **[xhigh]** starts the same
 `bouwer-sonnet` agent with per-call `model: opus` and effort low, so it keeps the same
