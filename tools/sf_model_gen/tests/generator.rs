@@ -11,7 +11,7 @@ const PINNED: [(&str, usize, u64); 6] = [
     (
         "meridian_construction_center.glb",
         311532,
-        0xe10017629a126140,
+        0x08330bf944248af7,
     ),
     ("meridian_harvester.glb", 245640, 0xb0906761beed1116),
     ("meridian_light_tank.glb", 261504, 0x1ffa2bb4720ce1c9),

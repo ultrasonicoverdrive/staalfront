@@ -63,7 +63,7 @@ fn every_part_of_both_rigs_has_a_picture_of_its_shape_size() {
             };
             let px = |v: f32| (v.ceil() as u32).max(3);
             assert_eq!((img.width, img.height), (px(w), px(h)), "{rel}");
-            assert_eq!(part.mouth_shapes.len() > 0, part.name == "mouth", "{rel}");
+            assert_eq!(!part.mouth_shapes.is_empty(), part.name == "mouth", "{rel}");
         }
     }
 }

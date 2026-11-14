@@ -303,10 +303,7 @@ impl Loader<'_> {
         if !self.use_models {
             return None;
         }
-        let file = damage.model_of(path, stage)?;
-        if !self.assets.join(&file).is_file() {
-            return None;
-        }
+        let file = state_file(self.assets, &damage.model_of(path, stage)?)?;
         self.source(role, faction, &Model::Glb(file), base)
     }
 
@@ -327,7 +324,7 @@ impl Loader<'_> {
             let staged = match model {
                 Model::Glb(path) if self.use_models => stages
                     .model_of(path, idx)
-                    .filter(|file| self.assets.join(file).is_file()),
+                    .and_then(|file| state_file(self.assets, &file)),
                 _ => None,
             };
             let from_model =
@@ -354,6 +351,17 @@ impl Loader<'_> {
             put(idx, source);
         }
     }
+}
+
+/// The file of a structure state (a build stage or a damage stage) as it lies under `assets`: `file` if it
+/// exists; for a set v5 model, whose generator has made only the finished look so far (WP11.6a; the states
+/// are WP11.6c), the set v4 file of the same name; else none.
+pub(crate) fn state_file(assets: &Path, file: &str) -> Option<String> {
+    if assets.join(file).is_file() {
+        return Some(file.to_owned());
+    }
+    let v4 = format!("set_v4/{}", file.strip_prefix("set_v5/")?);
+    assets.join(&v4).is_file().then_some(v4)
 }
 
 impl Roster {
@@ -1682,7 +1690,7 @@ mod tests {
                     (DamageStage::Heavy, "_heavily_damaged"),
                 ] {
                     let file = path.replace(".glb", &format!("{suffix}.glb"));
-                    if assets().join(&file).is_file() {
+                    if super::state_file(&assets(), &file).is_some() {
                         from_disk.push((def.id.clone(), faction, stage));
                     }
                 }

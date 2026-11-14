@@ -74,8 +74,9 @@ pub fn unit_normal(t: &Tri) -> V {
 /// Ring one at 30° from the normal, ring two at 65°; the values are fixed decimals.
 const RAY_DIRS: [V; AO_RAYS] = {
     // cos/sin of 0, 45, ..., 315 degrees.
-    const C: [f32; 8] = [1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071, 0.0, 0.7071];
-    const S: [f32; 8] = [0.0, 0.7071, 1.0, 0.7071, 0.0, -0.7071, -1.0, -0.7071];
+    const H: f32 = std::f32::consts::FRAC_1_SQRT_2;
+    const C: [f32; 8] = [1.0, H, 0.0, -H, -1.0, -H, 0.0, H];
+    const S: [f32; 8] = [0.0, H, 1.0, H, 0.0, -H, -1.0, -H];
     let mut d = [[0.0, 0.0, 1.0]; AO_RAYS];
     let mut i = 0;
     while i < 8 {

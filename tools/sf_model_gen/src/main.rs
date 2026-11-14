@@ -50,7 +50,7 @@ fn main() -> ExitCode {
         }
     }
     // The restyled cutscene parts go under assets/ (only with the default output folder).
-    if dir == PathBuf::from("assets/set_v5") {
+    if dir.as_path() == std::path::Path::new("assets/set_v5") {
         for (rel, bytes) in sf_model_gen::cutout_files() {
             let path = PathBuf::from("assets").join(&rel);
             if check {
