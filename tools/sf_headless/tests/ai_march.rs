@@ -3,6 +3,9 @@
 //! is sent to it, so a wave starts from one place. Both are checked on the real `m1_duel` games, one per start
 //! site: game 0 has seat 0 on the south-west site (12, 68), game 4 the same seating with the sites swapped (seat
 //! 0 on the north-east site (72, 14)). A control with the rules off shows what each test would catch.
+//!
+//! WP9.2b-1: these tests pin the gather rules on the unit mix of WP9.2a-2 (rocket trooper 2), which is still the
+//! shipped mix (the measured 4:4:3, 4:3:3 and 5:3:3 were not shipped).
 
 use std::collections::BTreeMap;
 
@@ -303,7 +306,7 @@ const EXIT_SPREAD: [(u32, Seats, Seats); 3] = [
 ];
 
 #[test]
-fn the_wave_leaves_the_staging_cell_in_one_body_on_both_start_sites() {
+fn the_staging_exit_spread_is_pinned_on_both_start_sites() {
     for (game, on, _) in EXIT_SPREAD {
         assert_eq!(exit_spread(game, false), on, "game {game}, rules on");
     }
