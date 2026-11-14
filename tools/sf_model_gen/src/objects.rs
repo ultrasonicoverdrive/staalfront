@@ -1,5 +1,5 @@
 //! The mission objects, the Network defences and the rubble heaps in style G (WP11.6c,
-//! docs/art-style.md section 10).
+//! docs/art-style.md section 11).
 //!
 //! The world's objects are neutral: their third material slot is the light paint `paint3`
 //! (palette `neutral`, as the neutral units of WP11.6b), never the player colour. The two automated Network defences carry the

@@ -54,12 +54,13 @@ const STRUCTURES: [&str; 21] = [
     "evidence_crate",
 ];
 
-/// The suffixes of the states (`build_stages.ron`, `damage.ron`, and the mission objects' own).
+/// The suffixes of the states (`build_stages.ron`, `damage.ron`, and the mission objects' own);
+/// `_heavily_damaged` before `_damaged`, which it ends with.
 const STATES: [&str; 9] = [
     "_foundation",
     "_scaffolding",
-    "_damaged",
     "_heavily_damaged",
+    "_damaged",
     "_rubble",
     "_burnt_out",
     "_destroyed",
@@ -166,6 +167,7 @@ fn buildings_use_their_detail_budget() {
             );
         } else if let Some(stage) = Stage::ALL
             .into_iter()
+            .rev() // `_heavily_damaged` before `_damaged`
             .find(|s| m.stem.ends_with(s.suffix()) && !is_neutral(&m.stem))
         {
             let base = m.stem.strip_suffix(stage.suffix()).unwrap();

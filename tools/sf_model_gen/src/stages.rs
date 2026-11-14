@@ -1,4 +1,4 @@
-//! The states of a structure (WP11.6c, docs/art-style.md section 10): the build stages
+//! The states of a structure (WP11.6c, docs/art-style.md section 11): the build stages
 //! (`_foundation`, `_scaffolding`) and the damage stages (`_damaged`, `_heavily_damaged`) are made
 //! from the finished model by fixed rules, so every structure gets all of them in the same style:
 //!
@@ -580,7 +580,7 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
         materials: built.materials.clone(),
         lods,
     };
-    // A stage keeps a detail level in proportion to its finished model (docs/art-style.md §10).
+    // A stage keeps a detail level in proportion to its finished model (docs/art-style.md §11).
     let share = match stage {
         Stage::Foundation => STAGE_FLOOR_PERMILLE[0],
         Stage::Scaffolding => STAGE_FLOOR_PERMILLE[1],
@@ -984,19 +984,19 @@ fn hole_at(parts: &Parts, slab: i32, seed: u32, k: u32) -> P {
     let fz = 250 + hash(seed ^ (k * 211 + 5)) as i32 / 2;
     let x = lo[0] + (hi[0] - lo[0]) * fx / 1000;
     let z = lo[2] + (hi[2] - lo[2]) * fz / 1000;
-    // The highest upward face near (x, z) sets the height.
+    // The highest upward face near (x, z) sets the height, up to a metre over the roof level (an
+    // antenna or a crane arm is no roof).
+    let roof = roof_level(parts, slab) + 1000;
     let y = parts
         .body
         .tris
         .iter()
         .filter(|t| faces_up(t))
-        .filter(|t| {
-            let c = centroid(t);
-            (c[0] - x).abs() < 1200 && (c[2] - z).abs() < 1200
-        })
-        .map(|t| centroid(t)[1])
+        .map(centroid)
+        .filter(|c| (c[0] - x).abs() < 1200 && (c[2] - z).abs() < 1200 && c[1] <= roof)
+        .map(|c| c[1])
         .max()
-        .unwrap_or(hi[1]);
+        .unwrap_or(roof - 1000);
     [x, y, z]
 }
 

@@ -13,6 +13,8 @@ use sf_model_gen::files;
 // Veyran's steel tones 25 % lighter and cooler, no edge wear on lathed surfaces (the dome).
 // WP11.6c: 137 files added (every structure's states, the mission objects, the heaps); the six
 // files above kept their bytes (the faster AO pre-filter and the palette's new entries change none).
+// WP11.6c: 137 files added (every structure's states, the mission objects, the heaps); the six
+// files above kept their bytes (the faster AO pre-filter and the palette's new entries change none).
 const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_advanced_defences.glb", 457052, 0x0c0dc29c9e944e34),
     (
@@ -59,8 +61,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_construction_center_damaged.glb",
-        572324,
-        0x26735a85da9e02f9,
+        575748,
+        0xea969d0ed37202de,
     ),
     (
         "meridian_construction_center_foundation.glb",
@@ -80,8 +82,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_decoy_emplacement.glb", 435896, 0x8f0d07d415a043ee),
     (
         "meridian_decoy_emplacement_damaged.glb",
-        435920,
-        0xfc03a74a9ba1ca1d,
+        435352,
+        0x97af77fbdb976b72,
     ),
     (
         "meridian_decoy_emplacement_foundation.glb",
@@ -122,7 +124,7 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_harvester.glb", 251960, 0xfdc6d76c5edada0d),
     ("meridian_light_tank.glb", 242188, 0xa78c91f749af33da),
     ("meridian_ore_silo.glb", 380744, 0xe5b00b983cb5c144),
-    ("meridian_ore_silo_damaged.glb", 497472, 0x70666ae96b7f8339),
+    ("meridian_ore_silo_damaged.glb", 494852, 0x42843618e4f13c21),
     (
         "meridian_ore_silo_foundation.glb",
         180896,
@@ -160,7 +162,7 @@ const PINNED: [(&str, usize, u64); 143] = [
         0xa871a356d7799d8b,
     ),
     ("meridian_radar.glb", 376052, 0xbd6463999840423e),
-    ("meridian_radar_damaged.glb", 413020, 0xe5157db60df3cc1a),
+    ("meridian_radar_damaged.glb", 412452, 0x066c77b2c9b3edde),
     ("meridian_radar_foundation.glb", 180884, 0xd0a412bf74560b93),
     (
         "meridian_radar_heavily_damaged.glb",
@@ -169,7 +171,7 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     ("meridian_radar_scaffolding.glb", 439480, 0x278a9c38e2ef60e8),
     ("meridian_refinery.glb", 522540, 0x77a1dc82be4b49ec),
-    ("meridian_refinery_damaged.glb", 567712, 0xf63e1609ef86cbff),
+    ("meridian_refinery_damaged.glb", 567260, 0x3e17cfe627ac5c1a),
     (
         "meridian_refinery_foundation.glb",
         221928,
@@ -186,7 +188,7 @@ const PINNED: [(&str, usize, u64); 143] = [
         0x55702227e9bda1f6,
     ),
     ("meridian_shipyard.glb", 478568, 0xd66cbabc1a0347db),
-    ("meridian_shipyard_damaged.glb", 517592, 0x970401be7f478507),
+    ("meridian_shipyard_damaged.glb", 517584, 0xfea34273f732ffbd),
     (
         "meridian_shipyard_foundation.glb",
         253828,
@@ -248,8 +250,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("neutral_archive_building.glb", 275476, 0xb8be02c0f8602a58),
     (
         "neutral_archive_building_damaged.glb",
-        376660,
-        0x4e3a7c53a857bee2,
+        376772,
+        0x548279be9de10176,
     ),
     (
         "neutral_archive_building_heavily_damaged.glb",
@@ -287,8 +289,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("neutral_relay_transmitter.glb", 286012, 0x6b0be1bdab50e282),
     (
         "neutral_relay_transmitter_damaged.glb",
-        286036,
-        0xff44a8e54cf211ae,
+        284668,
+        0x152499e24041c660,
     ),
     (
         "neutral_relay_transmitter_rubble.glb",
@@ -338,8 +340,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("veyran_construction_center.glb", 473936, 0xbf8b5f7880446186),
     (
         "veyran_construction_center_damaged.glb",
-        530748,
-        0x3acd79b1df0fa747,
+        534176,
+        0x440155c5a41cd74d,
     ),
     (
         "veyran_construction_center_foundation.glb",
@@ -360,7 +362,7 @@ const PINNED: [(&str, usize, u64); 143] = [
     (
         "veyran_defence_tower_damaged.glb",
         343428,
-        0xfed03a36460a6dcf,
+        0xf990209b76a9e5bd,
     ),
     (
         "veyran_defence_tower_foundation.glb",
@@ -400,7 +402,7 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     ("veyran_light_tank.glb", 223532, 0x520461c2447f5b49),
     ("veyran_ore_silo.glb", 376304, 0x92d839a170709e73),
-    ("veyran_ore_silo_damaged.glb", 509980, 0xdcb10b979310af47),
+    ("veyran_ore_silo_damaged.glb", 503600, 0xb5a00de394b5453e),
     ("veyran_ore_silo_foundation.glb", 180892, 0xcd5655a6b37cb62d),
     (
         "veyran_ore_silo_heavily_damaged.glb",
@@ -439,7 +441,7 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     ("veyran_radar_scaffolding.glb", 472100, 0xeb9d5ef8164adfad),
     ("veyran_refinery.glb", 459380, 0xcf55f48b59516ff3),
-    ("veyran_refinery_damaged.glb", 491676, 0xc6627603e7cf6805),
+    ("veyran_refinery_damaged.glb", 492132, 0xae22efe89a4574fe),
     ("veyran_refinery_foundation.glb", 221924, 0xede27d5f8835065a),
     (
         "veyran_refinery_heavily_damaged.glb",
@@ -452,7 +454,7 @@ const PINNED: [(&str, usize, u64); 143] = [
         0xdf20ab62d7e5e6b5,
     ),
     ("veyran_shipyard.glb", 451476, 0x68cf9c9c079381df),
-    ("veyran_shipyard_damaged.glb", 488108, 0x6baf9db5a3db37b5),
+    ("veyran_shipyard_damaged.glb", 487992, 0xd83888e57c84bd73),
     ("veyran_shipyard_foundation.glb", 253824, 0x2753b548f295ee3e),
     (
         "veyran_shipyard_heavily_damaged.glb",
@@ -468,7 +470,7 @@ const PINNED: [(&str, usize, u64); 143] = [
     (
         "veyran_vehicle_factory_damaged.glb",
         520380,
-        0x8a98c1be05166ff8,
+        0x299a24142fce0950,
     ),
     (
         "veyran_vehicle_factory_foundation.glb",

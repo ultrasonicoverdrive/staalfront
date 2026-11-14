@@ -3480,6 +3480,34 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Dropped:** WP9.2b-2 (choice of an economy target), for the measured reasons in PLAN.md; its budget goes to WP9.3a.
 * **Folded in.** Three doc and name nits from the review of #134 (`ai.md` test name and `gather_units`; the test `the_staging_exit_spread_is_pinned_on_both_start_sites`).
 
+### WP11.6c notes: every structure and its states in style G (14-11-2026)
+
+* **Built.** `tools/sf_model_gen/src/buildings.rs` (one recipe per structure role for both factions:
+  construction center (Veyran), power plant (Meridian), refinery, barracks, vehicle factory, radar,
+  defence tower (Meridian), advanced defences, shipyard, decoy emplacement, fortified bunker, ore
+  silo), `objects.rs` (the mission objects, the Network defences, six rubble heaps), `stages.rs`
+  (foundation, scaffolding, damaged and heavily damaged derived from the finished model, the team
+  fit and the detail pad), `set.rs` (all 143 files, sorted). 137 new files in `assets/set_v5`;
+  `unit_defs.ron` and `wrecks.ron` point at them (paths only; the ore silo gets faction models),
+  `models.ron`'s pack lists all 143. Rules in `docs/art-style.md` section 11.
+* **Roster.** The set v4 fallback of `roster::state_file` (WP11.6a) is gone: every set v5 structure
+  has its own stage files. `the_damaged_looks_are_the_art_sets_damaged_files` pins 49 damaged looks
+  (was 45: the ore silo now has art, 2 factions x 2 stages); `NO_ART_YET` is empty.
+* **Kit (shared, output unchanged).** `shade::bake` only tests occluders a ray can reach within
+  1.4 m (an exact filter on an `any`); `files()` writes on up to 8 threads round-robin. The six
+  WP11.6a files keep their pinned bytes (shown by the pin test). A full run: 59 s -> 18 s
+  (release, 4 cores, same machine, other agents building).
+* **Palette.** `neutral` and the `paint3` third slot as on branch WP11.6b (identical text), plus
+  `network` (graphite, amber lamp) for the automated gun and the unmanned artillery.
+* **Checked.** `sf_asset_check assets/set_v5`: 143 pass, no warnings. Contact sheets in
+  `docs/screenshots/wp11.6c/`.
+* **Gaps.** The heavily damaged stages read mostly as a heap (a grid of chunks in the cut shell);
+  the scaffolding deck hides the inside of the cut walls; the bolt rows that pad small structures
+  are a filler, not designed detail; the mission objects' special states (`_off`, `_disabled`,
+  `_no_uplink`, `_burnt_out`, `_destroyed`, `_rubble`) are made but no engine rule shows them yet;
+  the ferry (a vessel) is WP11.6b's; 51 MB of GLB in the repo (non-indexed vertices with RGB
+  vertex colour; the writer was left alone so the WP11.6a pins hold).
+
 ### WP11.6a notes: the model generator and the style proof (14-11-2026)
 
 * **Built.** `tools/sf_model_gen` (new workspace member): integer-millimetre kit (bevelled boxes, lofts, extrusions, lathes on a fixed sine table, plates, panel lines, bolts, hatches, the LOD knob, the node tree), baked per-vertex shading (ambient occlusion by ray casting, grime, downward faces, facet variation) written as `COLOR_0`, a hand-written GLB writer, the palette in `assets/config/model_palette.ron`, and a cutout painter for cutscene parts. Six models in `assets/set_v5` (Meridian construction_center, harvester, light_tank; Veyran defence_tower, light_tank, power_plant), wired in `unit_defs.ron` (paths only) and listed as pack `set_v5` in `models.ron`. Style G "semi-realistic, bright" (Tijmen 14-11-2026), rules in `docs/art-style.md`.

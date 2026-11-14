@@ -1049,7 +1049,7 @@ mod tests {
         // transport truck the repair truck's (the testpack ones they had).
         let (defs, roster) = built_with(|text| {
             text.replace(
-                "set_v4/meridian_decoy_emplacement.glb",
+                "set_v5/meridian_decoy_emplacement.glb",
                 "testpack_v1/models/verdedigingstoren.glb",
             )
             .replace(
@@ -1397,7 +1397,8 @@ mod tests {
             .filter(|d| !d.models.is_empty())
             .map(|d| d.id.as_str())
             .collect();
-        assert_eq!(dual.len(), 18, "{dual:?}");
+        // WP11.6c: 19, the ore silo got a model per faction.
+        assert_eq!(dual.len(), 19, "{dual:?}");
         for id in ["rifleman", "light_tank", "power_plant", "harvester"] {
             assert!(dual.contains(&id), "{id}");
         }
@@ -1593,8 +1594,8 @@ mod tests {
             }
         }
         // Eight structures with a model per faction (the shared tree) and the decoy and the bunker with
-        // one generic model each: 8 * 2 + 2.
-        assert_eq!(checked, 18);
+        // one generic model each: 8 * 2 + 2; WP11.6c added the ore silo (a model per faction): 20.
+        assert_eq!(checked, 20);
         assert!(roster.warnings.is_empty(), "{:?}", roster.warnings);
     }
 

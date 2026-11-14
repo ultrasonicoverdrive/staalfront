@@ -1,4 +1,4 @@
-//! The structures of both factions in style G (WP11.6c, docs/art-style.md section 10).
+//! The structures of both factions in style G (WP11.6c, docs/art-style.md section 11).
 //!
 //! One recipe per role, written once for both factions: the parts below ([`slab`], [`hall`],
 //! [`tank`], [`stack`], ...) carry the shape language (Meridian rounded: big chamfers, round
