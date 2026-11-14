@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 
 use crate::kit::{Mat, Model, Node, Tri};
-use crate::shade::{bake, unit_normal};
+use crate::shade::{bake, factor, unit_normal};
 
 /// sRGB 0..=255 to the linear factor glTF stores (a cubic fit of the sRGB curve, basic operations
 /// only, so the same bytes everywhere; within 0.4 % of the exact curve).
@@ -56,11 +56,11 @@ fn flatten(node: &Node, nodes: &mut Vec<Flat>, meshes: &mut Vec<Vec<Tri>>) -> us
 }
 
 /// The baked shade of every node's triangles of one level, keyed like the flattened meshes.
-fn shades(level: &Node) -> Vec<Vec<[f32; 3]>> {
+fn shades(level: &Node, lin: &[[f32; 3]]) -> Vec<Vec<[f32; 3]>> {
     // Bake on the whole level in model space (parts occlude each other), then hand each node
     // its slice, in the same preorder as `flatten`.
     let world = level.world_tris();
-    let baked = bake(&world);
+    let baked = bake(&world, lin);
     let mut out = Vec::new();
     let mut at = 0;
     fn walk(n: &Node, baked: &[[f32; 3]], at: &mut usize, out: &mut Vec<Vec<[f32; 3]>>) {
@@ -83,9 +83,10 @@ pub fn write(model: &Model) -> Vec<u8> {
     let mut meshes = Vec::new();
     let mut shade = Vec::new();
     let mut roots = Vec::new();
+    let lin: Vec<[f32; 3]> = model.materials.iter().map(|m| m.srgb.map(linear)).collect();
     for level in &model.lods {
         roots.push(flatten(level, &mut nodes, &mut meshes));
-        shade.extend(shades(level));
+        shade.extend(shades(level, &lin));
     }
     // Primitives: per mesh, per material in material order.
     let mut prims: Vec<Prim> = Vec::new();
@@ -201,7 +202,13 @@ pub fn write(model: &Model) -> Vec<u8> {
             format!(
                 "{{\"name\":\"{}\",\"pbrMetallicRoughness\":{{\"baseColorFactor\":[{},1],\"metallicFactor\":0,\"roughnessFactor\":1}}}}",
                 m.name,
-                list(m.srgb.map(linear))
+                // The team colour is replaced by the player colour and ignores COLOR_0; the
+                // others leave head room for the baked highlight (`shade::factor`).
+                if m.name == crate::kit::TEAM {
+                    list(m.srgb.map(linear))
+                } else {
+                    list(factor(m.srgb.map(linear)))
+                }
             )
         })
         .collect();

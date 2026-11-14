@@ -526,6 +526,78 @@ pub fn hatch(at: P, r: i32, segs: u32, mat: Mat) -> Mesh {
     rim.with(lid).moved(at)
 }
 
+/// A flat band between two outlines with the same number of corners (`outer` round `inner`, both
+/// round the origin), from `y0` up to `y1`: the top and the outer wall. The team band
+/// round a turret roof or a building's roof edge (docs/art-style.md section 3).
+///
+/// # Panics
+/// When the outlines differ in length.
+pub fn frame(outer: &[[i32; 2]], inner: &[[i32; 2]], y0: i32, y1: i32, mat: Mat) -> Mesh {
+    assert_eq!(outer.len(), inner.len(), "frame outlines");
+    let mut m = Mesh::new();
+    let n = outer.len();
+    let c = centroid2(outer);
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (o0, o1, i0, i1) = (outer[i], outer[j], inner[i], inner[j]);
+        m.face(
+            &[
+                [o0[0], y1, o0[1]],
+                [o1[0], y1, o1[1]],
+                [i1[0], y1, i1[1]],
+                [i0[0], y1, i0[1]],
+            ],
+            mat,
+            [0, 1, 0],
+        );
+        // The outer wall only: the inner one is a lip of a few centimetres nobody sees.
+        {
+            let (a, b) = (o0, o1);
+            let mid = [
+                i64::from(a[0] + b[0]) - 2 * c[0],
+                i64::from(a[1] + b[1]) - 2 * c[1],
+            ];
+            m.face(
+                &[
+                    [a[0], y0, a[1]],
+                    [b[0], y0, b[1]],
+                    [b[0], y1, b[1]],
+                    [a[0], y1, a[1]],
+                ],
+                mat,
+                [mid[0], 0, mid[1]],
+            );
+        }
+    }
+    m
+}
+
+/// A railing along a straight horizontal line from `a` to `b` (both on the walk level `Y = a[1]`):
+/// `posts` square posts and a top and a middle rail, `h` high.
+pub fn railing(a: P, b: P, h: i32, posts: i32, mat: Mat) -> Mesh {
+    let mut m = Mesh::new();
+    let along_x = a[2] == b[2];
+    let (lo, hi) = if along_x {
+        (a[0].min(b[0]), a[0].max(b[0]))
+    } else {
+        (a[2].min(b[2]), a[2].max(b[2]))
+    };
+    let at = |t: i32, y0: i32, y1: i32, w: i32, len: i32| -> Mesh {
+        if along_x {
+            cuboid([t, y0, a[2] - w], [t + len, y1, a[2] + w], mat)
+        } else {
+            cuboid([a[0] - w, y0, t], [a[0] + w, y1, t + len], mat)
+        }
+    };
+    for k in 0..posts {
+        let t = lo + (hi - lo - 50) * k / (posts - 1).max(1);
+        m.add(at(t, a[1], a[1] + h, 25, 50));
+    }
+    m.add(at(lo, a[1] + h - 50, a[1] + h, 30, hi - lo));
+    m.add(at(lo, a[1] + h / 2 - 20, a[1] + h / 2 + 20, 20, hi - lo));
+    m
+}
+
 // ---- Levels of detail ---------------------------------------------------------------------
 
 /// Which level is being built: 0 is the full model, 1 and 2 are reduced.

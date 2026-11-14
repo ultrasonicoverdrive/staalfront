@@ -50,17 +50,20 @@ fn every_level_is_inside_its_budget_and_really_reduced() {
 }
 
 #[test]
-fn the_checker_finds_nothing_and_the_team_share_is_20_to_40_percent_in_every_level() {
+fn the_checker_finds_nothing_and_the_team_share_is_20_to_30_percent_in_every_level() {
     let checker = Checker::embedded();
     for m in models() {
         let file = format!("{}.glb", m.stem);
         let report = checker.check_bytes(&file, &glb::write(&m));
-        assert!(report.findings.is_empty(), "{file}: {:?}", report.findings);
         let shares = &report.facts.team_share;
         assert_eq!(shares.len(), 3, "{file}");
+        let shares: Vec<f64> = shares.iter().map(|s| s.expect("seen from above")).collect();
+        println!("{file}: team share {shares:.3?}");
+        assert!(report.findings.is_empty(), "{file}: {:?}", report.findings);
         for (n, s) in shares.iter().enumerate() {
-            let s = s.expect("seen from above");
-            assert!((0.20..=0.40).contains(&s), "{file} LOD{n}: team {s}");
+            // The tuning round (14-11-2026): team is bands and trim, aimed at 20-25 %. The
+            // checker's own rule stays at 20-40 % (so 20 is the floor); this test caps it at 30.
+            assert!((0.20..=0.30).contains(s), "{file} LOD{n}: team {s}");
         }
     }
 }

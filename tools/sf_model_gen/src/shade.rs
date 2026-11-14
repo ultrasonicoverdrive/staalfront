@@ -5,13 +5,22 @@
 //! depth a model needs is baked in here, per corner of every (flat) triangle:
 //!
 //! - **ambient occlusion**: [`AO_RAYS`] rays over the hemisphere of the face; the share that hits
-//!   other geometry within [`AO_REACH_MM`] darkens the corner by up to [`AO_STRENGTH`] (creases,
-//!   the underside of an overhang, the gap between hull and tracks);
+//!   other geometry within [`AO_REACH_MM`], times [`AO_GAIN`], darkens the corner by up to
+//!   [`AO_STRENGTH`] (creases, the underside of an overhang, the gap between hull and tracks);
 //! - **grime**: up to [`GRIME`] darker towards the ground, fading out at [`GRIME_HEIGHT_MM`];
 //! - **downward faces** up to [`DOWN`] darker;
 //! - **facet variation**: each triangle ± [`VARIATION`] from a fixed hash of its index, so large
 //!   flat areas do not look like one sheet;
-//! - the triangle's own [`crate::kit::Tone`] (panel lines, recesses).
+//! - the triangle's own [`crate::kit::Tone`] (panel lines, recesses);
+//! - **top-edge highlight**: a face that slopes upward (a bevel or chamfer on top, `n.y` between
+//!   [`HIGHLIGHT_MIN_UP`] and [`HIGHLIGHT_MAX_UP`]) is up to [`HIGHLIGHT`] brighter;
+//! - **edge wear**: on a bevel (no axis-aligned normal) whose corner sees open sky (no AO ray
+//!   blocked), about two thirds of the triangles (fixed hash) are lifted [`WEAR`] towards a lighter
+//!   grey: paint rubbed thin on an exposed edge, lighter and less saturated.
+//!
+//! The vertex colour is RGB: it is the wanted linear colour divided by the material factor the GLB
+//! stores, [`factor`] (the palette colour over [`NOMINAL`]), so a plain face is exactly the palette
+//! colour and a highlight can go above it without leaving glTF's 0..1 range.
 //!
 //! The result is rounded to 1/255, so tiny float differences cannot reach the file. Only basic
 //! IEEE operations are used (no `sin`, `pow`), so every platform computes the same bytes.
@@ -22,11 +31,22 @@ use crate::kit::Tri;
 pub const AO_RAYS: usize = 17;
 /// How far a ray looks for an occluder, in millimetres.
 pub const AO_REACH_MM: f32 = 1400.0;
-/// The darkest an entirely occluded corner gets (share of the colour taken away).
+/// The darkest an occluded corner gets (share of the colour taken away).
 pub const AO_STRENGTH: f32 = 0.6;
-/// Grime at the ground, fading to none at [`GRIME_HEIGHT_MM`].
-pub const GRIME: f32 = 0.22;
-pub const GRIME_HEIGHT_MM: f32 = 1100.0;
+/// The blocked share is multiplied by this before [`AO_STRENGTH`] (tuning round: twice as visible),
+/// so half the rays blocked already gives the full darkening.
+pub const AO_GAIN: f32 = 2.0;
+/// Grime at the ground, fading to none at [`GRIME_HEIGHT_MM`] (tuning round: about twice as strong).
+pub const GRIME: f32 = 0.40;
+pub const GRIME_HEIGHT_MM: f32 = 1300.0;
+/// A plain face's shade as a share of the material factor: the head room for highlights.
+pub const NOMINAL: f32 = 0.85;
+/// The extra brightness of an upward-sloping bevel or chamfer (the top-edge highlight).
+pub const HIGHLIGHT: f32 = 0.16;
+pub const HIGHLIGHT_MIN_UP: f32 = 0.2;
+pub const HIGHLIGHT_MAX_UP: f32 = 0.97;
+/// How far worn edge paint moves towards a light grey (lighter, desaturated).
+pub const WEAR: f32 = 0.35;
 /// A face pointing straight down loses this share.
 pub const DOWN: f32 = 0.3;
 /// Facet variation, either way.
@@ -133,9 +153,16 @@ fn hits(o: V, d: V, tri: &Occluder) -> bool {
     t > 1.0 && t < AO_REACH_MM
 }
 
-/// The shade of every corner of `tris` (all the triangles of one level, in model space), in the
-/// order of the triangles, three per triangle. 1.0 is the plain material colour.
-pub fn bake(tris: &[Tri]) -> Vec<[f32; 3]> {
+/// The material factor the GLB stores for a linear palette colour: the colour over [`NOMINAL`],
+/// at most 1 per channel.
+pub fn factor(lin: [f32; 3]) -> [f32; 3] {
+    lin.map(|c| (c / NOMINAL).min(1.0))
+}
+
+/// The vertex colour of every corner of `tris` (all the triangles of one level, in model space),
+/// in the order of the triangles, three per triangle; `lin` is the linear colour of each material.
+/// A plain open face gets [`NOMINAL`] times the factor: the palette colour.
+pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
     let occ: Vec<Occluder> = tris
         .iter()
         .map(|t| {
@@ -176,6 +203,16 @@ pub fn bake(tris: &[Tri]) -> Vec<[f32; 3]> {
         let centre = occ[i].centre;
         let variation = 1.0 + VARIATION * (hash(i as u32) as f32 / 500.0 - 1.0);
         let tone = f32::from(t.tone) / 1000.0;
+        let up = n[1];
+        let highlight = if up > HIGHLIGHT_MIN_UP && up < HIGHLIGHT_MAX_UP {
+            1.0 + HIGHLIGHT
+        } else {
+            1.0
+        };
+        let bevel = n.iter().all(|c| c.abs() < HIGHLIGHT_MAX_UP);
+        let worn = bevel && hash(i as u32 ^ 0x55) % 3 != 0;
+        let base = lin[usize::from(t.mat.0)];
+        let fac = factor(base);
         for corner in t.v.map(v) {
             // Start a little inside the face and off it, so the ray does not hit its own edges.
             let o = add(add(corner, mul(sub(centre, corner), 0.12)), mul(n, 8.0));
@@ -187,13 +224,23 @@ pub fn bake(tris: &[Tri]) -> Vec<[f32; 3]> {
                         .any(|(j, tri)| j != i && hits(o, d, tri))
                 })
                 .count();
-            let ao = 1.0 - AO_STRENGTH * blocked as f32 / AO_RAYS as f32;
+            let share = (AO_GAIN * blocked as f32 / AO_RAYS as f32).min(1.0);
+            let ao = 1.0 - AO_STRENGTH * share;
             let height = (corner[1] / GRIME_HEIGHT_MM).clamp(0.0, 1.0);
             let grime = 1.0 - GRIME * (1.0 - height);
             let down = 1.0 - DOWN * (-n[1]).max(0.0);
-            let s = (ao * grime * down * variation * tone).clamp(0.0, 1.0);
-            let q = (s * 255.0).round() / 255.0;
-            out.push([q, q, q]);
+            let s = ao * grime * down * variation * tone * highlight;
+            let mut c = base.map(|b| b * s);
+            if worn && blocked == 0 {
+                // Lighter and less saturated: towards a grey a quarter above the luminance.
+                let lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+                let grey = lum * 1.25 + 0.02;
+                c = c.map(|x| x + WEAR * (grey - x));
+            }
+            out.push([0, 1, 2].map(|k| {
+                let q = if fac[k] > 0.0 { c[k] / fac[k] } else { 1.0 };
+                (q.clamp(0.0, 1.0) * 255.0).round() / 255.0
+            }));
         }
     }
     out
