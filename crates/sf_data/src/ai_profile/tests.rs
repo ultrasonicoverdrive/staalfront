@@ -418,16 +418,24 @@ fn the_scout_is_checked_like_a_unit_of_the_mix() {
     };
     with("scout").check(&UnitDefs::embedded()).unwrap();
     refused_check(&with("no_such_role"), "scout (no_such_role): no such role");
+    // WP9.2b-1: the scout kind is never tallied by the counter mix, so it may not be a role of the mix too.
+    refused_check(
+        &with("rifleman"),
+        "scout (rifleman): the scout is also a role of the unit mix",
+    );
     refused_check(&with("power_plant"), "only infantry and vehicles");
     refused_check(&with("harvester"), "harvesters");
     // The scout comes out of a barracks, which the list must have.
     let mut p = meridian(&[("power_plant", 1)], &[]);
     p.factions[0].scout = Some("scout".to_string());
     refused_check(&p, "InfantryFactory missing");
-    // It may also be a role of the mix.
+    // It may not also be a role of the mix (WP9.2b-1; it was allowed before).
     let mut p = meridian(&BASE, &[("scout", 1)]);
     p.factions[0].scout = Some("scout".to_string());
-    p.check(&UnitDefs::embedded()).unwrap();
+    refused_check(
+        &p,
+        "scout (scout): the scout is also a role of the unit mix",
+    );
 }
 
 #[test]

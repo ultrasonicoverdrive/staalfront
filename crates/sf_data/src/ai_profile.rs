@@ -623,6 +623,11 @@ impl AiProfile {
                 if in_mix && !seen.insert(role.as_str()) {
                     return err(format!("{here}: listed twice"));
                 }
+                // WP9.2b-1: the counter mix never tallies the AI's own scout kind, so a scout kind that is also a
+                // role of the mix would never be tallied (docs/rules/ai.md "Counter mix (WP9.2b-1)").
+                if !in_mix && seen.contains(role.as_str()) {
+                    return err(format!("{here}: the scout is also a role of the unit mix"));
+                }
                 if !def.factions.contains(&f.faction) {
                     return err(format!("{here}: the role is not open to {:?}", f.faction));
                 }

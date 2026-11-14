@@ -26,6 +26,7 @@ const P1: PlayerId = PlayerId(1);
 const RIFLEMAN: Kind = Kind(12);
 const ROCKET: Kind = Kind(13);
 const SCOUT: Kind = Kind(15);
+const SNIPER: Kind = Kind(16);
 const HARVESTER: Kind = Kind(11);
 const TANK: Kind = Kind(19);
 const HEAVY: Kind = Kind(20);
@@ -332,6 +333,25 @@ fn a_tie_goes_to_the_earlier_entry_and_a_kind_nobody_hurts_to_nobody() {
     assert_eq!(counter::best_role(&lens, &[(HARVESTER, 1)], TANK), None);
     // An empty mix: nobody.
     assert_eq!(counter::best_role(&lens, &[], TANK), None);
+}
+
+#[test]
+fn a_tallied_kind_nobody_in_the_mix_counters_still_counts_in_the_total() {
+    // The sniper (kind 16) hurts infantry and scores 0 against the light tank (shipped tables), so with the sniper as
+    // the only role, a seen light tank is valued but nobody's: it stays in the total and the shares add up to less
+    // than 1,000 (riflemen 10 x 100 = 1,000 of 1,000 + 700 credits = 588 thousandths).
+    let (world, mut state) = shipped(1000, 3000);
+    let lens = Lens::new(&world, P0);
+    assert!(lens.counter_score(SNIPER, RIFLEMAN) > 0);
+    assert_eq!(lens.counter_score(SNIPER, TANK), 0);
+    state.profile.unit_mix = vec![(SNIPER, 1)];
+    with_intel(&mut state, &[(RIFLEMAN, 10), (TANK, 1)]);
+    let share = counter::shares(&state, &lens);
+    assert_eq!(share, [588]);
+    assert!(share.iter().sum::<u32>() < 1000);
+    // Only the countered kind: the whole share.
+    with_intel(&mut state, &[(RIFLEMAN, 10)]);
+    assert_eq!(counter::shares(&state, &lens), [1000]);
 }
 
 // ---- the weights -------------------------------------------------------------------------------------------

@@ -824,9 +824,9 @@ fn counter_setup() -> (sf_ai::Ai, sf_ai::Observation, Box<sf_sim::World>) {
 #[test]
 fn what_the_counter_mix_costs_with_a_visible_army_of_200_units() {
     // WP9.2b-1: a think with 200 armed enemy units in sight and the counter mix on (the tally runs every think; the
-    // weights once per production turn), 20,000 thinks on a copy of the AI, the clone outside the clock. Mean and
-    // worst think as in the design memo's budget: mean at most 20 microseconds, worst at most 1 millisecond, asserted
-    // in release. The weights alone are timed on a state whose tally holds all four kinds.
+    // weights once per production turn), 4,000 thinks on a copy of the AI (each the fastest of five), the clone outside
+    // the clock. Mean and worst think as in the design memo's budget: mean at most 20 microseconds, worst at most 1
+    // millisecond, asserted in release (the worst is the worst of the fastest-of-five, so its bound is weak). The weights alone are timed on a state whose tally holds all four kinds.
     let (ai, obs, world) = counter_setup();
     let player = sf_sim::PlayerId(0);
     let runs = 4_000u32;

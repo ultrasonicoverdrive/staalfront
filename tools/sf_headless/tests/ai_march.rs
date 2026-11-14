@@ -3,6 +3,9 @@
 //! is sent to it, so a wave starts from one place. Both are checked on the real `m1_duel` games, one per start
 //! site: game 0 has seat 0 on the south-west site (12, 68), game 4 the same seating with the sites swapped (seat
 //! 0 on the north-east site (72, 14)). A control with the rules off shows what each test would catch.
+//!
+//! WP9.2b-1: these tests pin the gather rules on the unit mix of WP9.2a-2 (rocket trooper 2), not on the shipped
+//! mix; the start-site numbers below describe that older profile, not the one that ships now.
 
 use std::collections::BTreeMap;
 
