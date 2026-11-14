@@ -46,10 +46,16 @@ A test pins the shipped values (`tools/sf_model_gen/tests/models.rs`,
 
 The team colour is the engine's dynamic region (the material named `team`):
 
-- vivid **bands and panels**: the turret roof, hull side panels, the rear deck, building roof
-  panels, bands round a drum or a tank; never a single triangle and never a diagonal;
-- **20-40 % of the top-down view in every level** (`sf_asset_check`'s `team-share` rule; LOD1 and LOD2
-  too), and at least 12 team triangles per level (`the_team_colour_is_bands_and_panels_never_one_triangle`);
+- **bands and trim, never whole surfaces** (tuning round 14-11-2026): a band round the turret roof
+  edge, a stripe across the rear deck, a stripe along the fenders or the hull top, panels on the
+  skirts, a band round a building's roof edge, a flange on a stack, the shoulder of a tank, a pad
+  marking, bands round a drum; never a full roof, never a single triangle and never a diagonal. A
+  roof band is built with `kit::frame` and the roof inside it is filled flush (`team_frame` in the
+  recipes), because a band standing proud of a large roof face darkens all of it in the baked AO;
+- **aim at 20-25 % of the top-down view in every level**; `sf_asset_check`'s `team-share` rule still
+  asks 20-40 %, the generator test caps it at 30 %
+  (`the_checker_finds_nothing_and_the_team_share_is_20_to_30_percent_in_every_level`); at least 12
+  team triangles per level (`the_team_colour_is_bands_and_panels_never_one_triangle`);
 - the team vertices carry no baked shade (the loader ignores `COLOR_0` on them), so every player
   colour shows at full strength.
 
@@ -66,16 +72,30 @@ The renderer has one directional light, an ambient term and no shadows or textur
 baked per vertex into `COLOR_0` (`tools/sf_model_gen/src/shade.rs`), which the loader multiplies into
 the material colour:
 
-- **ambient occlusion:** 17 rays per corner over the face's hemisphere, 1.4 m reach, up to 60 %
-  darker where all are blocked (creases, under overhangs, between hull and tracks);
-- **grime:** up to 22 % darker at the ground, fading out at 1.1 m;
+- **ambient occlusion:** 17 rays per corner over the face's hemisphere, 1.4 m reach; the blocked
+  share times 2 (`AO_GAIN`, tuning round: twice as visible), up to 60 % darker (so half the rays
+  blocked is already the full darkening: creases, under overhangs, between hull and tracks);
+- **grime:** up to 40 % darker at the ground, fading out at 1.3 m (tuning round: about twice the
+  first 22 %);
 - **downward faces** up to 30 % darker;
 - **facet variation** of +-3.5 % per triangle from a fixed hash (no randomness), so large flat areas
   are not one sheet;
-- the **tone** of a detail (panel line 56 %, recess 72 %).
+- the **tone** of a detail (panel line 56 %, recess 72 %, track shoe 82 %);
+- **top-edge highlight:** a face that slopes upward (a bevel or chamfer on top, normal `y` between
+  0.2 and 0.97) is 16 % brighter;
+- **edge wear:** a bevel strip (no axis-aligned normal, narrower than 320 mm) whose corner sees open
+  sky (no AO ray blocked) is, on about two thirds of its triangles (fixed hash), moved 35 % towards a
+  grey a quarter above its luminance: lighter and less saturated, as paint rubbed thin. Big slanted
+  facets (a dome segment) are not edges and get none.
 
-Keep colours clean and bright: the AO darkens creases, not whole surfaces. Light edge wear is not
-built yet (a gap: the bevels catch the light instead).
+The vertex colour is RGB: the wanted linear colour divided by the material factor, which is a grey at
+the palette colour's brightest channel over 0.85 (`shade::factor`). A plain open face therefore shows
+exactly the palette colour, and highlights and worn edges stay inside glTF's 0..1 range. The team
+material keeps its own factor and ignores `COLOR_0`. Tests: `tools/sf_model_gen/tests/shade.rs`
+(one per rule: plain colour, highlight, wear, crease and grime).
+
+Keep colours clean and bright: the AO darkens creases, not whole surfaces; judge it in the engine
+render (contact sheet), not only in numbers.
 
 ## 6. Levels of detail
 
@@ -90,6 +110,13 @@ One recipe builds all three levels from `kit::Lod`:
 
 Budgets (the art brief): units 1500 / 500 / 150, buildings 5000 / 1500 / 300 triangles; LOD1 at
 most 40 % and LOD2 at most 15 % of LOD0 (`every_level_is_inside_its_budget_and_really_reduced`).
+
+**Detail budget** (tuning round 14-11-2026, `buildings_use_their_detail_budget`): a building uses
+**2,500-3,500 triangles in LOD0** on real geometry: vents with louvres, pipe runs with flanges,
+railings (`kit::railing`), roof units with fans, window rows with frames, door frames, bolted panels,
+ladders and walkways; that detail is LOD0 only, so LOD1 and LOD2 stay far below. A vehicle stays
+under 1,500 and spends it where it reads at game distance: capped road wheels with hubs, track
+shoes (one raised face each), hatches, smoke dischargers, tools on the fenders, lamps and exhausts.
 
 ## 7. Node tree
 
