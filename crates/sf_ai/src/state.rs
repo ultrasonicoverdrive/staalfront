@@ -726,8 +726,31 @@ mod tests {
     }
 
     /// A state with two entries in each map of WP9.1b-1 and the other new parts set.
+    /// The Meridian goal list of the shipped profile before WP9.3c (kinds: power plant, refinery, vehicle factory, barracks,
+    /// power plant 2, refinery 2, tower, radar, tower 2, advanced defences). `base_state` carries it so that every digest pin
+    /// of the earlier phases stands as the proof that nothing but the list moved; `the_digest_of_the_shipped_profile_state_is_pinned`
+    /// pins the list of today.
+    fn list_before_wp9_3c() -> Vec<(Kind, u16)> {
+        [
+            (1, 1),
+            (2, 1),
+            (4, 1),
+            (3, 1),
+            (1, 2),
+            (2, 2),
+            (6, 1),
+            (5, 1),
+            (6, 2),
+            (7, 1),
+        ]
+        .into_iter()
+        .map(|(k, n)| (Kind(k), n))
+        .collect()
+    }
+
     fn base_state() -> AiState {
         let mut s = state();
+        s.profile.build_order = list_before_wp9_3c();
         s.pending_build = Some((Kind(2), Cell::new(17, 64), Tick(250)));
         s.blocked_until.insert(Kind(2), Tick(800));
         s.blocked_until.insert(Kind(4), Tick(900));
@@ -812,6 +835,22 @@ mod tests {
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well (WP9.1c-3: 0x392b1f3256aa3c19 ->
         // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`; WP9.2a: -> 0x8383_758e_5b5e_90e6, the numbers of the groups in the shipped profile and the group state; with them off and one group the old value comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin`; WP9.2a-2: 0x8383_758e_5b5e_90e6 -> 0x4d0a_8207_c799_2fad, `gather_refinery_gap` 2 and `gather_everyone` true in the shipped profile; with both off, 0x8383_758e_5b5e_90e6 comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin` covers the older pin).
         assert_eq!(base_state().digest(), 0x4d0a_8207_c799_2fad);
+    }
+
+    #[test]
+    fn the_digest_of_the_shipped_profile_state_is_pinned() {
+        // WP9.3c: the shipped goal list ends at the second refinery (docs/rules/ai.md "Defence lock (WP9.3c)"). The base state
+        // with that list hashes to a new literal, and with the list of before WP9.3c in place the pin of WP9.2a-2 is back
+        // (`the_digest_of_the_base_state_is_pinned`, whose state carries the old list): the list is the whole cause.
+        let mut s = base_state();
+        s.profile.build_order = state().profile.build_order;
+        assert_eq!(
+            s.profile.build_order,
+            [(1, 1), (2, 1), (4, 1), (3, 1), (1, 2), (2, 2)].map(|(k, n)| (Kind(k), n))
+        );
+        assert_eq!(s.digest(), 0xfcc3_6552_5acd_73ee);
+        s.profile.build_order = list_before_wp9_3c();
+        assert_eq!(s.digest(), 0x4d0a_8207_c799_2fad);
     }
 
     #[test]

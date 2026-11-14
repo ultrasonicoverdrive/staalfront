@@ -674,6 +674,17 @@ fn the_frozen_duel_opponent_is_the_shipped_profile_with_the_counter_mix_off() {
     new.name = "normal_9_2a2".to_string();
     new.army.counter_permille = 0;
     new.army.intel_ticks = old.army.intel_ticks;
+    // WP9.3c: the shipped goal lists now end at the second refinery; the frozen copy keeps the lists of before (pinned here:
+    // Meridian ten entries ending in the advanced defences, Veyran eleven with the bunker after the first tower).
+    assert_eq!(old.factions[0].build_order.len(), 10);
+    assert_eq!(
+        old.factions[0].build_order.last(),
+        Some(&("advanced_defences".to_string(), 1))
+    );
+    assert_eq!(old.factions[1].build_order.len(), 11);
+    assert_eq!(old.factions[1].build_order[7].0, "fortified_bunker");
+    new.factions[0].build_order = old.factions[0].build_order.clone();
+    new.factions[1].build_order = old.factions[1].build_order.clone();
     // The shipped mix is still the one of WP9.2a-2 (the measured static mixes were not shipped, fix round 1).
     assert_eq!(old, new);
     assert!(!old.army.counter_on());

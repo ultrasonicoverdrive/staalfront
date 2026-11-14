@@ -96,6 +96,17 @@ fn the_frozen_profile_is_the_shipped_one_with_the_numbers_of_wp9_2a_off() {
     a.gather_everyone = false;
     a.stage_permille = old.army.stage_permille;
     a.stage_patience = old.army.stage_patience;
+    // WP9.3c: the shipped goal lists now end at the second refinery; the frozen copy keeps the lists of before (pinned here:
+    // Meridian ten entries ending in the advanced defences, Veyran eleven with the bunker after the first tower).
+    assert_eq!(old.factions[0].build_order.len(), 10);
+    assert_eq!(
+        old.factions[0].build_order.last(),
+        Some(&("advanced_defences".to_string(), 1))
+    );
+    assert_eq!(old.factions[1].build_order.len(), 11);
+    assert_eq!(old.factions[1].build_order[7].0, "fortified_bunker");
+    new.factions[0].build_order = old.factions[0].build_order.clone();
+    new.factions[1].build_order = old.factions[1].build_order.clone();
     assert_eq!(old, new);
 }
 

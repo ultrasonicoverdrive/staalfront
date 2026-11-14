@@ -704,15 +704,58 @@ fn the_money_of_the_ai_in_the_game_seat_around_the_first_attack() {
 /// list completes with the floor. Printed: the last build, the army every 4,000 ticks.
 #[test]
 fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
+    let (last_build, last_kind) = goal_list_run(false);
+    // WP9.3c: the shipped list ends at the second refinery (kind 2) and is complete at 11,737 (docs/rules/ai.md "Defence
+    // lock (WP9.3c)"); it was 20,297 with the tower, radar, second tower and advanced defences behind it
+    // (`the_old_goal_list_still_completes_at_20_297`).
+    assert_eq!(last_build, 11_737);
+    assert_eq!(last_kind, 2);
+    // The bound since WP9.3c: 12,000 (PLAN.md note of 14-11-2026), the measured value plus a margin; it was 20,500 for the longer list.
+    assert!(last_build <= 12_000, "{last_build}");
+}
+
+/// The cause of the move above, as a test: the same run with the goal list of before WP9.3c written into the profile gives the old
+/// pins back (the last build at 20,297, the advanced defences, kind 7, under the old bound of 20,500).
+#[test]
+fn the_old_goal_list_still_completes_at_20_297() {
+    let (last_build, last_kind) = goal_list_run(true);
+    assert_eq!(last_build, 20_297);
+    // The last structure ordered is the list's last entry, the advanced defences (kind 7).
+    assert_eq!(last_kind, 7);
+    assert!(last_build <= 20_500, "{last_build}");
+}
+
+/// `m1_ai` for 30,000 ticks with the attack switched off, the army floor on; with `old_list` the Veyran goal list of before
+/// WP9.3c (tower, bunker, radar, second tower, advanced defences behind the second refinery) is put into the profile. Returns the tick
+/// and kind of the last structure ordered.
+fn goal_list_run(old_list: bool) -> (u64, u16) {
     let (mut world, _, mut ais) = game(&ai_file());
     for ai in &mut ais {
         let st = ai.state().clone();
         let mut p = st.profile.clone();
         p.army.attack_value = 1_000_000;
         p.army.max_wait = 72_000;
+        if old_list {
+            // The seat of `m1_ai` is Veyran: its old list has the fortified bunker (kind 10) after the first tower.
+            p.build_order = [
+                (1, 1),
+                (2, 1),
+                (4, 1),
+                (3, 1),
+                (1, 2),
+                (2, 2),
+                (6, 1),
+                (10, 1),
+                (5, 1),
+                (6, 2),
+                (7, 1),
+            ]
+            .map(|(k, n)| (sf_sim::Kind(k), n))
+            .to_vec();
+        }
         *ai = sf_ai::Ai::new(st.player, p, 458758, st.start_sites.clone());
     }
-    let (mut last_build, mut last_kind, mut army) = (0, 0, Vec::new());
+    let (mut last_build, mut last_kind) = (0, 0);
     drive(&mut world, &mut ais, 30_000, |w, _, sent| {
         for c in sent {
             if let sf_sim::Command::BuildStructure { kind, .. } = c {
@@ -720,32 +763,9 @@ fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
                 last_kind = kind.0;
             }
         }
-        if w.tick().0.is_multiple_of(4000) {
-            let n = w
-                .snapshot()
-                .iter()
-                .filter(|v| v.owner == AI && [12, 13, 19].contains(&v.kind.0))
-                .count();
-            army.push((w.tick().0, n));
-        }
     });
-    println!(
-        "m1_ai, no attack: last build at {last_build}, army {army:?}, result {:?}",
-        world.match_result()
-    );
     assert_eq!(world.match_result(), None);
-    // Measured (WP9.1c-3): the list's last build at 19,777 (was 29,777 and not complete: the vehicle factory
-    // waited for the 4,000 credits the floor spent on twelve units). The target of 20,000 was met in this seat
-    // (not in `ai_vs_passive`, 22,730); the ore of the map is the limit, see docs/rules/ai.md "The opening".
-    // WP9.2a-2: 20,297. The new gather cell moves where the later structures are placed (the cell and its ring are
-    // kept free of them), so the list's timing shifts: gap rule alone 20,297, gathering of every unit alone 20,537,
-    // both 20,297, both off 19,777 (docs/rules/ai.md "The start-site advantage"). The target of 20,000 is no longer
-    // met in this seat; that is written down there as a known cost, not hidden by this pin.
-    assert_eq!(last_build, 20_297);
-    // The last structure ordered is the list's last entry, the advanced defences (kind 7).
-    assert_eq!(last_kind, 7);
-    // The target since WP9.2a-2: 20,500 (orchestrator decision 14-11-2026, PLAN.md), measured value plus a margin.
-    assert!(last_build <= 20_500, "{last_build}");
+    (last_build, last_kind)
 }
 
 /// What `the_opening_in_the_game_seat` reads off a run.

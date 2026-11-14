@@ -264,6 +264,17 @@ fn the_frozen_duel_opponent_is_the_shipped_profile_after_wp9_2b_1_without_the_ne
     a.escalate_permille = 0;
     a.attack_value_max = 0;
     a.harvester_threat = false;
+    // WP9.3c: the shipped goal lists now end at the second refinery; the frozen copy keeps the lists of before (pinned here:
+    // Meridian ten entries ending in the advanced defences, Veyran eleven with the bunker after the first tower).
+    assert_eq!(old.factions[0].build_order.len(), 10);
+    assert_eq!(
+        old.factions[0].build_order.last(),
+        Some(&("advanced_defences".to_string(), 1))
+    );
+    assert_eq!(old.factions[1].build_order.len(), 11);
+    assert_eq!(old.factions[1].build_order[7].0, "fortified_bunker");
+    new.factions[0].build_order = old.factions[0].build_order.clone();
+    new.factions[1].build_order = old.factions[1].build_order.clone();
     assert_eq!(old, new);
     assert!(!old.army.escalate_on() && !old.army.harvester_threat);
     // The mix and the counter mix of the profile after #135.
