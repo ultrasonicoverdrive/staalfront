@@ -98,7 +98,8 @@ const BOUNCE_LAUNCHES: [(u64, u64); 3] = [(1630, 800), (7590, 1200), (17630, 180
 const BOUNCE_BOUNCES: [(u64, u64, u32); 3] = [(3790, 800, 1), (9870, 1200, 2), (20110, 1800, 3)];
 
 #[test]
-fn each_failed_strike_makes_the_next_launch_half_as_big_again_and_the_ticks_and_values_are_pinned() {
+fn each_failed_strike_makes_the_next_launch_half_as_big_again_and_the_ticks_and_values_are_pinned()
+{
     let s = story(&load("ai_bounce"));
     assert_eq!(s.launches, BOUNCE_LAUNCHES);
     assert_eq!(s.bounces, BOUNCE_BOUNCES);
@@ -113,7 +114,13 @@ fn without_the_escalation_the_second_wave_leaves_at_once_with_less() {
     // 3,800 ticks before the escalated one.
     assert_eq!(
         s.launches,
-        [(1630, 800), (3790, 800), (9710, 800), (14270, 800), (18750, 800)]
+        [
+            (1630, 800),
+            (3790, 800),
+            (9710, 800),
+            (14270, 800),
+            (18750, 800)
+        ]
     );
     assert!(s.bounces.is_empty());
 }

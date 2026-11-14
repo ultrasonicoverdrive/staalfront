@@ -1012,6 +1012,77 @@ mod tests {
     }
 
     #[test]
+    fn the_bounce_ledger_and_the_harvesters_seen_are_hashed_only_when_their_rules_are_on() {
+        // Off (the shipped profile): the ledger and the harvesters seen are not read, so not hashed; the base pin stands.
+        let d = base_state().digest();
+        assert_eq!(d, 0x4d0a_8207_c799_2fad);
+        let mut off = base_state();
+        off.bounces = 3;
+        off.bounce_value = 4000;
+        off.bounce_tick = Tick(9000);
+        off.harv_seen
+            .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 5), 80));
+        assert_eq!(off.digest(), d);
+        // Escalation on: the numbers and each part of the ledger move the digest, and so does switching it on.
+        let mut on = base_state();
+        on.profile.army.escalate_permille = 250;
+        on.profile.army.attack_value_max = 8000;
+        on.bounces = 2;
+        on.bounce_value = 3000;
+        on.bounce_tick = Tick(7000);
+        let e = on.digest();
+        assert_ne!(e, d);
+        // A literal, so that the tag (0x95) and the order of the fields are pinned.
+        assert_eq!(e, 0x8829_15b7_1a46_ca43, "escalation on");
+        for change in [
+            (|s: &mut AiState| s.bounces += 1) as fn(&mut AiState),
+            |s| s.bounce_value += 1,
+            |s| s.bounce_tick = Tick(s.bounce_tick.0 + 1),
+            |s| s.profile.army.escalate_permille += 1,
+            |s| s.profile.army.attack_value_max += 1,
+        ] {
+            let mut t = on.clone();
+            change(&mut t);
+            assert_ne!(t.digest(), e);
+        }
+        // The cap is read only with the rule on.
+        let mut capped = base_state();
+        capped.profile.army.attack_value_max = 8000;
+        assert_eq!(capped.digest(), d);
+        // The harvester threat on: the switch and each harvester seen move the digest.
+        let mut h = base_state();
+        h.profile.army.harvester_threat = true;
+        h.harv_seen
+            .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 5), 80));
+        let f = h.digest();
+        assert_ne!(f, d);
+        assert_eq!(f, 0x6da9_505f_7082_0c3f, "harvester threat on");
+        for change in [
+            (|s: &mut AiState| {
+                s.harv_seen
+                    .insert(EntityId::new(31, 0), (Kind(11), Cell::new(1, 1), 10));
+            }) as fn(&mut AiState),
+            |s| {
+                s.harv_seen
+                    .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 5), 79));
+            },
+            |s| {
+                s.harv_seen
+                    .insert(EntityId::new(30, 0), (Kind(11), Cell::new(4, 6), 80));
+            },
+            |s| {
+                s.harv_seen
+                    .insert(EntityId::new(30, 1), (Kind(11), Cell::new(4, 5), 80));
+            },
+            |s| s.harv_seen.clear(),
+        ] {
+            let mut t = h.clone();
+            change(&mut t);
+            assert_ne!(t.digest(), f);
+        }
+    }
+
+    #[test]
     fn every_part_of_the_groups_moves_the_digest() {
         let d = base_state().digest();
         let changes: [fn(&mut AiState); 24] = [
