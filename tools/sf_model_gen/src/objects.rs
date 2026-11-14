@@ -494,7 +494,7 @@ pub fn evidence_crate() -> Model {
         }
         if lod.has(0) {
             m.add(cuboid([-200, 560, -150], [200, 570, 150], PAINT).toned(900));
-            for (x, z) in [(-480, -280), (480, -280), (-480, 280), (480, 280)] {
+            for (x, z) in [(-470, -270), (470, -270), (-470, 270), (470, 270)] {
                 m.add(closed_box(
                     [x - 30, 0, z - 30],
                     [x + 30, 580, z + 30],
@@ -568,6 +568,13 @@ pub fn automated_gun(working: bool) -> Model {
             for k in 0..16 {
                 let [x, z] = crate::kit::on_circle(1500, k, 16);
                 m.add(crate::kit::bolt([x, 1200, z], 40, 25, 4, METAL));
+                m.add(crate::kit::bolt(
+                    [x * 112 / 100, 450, z * 112 / 100],
+                    40,
+                    25,
+                    4,
+                    METAL,
+                ));
             }
         }
         let mut t = turret(F::V, lod, [0, 1530, 0], 800, 1300, false);
@@ -709,7 +716,8 @@ pub fn rubble(w: i32, h: i32) -> Model {
                 let hh = 350 + hash(s ^ 5) as i32 * 5 / 10;
                 let mat = [PAINT, PAINT2, PAINT][(s % 3) as usize];
                 let r = r.min(hx * 8 / 10).min(hz * 8 / 10);
-                let (x, z) = (x.clamp(-hx + r, hx - r), z.clamp(-hz + r, hz - r));
+                let m2 = r * 12 / 10;
+                let (x, z) = (x.clamp(-hx + m2, hx - m2), z.clamp(-hz + m2, hz - m2));
                 m.add(chunk([x, 60, z], r, hh, s, mat, lod));
             }
         }
@@ -718,12 +726,9 @@ pub fn rubble(w: i32, h: i32) -> Model {
                 let s = seed + k as u32;
                 let x = (hash(s * 7) as i32 - 500) * hx / 800;
                 let z = (hash(s * 11) as i32 - 500) * hz / 800;
-                let x = x.clamp(-hx + 900, hx - 900);
-                let z = z.clamp(-hz + 900, hz - 900);
-                m.add(
-                    fallen_plate([x - 700, 100, z], 1400, 600, 380, (k % 4) as u8, METAL)
-                        .toned(700),
-                );
+                let x = x.clamp(-hx + 1000, hx - 1000);
+                let z = z.clamp(-hz + 1000, hz - 1000);
+                m.add(fallen_plate([x, 100, z], 900, 600, 380, (k % 4) as u8, METAL).toned(700));
             }
         }
         if lod.has(0) {

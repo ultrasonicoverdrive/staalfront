@@ -1468,7 +1468,10 @@ mod tests {
             assert_eq!(style.shape(look.shape).icon, want, "{}", def.id);
             seen += 1;
         }
-        assert_eq!(seen, 36, "eighteen roles, two factions");
+        assert_eq!(
+            seen, 38,
+            "nineteen roles (WP11.6c: the ore silo), two factions"
+        );
     }
 
     /// With models off, or a faction's file missing, its units get the generic

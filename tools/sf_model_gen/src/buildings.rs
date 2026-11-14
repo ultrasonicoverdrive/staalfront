@@ -1070,7 +1070,7 @@ pub fn barracks(f: F) -> Model {
                 TEAM,
             ));
         }
-        m.add(bags(f, lod, 1800, -4300, sh, 1300, 8, 0));
+        m.add(bags(f, lod, 1800, -4100, sh, 1250, 8, 0));
         for z in [-2000, 1000, 3800] {
             m.add(roof_unit(f, lod, -1200, top, z, 900));
         }

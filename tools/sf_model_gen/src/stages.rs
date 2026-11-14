@@ -396,13 +396,13 @@ pub fn debris(
         let side = i % 4;
         let along = |half: i32| (h as i32 * 2 - 1000) * half / 1000;
         let gap = |inner: i32, outer: i32| {
-            inner + (hash(seed * 7 + i * 13) as i32) * (outer - inner).max(1) / 1000
+            inner + (hash(seed * 7 + i * 13) as i32) * (outer - r - inner).max(1) / 1000
         };
         let (x, z) = match side {
-            0 => (gap(hx, ox), along(oz)),
-            1 => (-gap(hx, ox), along(oz)),
-            2 => (along(ox), gap(hz, oz)),
-            _ => (along(ox), -gap(hz, oz)),
+            0 => (gap(hx, ox), along(oz - r)),
+            1 => (-gap(hx, ox), along(oz - r)),
+            2 => (along(ox - r), gap(hz, oz)),
+            _ => (along(ox - r), -gap(hz, oz)),
         };
         let rr = r * (500 + hash(seed + i * 3) as i32 / 2) / 1000;
         let mat = mats[(i as usize) % mats.len()];
@@ -1309,7 +1309,7 @@ fn heavy(
         for i in 0..4u32 {
             let s = if i % 2 == 0 { 1 } else { -1 };
             if ix >= 1800 && iz >= 1800 {
-                let len = ix.min(iz) / 2;
+                let len = ix.min(iz) / 3;
                 m.add(
                     fallen_plate(
                         [mid[0] + s * ix / 3, floor, mid[2] - s * iz / 2],

@@ -181,7 +181,14 @@ fn buildings_use_their_detail_budget() {
         } else if is_decor(&m.stem) {
             assert!((100..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else if is_building(&m.stem) {
-            assert!((1000..=3500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+            // A mission object at least 1,000 (`objects::OBJECT_FLOOR`); its states (a heavy stage
+            // broken off low, `_destroyed`, `_rubble`) at least 500.
+            let state = STATES
+                .iter()
+                .chain(&["_no_uplink"])
+                .any(|s| m.stem.ends_with(s));
+            let least = if state { 500 } else { 1000 };
+            assert!((least..=3500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else {
             assert!((1200..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         }
