@@ -56,7 +56,12 @@ the picture **below** the sign (`sidebar_view::label_rect`, `loop_sign_rect`), s
 800 x 600, scale 0.5 to 2, and checks that the boxes do not meet (at scale 1 and above the label also stays inside the picture; at scale 0.5 the picture is too small for
 sign and label and only the first claim holds). `picture_rect` and `count_badge_rect` are the functions `draw_tile` and the test share. **Gap, measured**: a count badge of
 one digit never reaches the moved label (all labels, scale 1 to 2), but with a count of ten or more the badge reaches into the glyph box of
-DECOY, ROCKT and SCOUT (1280 x 720, scale 1; the set is pinned in the test); nothing was widened for it. The screenshot test checks the pixels. Mouse only: no key in this WP (letters such as R and L are free in `input.ron`, but a key needs a decision with the
+DECOY, ROCKT and SCOUT (1280 x 720, scale 1; the set is pinned in the test); nothing was widened for it. **When it can happen**: not for a unit item
+with the shipped config. A unit item counts only the queue of its primary factory (`sidebar.rs`, `item`'s `view.queue.iter().filter(..).count()`,
+not summed over factories), and that queue holds at most `queue_limit` items (`assets/config/production.ron`: 5; `sf_sim/src/production.rs`, `QueueFull` at `items.len() >= queue_limit`; the
+repeat refill checks the same limit), so the count is 5 at most; it only reaches ten if `queue_limit` is raised to 10 or more (the data allows up to `MAX_QUEUE_LIMIT`, 20).
+For a structure item the count is the number of structures of that kind going up at once (`sidebar.rs`, `sit.buildings`), and the code has no cap on that
+(`PlacementError` has no such case; credits, space and the entity limit are the only limits), so ten at once is possible in play but not tested and unlikely; the badge count on a structure tile is not pinned by a test beyond the counts 1 and 2. The screenshot test checks the pixels. Mouse only: no key in this WP (letters such as R and L are free in `input.ron`, but a key needs a decision with the
 rest of the key map; the button is one click). The row is three equal buttons now. Tests: `sidebar/tests.rs`
 (`the_repeat_button_acts_on_the_primary_factory_...`), `sidebar_view/tests.rs` (press, lit, sign), `sidebar_layout/tests.rs`
 (`the_repeat_button_is_the_third_in_the_row_of_buttons`), `tests/sidebar_screenshot.rs` (pixels from a real world;
