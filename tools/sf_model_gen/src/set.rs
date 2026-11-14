@@ -23,8 +23,20 @@ macro_rules! with_states {
 pub fn structure_recipes() -> Vec<fn() -> Model> {
     let mut v: Vec<fn() -> Model> = Vec::new();
     // The three finished structures of WP11.6a get their states.
-    v.push(|| derive(&models::meridian_construction_center(), Stage::Foundation, 500));
-    v.push(|| derive(&models::meridian_construction_center(), Stage::Scaffolding, 500));
+    v.push(|| {
+        derive(
+            &models::meridian_construction_center(),
+            Stage::Foundation,
+            500,
+        )
+    });
+    v.push(|| {
+        derive(
+            &models::meridian_construction_center(),
+            Stage::Scaffolding,
+            500,
+        )
+    });
     v.push(|| derive(&models::meridian_construction_center(), Stage::Damaged, 500));
     v.push(|| derive(&models::meridian_construction_center(), Stage::Heavy, 500));
     v.push(|| derive(&models::veyran_power_plant(), Stage::Foundation, 400));
@@ -80,7 +92,15 @@ pub fn structure_recipes() -> Vec<fn() -> Model> {
     v.push(|| derive_as(&o::automated_gun(true), Stage::Heavy, 0, "_rubble", 150));
     v.push(|| o::unmanned_artillery(true));
     v.push(|| o::unmanned_artillery(false));
-    v.push(|| derive_as(&o::unmanned_artillery(true), Stage::Heavy, 350, "_rubble", 150));
+    v.push(|| {
+        derive_as(
+            &o::unmanned_artillery(true),
+            Stage::Heavy,
+            350,
+            "_rubble",
+            150,
+        )
+    });
     // The rubble heaps, one per structure footprint (`wrecks.ron`).
     v.push(|| o::rubble(1, 1));
     v.push(|| o::rubble(2, 2));

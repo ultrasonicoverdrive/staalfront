@@ -18,8 +18,7 @@
 //! throughout; the share uses basic float operations only, like the checker's raster.
 
 use crate::kit::{
-    Lod, Mat, Mesh, Model, Node, P, Tri, bevel_box, closed_box, cuboid, dot, extrude_z1,
-    loft, sub,
+    Lod, Mat, Mesh, Model, Node, P, Tri, bevel_box, closed_box, cuboid, dot, extrude_z1, loft, sub,
 };
 use crate::palette::slot::*;
 
@@ -28,7 +27,7 @@ pub const SOOT: crate::kit::Tone = 420;
 /// The tone of the burnt rim of a hole.
 pub const CHAR: crate::kit::Tone = 300;
 /// The team share every stage aims at (the floor; the checker's is 20 %, the tests cap at 30 %).
-pub const TEAM_AIM: f64 = 0.21;
+pub const TEAM_AIM: f64 = 0.216;
 /// At least this many team triangles per level (the rule of the finished models).
 pub const TEAM_MIN_TRIS: usize = 12;
 
@@ -97,7 +96,8 @@ pub fn team_share(tris: &[Tri], res: usize) -> f64 {
     let mut top = vec![f64::NEG_INFINITY; w * d];
     let mut team = vec![false; w * d];
     for t in tris {
-        let c = t.v.map(|p| [f64::from(p[0]), f64::from(p[2]), f64::from(p[1])]);
+        let c =
+            t.v.map(|p| [f64::from(p[0]), f64::from(p[2]), f64::from(p[1])]);
         let (a, b, cc) = (c[0], c[1], c[2]);
         let area = (b[0] - a[0]) * (cc[1] - a[1]) - (b[1] - a[1]) * (cc[0] - a[0]);
         if area.abs() < 1e-9 {
@@ -144,7 +144,7 @@ pub fn team_share(tris: &[Tri], res: usize) -> f64 {
 }
 
 /// The resolution of [`fit_team`]'s raster (the checker uses 512; 160 is within a percent here).
-pub const FIT_RES: usize = 160;
+pub const FIT_RES: usize = 400;
 
 /// Add `cands` (team stripes) to `body` one by one, in order, until the team share of `fixed` +
 /// `body` + the added ones reaches [`TEAM_AIM`] and the level has at least [`TEAM_MIN_TRIS`]
@@ -312,7 +312,7 @@ pub fn clip(mesh: &Mesh, plane: Plane) -> Mesh {
             let mut piece = *t;
             piece.v = [poly[0], poly[k], poly[k + 1]];
             let n = piece.normal();
-            if n != [0, 0, 0] && dot(n, n0) > 0 {
+            if dot(n, n) >= 1_000_000 && dot(n, n0) > 0 {
                 out.tris.push(piece);
             }
         }
@@ -340,7 +340,7 @@ pub fn bounds(tris: &[Tri]) -> (P, P) {
 /// LOD2 a plain block of 10.
 pub fn chunk(at: P, r: i32, h: i32, seed: u32, mat: Mat, lod: Lod) -> Mesh {
     if !lod.has(1) {
-        let q = r * 7 / 10;
+        let q = r * 8 / 10;
         return cuboid([-q, 0, -q], [q, h, q], mat).moved(at);
     }
     let ring = |scale: i32, salt: u32| -> Vec<[i32; 2]> {
@@ -439,7 +439,8 @@ pub fn hole(mesh: &mut Mesh, c: P, r: i32) {
 }
 
 fn centroid(t: &Tri) -> P {
-    [0, 1, 2].map(|k| ((i64::from(t.v[0][k]) + i64::from(t.v[1][k]) + i64::from(t.v[2][k])) / 3) as i32)
+    [0, 1, 2]
+        .map(|k| ((i64::from(t.v[0][k]) + i64::from(t.v[1][k]) + i64::from(t.v[2][k])) / 3) as i32)
 }
 
 /// Whether the triangle faces up (for the share and the hole picks).
@@ -551,7 +552,10 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
     let f = footprint(built);
     let stem = format!("{}{}", built.stem, suffix);
     let teamed = built.team().is_some();
-    let seed = built.stem.bytes().fold(7u32, |h, b| h.wrapping_mul(31) ^ u32::from(b));
+    let seed = built
+        .stem
+        .bytes()
+        .fold(7u32, |h, b| h.wrapping_mul(31) ^ u32::from(b));
     let lods: Vec<Node> = Lod::ALL
         .iter()
         .map(|&lod| {
@@ -602,15 +606,37 @@ fn grounded(anchors: &[(String, P)], y: i32) -> Vec<(String, P)> {
 }
 
 /// The foundation: a slab, footing beams, rebar, formwork, stakes.
-fn foundation(f: &Footprint, slab: i32, parts: &Parts, lod: Lod, seed: u32, stem: &str, teamed: bool) -> Vec<Node> {
+fn foundation(
+    f: &Footprint,
+    slab: i32,
+    parts: &Parts,
+    lod: Lod,
+    seed: u32,
+    stem: &str,
+    teamed: bool,
+) -> Vec<Node> {
     let (hx, hz) = (f.hx - 100, f.hz - 100);
     let y = slab.clamp(200, 450);
     let mut m = bevel_box([-hx, 0, -hz], [hx, y, hz], lod.bevel(60), PAINT2, PAINT2);
     // Formwork boards round the slab, standing a little proud.
     let b = 90;
     for s in [-1, 1] {
-        m.add(cuboid([-hx - b, 0, s * hz - b], [hx + b, y + 120, s * hz + b], PAINT).toned(860));
-        m.add(cuboid([s * hx - b, 0, -hz + b], [s * hx + b, y + 120, hz - b], PAINT).toned(860));
+        m.add(
+            cuboid(
+                [-hx - b, 0, s * hz - b],
+                [hx + b, y + 120, s * hz + b],
+                PAINT,
+            )
+            .toned(860),
+        );
+        m.add(
+            cuboid(
+                [s * hx - b, 0, -hz + b],
+                [s * hx + b, y + 120, hz - b],
+                PAINT,
+            )
+            .toned(860),
+        );
     }
     // Footing beams in a grid (300 mm wide, team candidates), rebar stubs on the crossings.
     let step = 2400;
@@ -620,16 +646,32 @@ fn foundation(f: &Footprint, slab: i32, parts: &Parts, lod: Lod, seed: u32, stem
     let beam_h = 140;
     for i in 1..nx.max(2) {
         let x = -hx + 2 * hx * i / nx.max(2);
-        cands.push(cuboid([x - 150, y, -hz + 300], [x + 150, y + beam_h, hz - 300], TEAM));
+        cands.push(cuboid(
+            [x - 150, y, -hz + 300],
+            [x + 150, y + beam_h, hz - 300],
+            TEAM,
+        ));
     }
     for k in 1..nz.max(2) {
         let z = -hz + 2 * hz * k / nz.max(2);
-        cands.push(cuboid([-hx + 300, y, z - 150], [hx - 300, y + beam_h, z + 150], TEAM));
+        cands.push(cuboid(
+            [-hx + 300, y, z - 150],
+            [hx - 300, y + beam_h, z + 150],
+            TEAM,
+        ));
     }
     // Survey stripes along the slab edge (inside the boards).
     for s in [-1, 1] {
-        cands.push(cuboid([-hx + 200, y, s * (hz - 330) - 130], [hx - 200, y + 18, s * (hz - 330) + 130], TEAM));
-        cands.push(cuboid([s * (hx - 330) - 130, y, -hz + 520], [s * (hx - 330) + 130, y + 18, hz - 520], TEAM));
+        cands.push(cuboid(
+            [-hx + 200, y, s * (hz - 330) - 130],
+            [hx - 200, y + 18, s * (hz - 330) + 130],
+            TEAM,
+        ));
+        cands.push(cuboid(
+            [s * (hx - 330) - 130, y, -hz + 520],
+            [s * (hx - 330) + 130, y + 18, hz - 520],
+            TEAM,
+        ));
     }
     // Interleave: beams and edge stripes alternate so the markings spread evenly.
     let cands = interleave(cands);
@@ -639,24 +681,51 @@ fn foundation(f: &Footprint, slab: i32, parts: &Parts, lod: Lod, seed: u32, stem
                 let x = -hx + 400 + (2 * hx - 800) * i / nx.max(2);
                 let z = -hz + 400 + (2 * hz - 800) * k / nz.max(2);
                 for (dx, dz) in [(-90, -90), (90, 90)] {
-                    m.add(cuboid([x + dx - 20, y, z + dz - 20], [x + dx + 20, y + 620, z + dz + 20], METAL));
+                    m.add(cuboid(
+                        [x + dx - 20, y, z + dz - 20],
+                        [x + dx + 20, y + 620, z + dz + 20],
+                        METAL,
+                    ));
                 }
             }
         }
         // Pallets of blocks and a stack of boards.
-        for (i, (px, pz)) in [(hx - 1300, hz - 1300), (-hx + 1300, -hz + 1300)].iter().enumerate() {
-            m.add(closed_box([px - 600, y, pz - 500], [px + 600, y + 120, pz + 500], RUBBER).toned(900));
+        for (i, (px, pz)) in [(hx - 1300, hz - 1300), (-hx + 1300, -hz + 1300)]
+            .iter()
+            .enumerate()
+        {
+            m.add(
+                closed_box(
+                    [px - 600, y, pz - 500],
+                    [px + 600, y + 120, pz + 500],
+                    RUBBER,
+                )
+                .toned(900),
+            );
             for k in 0..3 {
                 let x0 = px - 550 + k * 380;
-                m.add(bevel_box([x0, y + 120, pz - 450], [x0 + 340, y + 520, pz + 450], 20, PAINT, PAINT).toned(900 - 40 * i as u16));
+                m.add(
+                    bevel_box(
+                        [x0, y + 120, pz - 450],
+                        [x0 + 340, y + 520, pz + 450],
+                        20,
+                        PAINT,
+                        PAINT,
+                    )
+                    .toned(900 - 40 * i as u16),
+                );
             }
         }
     }
-    if lod.has(1) {
+    {
         // Survey stakes on the corners.
         for (sx, sz) in [(-1, -1), (-1, 1), (1, -1), (1, 1)] {
             let (x, z) = (sx * (hx + 20), sz * (hz + 20));
-            m.add(closed_box([x - 40, 0, z - 40], [x + 40, y + 900, z + 40], METAL));
+            m.add(cuboid(
+                [x - 40, 0, z - 40],
+                [x + 40, y + 900, z + 40],
+                METAL,
+            ));
         }
     }
     let fixed = turret_tris(&None);
@@ -726,7 +795,15 @@ pub fn roof_level(parts: &Parts, slab: i32) -> i32 {
 }
 
 /// The scaffolding: the finished body cut at about half its height, a deck, a scaffold round it.
-fn scaffolding(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem: &str, teamed: bool) -> Vec<Node> {
+fn scaffolding(
+    f: &Footprint,
+    slab: i32,
+    parts: Parts,
+    lod: Lod,
+    seed: u32,
+    stem: &str,
+    teamed: bool,
+) -> Vec<Node> {
     let cut = slab + (roof_level(&parts, slab) - slab) * 60 / 100;
     let _ = f.top;
     let mut m = clip(&parts.body, Plane::level(cut));
@@ -735,19 +812,42 @@ fn scaffolding(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem
     let (lo, hi) = hull_bounds(&parts, slab);
     let (x0, x1, z0, z1) = (lo[0], hi[0], lo[2], hi[2]);
     let (ix, iz) = ((x1 - x0) * 12 / 100, (z1 - z0) * 12 / 100);
-    m.add(cuboid([x0 + ix, cut - 160, z0 + iz], [x1 - ix, cut - 100, z1 - iz], METAL).toned(900));
+    m.add(
+        cuboid(
+            [x0 + ix, cut - 160, z0 + iz],
+            [x1 - ix, cut - 100, z1 - iz],
+            METAL,
+        )
+        .toned(900),
+    );
     // Setting-out stripes on the deck (team candidates, added after the scaffold's own).
     let mut deck = Vec::new();
     let mut z = z0 + iz + 300;
     while z + 260 < z1 - iz - 200 {
-        deck.push(strip([x0 + ix + 200, cut - 100, z], [x1 - ix - 200, cut - 84, z + 260], lod));
+        deck.push(strip(
+            [x0 + ix + 200, cut - 100, z],
+            [x1 - ix - 200, cut - 84, z + 260],
+            lod,
+        ));
         z += 900;
     }
     // Scaffold: poles round the hull bounds, 500 mm out, inside the footprint.
-    let (px0, px1) = ((x0 - 500).max(-f.hx + f.cx + 80), (x1 + 500).min(f.hx + f.cx - 80));
-    let (pz0, pz1) = ((z0 - 500).max(-f.hz + f.cz + 80), (z1 + 500).min(f.hz + f.cz - 80));
+    let (px0, px1) = (
+        (x0 - 500).max(-f.hx + f.cx + 150),
+        (x1 + 500).min(f.hx + f.cx - 150),
+    );
+    let (pz0, pz1) = (
+        (z0 - 500).max(-f.hz + f.cz + 150),
+        (z1 + 500).min(f.hz + f.cz - 150),
+    );
     let top = cut + 1100;
-    let spacing = if lod.has(0) { 1800 } else if lod.has(1) { 5000 } else { 1_000_000 };
+    let spacing = if lod.has(0) {
+        1800
+    } else if lod.has(1) {
+        5000
+    } else {
+        1_000_000
+    };
     let mut poles: Vec<(i32, i32)> = Vec::new();
     let nx = ((px1 - px0) / spacing).max(1);
     let nz = ((pz1 - pz0) / spacing).max(1);
@@ -765,7 +865,13 @@ fn scaffolding(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem
         m.add(cuboid([x - 30, slab, z - 30], [x + 30, top, z + 30], METAL));
     }
     // Ledgers and planks on two lifts; the toe boards are the team candidates.
-    let lifts: Vec<i32> = if lod.has(0) { vec![slab + (cut - slab) / 2, cut] } else if lod.has(1) { vec![cut] } else { Vec::new() };
+    let lifts: Vec<i32> = if lod.has(0) {
+        vec![slab + (cut - slab) / 2, cut]
+    } else if lod.has(1) {
+        vec![cut]
+    } else {
+        Vec::new()
+    };
     let mut cands = Vec::new();
     for &ly in &lifts {
         for (a0, a1, z, out) in [(px0, px1, pz0, -1), (px0, px1, pz1, 1)] {
@@ -773,16 +879,24 @@ fn scaffolding(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem
             let zi = z - out * 380;
             let (za, zb) = (z.min(zi), z.max(zi));
             m.add(cuboid([a0 + 40, ly, za], [a1 - 40, ly + 50, zb], PAINT).toned(840));
-            let zt = z + out * 40;
-            cands.push(cuboid([a0 + 40, ly + 50, zt.min(z) - 110], [a1 - 40, ly + 70, zt.max(z) + 110], TEAM));
+            let (ta, tb) = (z - out * 260, z - out * 40);
+            cands.push(strip(
+                [a0 + 40, ly + 50, ta.min(tb)],
+                [a1 - 40, ly + 70, ta.max(tb)],
+                lod,
+            ));
         }
         for (b0, b1, x, out) in [(pz0, pz1, px0, -1), (pz0, pz1, px1, 1)] {
             m.add(cuboid([x - 30, ly - 60, b0], [x + 30, ly, b1], METAL));
             let xi = x - out * 380;
             let (xa, xb) = (x.min(xi), x.max(xi));
             m.add(cuboid([xa, ly, b0 + 420], [xb, ly + 50, b1 - 420], PAINT).toned(840));
-            let xt = x + out * 40;
-            cands.push(cuboid([xt.min(x) - 110, ly + 50, b0 + 420], [xt.max(x) + 110, ly + 70, b1 - 420], TEAM));
+            let (ta, tb) = (x - out * 260, x - out * 40);
+            cands.push(strip(
+                [ta.min(tb), ly + 50, b0 + 420],
+                [ta.max(tb), ly + 70, b1 - 420],
+                lod,
+            ));
         }
     }
     if lod.has(0) {
@@ -790,7 +904,9 @@ fn scaffolding(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem
         for (x, z) in poles.iter().step_by(3) {
             for k in 0..4 {
                 let y = slab + 300 + k * (top - slab - 600) / 4;
-                m.add(cuboid([x - 25, y, z - 25], [x + 25, y + 40, z + 25], METAL).moved([0, 0, 0]));
+                m.add(
+                    cuboid([x - 25, y, z - 25], [x + 25, y + 40, z + 25], METAL).moved([0, 0, 0]),
+                );
             }
         }
     }
@@ -798,18 +914,48 @@ fn scaffolding(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem
     let (cx, cz) = (px1 - 300, pz1 - 300);
     let mast_top = f.top + 1500;
     let w = if lod.has(1) { 220 } else { 260 };
-    m.add(boxy(lod, [cx - w, slab, cz - w], [cx + w, mast_top, cz + w], PAINT2));
+    m.add(boxy(
+        lod,
+        [cx - w, slab, cz - w],
+        [cx + w, mast_top, cz + w],
+        PAINT2,
+    ));
     let jib = (px1 - px0) * 6 / 10;
-    m.add(boxy(lod, [cx - jib, mast_top - 300, cz - 110], [cx + 600, mast_top, cz + 110], PAINT));
-    cands.push(cuboid([cx - jib + 200, mast_top, cz - 110], [cx - 200, mast_top + 20, cz + 110], TEAM));
     if lod.has(1) {
-        m.add(closed_box([cx + 300, mast_top - 900, cz - 300], [cx + 800, mast_top - 300, cz + 300], METAL));
-        m.add(cuboid([cx - jib + 400, mast_top - 2300, cz - 10], [cx - jib + 420, mast_top - 300, cz + 10], METAL));
+        m.add(boxy(
+            lod,
+            [cx - jib, mast_top - 300, cz - 110],
+            [cx + 250, mast_top, cz + 110],
+            PAINT,
+        ));
+    }
+    if lod.has(1) {
+        cands.push(cuboid(
+            [cx - jib + 200, mast_top, cz - 110],
+            [cx - 200, mast_top + 20, cz + 110],
+            TEAM,
+        ));
+    }
+    if lod.has(1) {
+        m.add(closed_box(
+            [cx - 700, mast_top - 900, cz - 300],
+            [cx - 260, mast_top - 300, cz + 300],
+            METAL,
+        ));
+        m.add(cuboid(
+            [cx - jib + 400, mast_top - 2300, cz - 10],
+            [cx - jib + 420, mast_top - 300, cz + 10],
+            METAL,
+        ));
     }
     if lod.has(0) {
         for k in 0..((mast_top - slab) / 600) {
             let y = slab + k * 600;
-            m.add(cuboid([cx - w - 20, y, cz - w - 20], [cx + w + 20, y + 40, cz + w + 20], METAL));
+            m.add(cuboid(
+                [cx - w - 20, y, cz - w - 20],
+                [cx + w + 20, y + 40, cz + w + 20],
+                METAL,
+            ));
         }
     }
     let mut cands = interleave(cands);
@@ -857,7 +1003,7 @@ fn hole_at(parts: &Parts, slab: i32, seed: u32, k: u32) -> P {
 /// the platform edge, two pieces per edge and ring, inside the footprint, on `y`.
 fn edge_cands(f: &Footprint, y: i32, lod: Lod) -> Vec<Mesh> {
     let mut c = Vec::new();
-    for inset in [300, 850, 1400, 1950, 2500, 3050] {
+    for inset in (0..12).map(|k| 300 + k * 550) {
         let (ax, az) = (f.hx - inset, f.hz - inset);
         if ax < 900 || az < 900 {
             continue;
@@ -876,17 +1022,35 @@ fn edge_cands(f: &Footprint, y: i32, lod: Lod) -> Vec<Mesh> {
     c.into_iter().map(|m| m.moved([f.cx, 0, f.cz])).collect()
 }
 
-/// A team stripe: a thin box, at LOD2 its top only.
+/// A team stripe: a thin box at LOD0, its top only at LOD1 and LOD2 (16 mm walls nobody sees at
+/// that distance). At LOD2, the far view, a stripe is [`FAR_STRIPE_MM`] wide (the narrow-band
+/// rule holds for LOD0 and LOD1), so fewer of them reach the share on its 300 triangles.
 fn strip(lo: P, hi: P, lod: Lod) -> Mesh {
-    if lod.has(1) {
-        cuboid(lo, hi, TEAM)
-    } else {
-        cuboid([lo[0], hi[1], lo[2]], hi, TEAM)
+    if lod.has(0) {
+        return cuboid(lo, hi, TEAM);
     }
+    let (mut lo, mut hi) = (lo, hi);
+    if !lod.has(1) {
+        let k = if hi[0] - lo[0] < hi[2] - lo[2] { 0 } else { 2 };
+        let mid = (lo[k] + hi[k]) / 2;
+        lo[k] = mid - FAR_STRIPE_MM / 2;
+        hi[k] = mid + FAR_STRIPE_MM / 2;
+    }
+    cuboid([lo[0], hi[1], lo[2]], hi, TEAM)
 }
 
+/// The width of a stage's team stripe at LOD2.
+pub const FAR_STRIPE_MM: i32 = 600;
+
 /// Debris and the team candidates among it: fallen band pieces (narrow strips lying on the ground).
-fn debris_cands(f: &Footprint, slab: i32, n: u32, seed: u32, lod: Lod, hull: (P, P)) -> (Mesh, Vec<Mesh>) {
+fn debris_cands(
+    f: &Footprint,
+    slab: i32,
+    n: u32,
+    seed: u32,
+    lod: Lod,
+    hull: (P, P),
+) -> (Mesh, Vec<Mesh>) {
     // Debris lies on the free platform round the hull, never on the body (a small structure that
     // fills its footprint gets none).
     let (lo, hi) = hull;
@@ -894,7 +1058,17 @@ fn debris_cands(f: &Footprint, slab: i32, n: u32, seed: u32, lod: Lod, hull: (P,
     let hz = (f.hz * 70 / 100).max((hi[2] - lo[2]) / 2 + 200);
     let (ox, oz) = (f.hx - 200, f.hz - 200);
     let n = if hx > ox - 400 && hz > oz - 400 { 0 } else { n };
-    let mut m = debris(n, hx.min(ox - 400), hz.min(oz - 400), ox, oz, 700, seed, &[PAINT, PAINT2, METAL], lod);
+    let mut m = debris(
+        n,
+        hx.min(ox - 400),
+        hz.min(oz - 400),
+        ox,
+        oz,
+        700,
+        seed,
+        &[PAINT, PAINT2, METAL],
+        lod,
+    );
     m = m.moved([f.cx, slab, f.cz]);
     let mut cands = Vec::new();
     // Fallen band pieces on the platform edge: short narrow strips along the edges.
@@ -909,20 +1083,42 @@ fn debris_cands(f: &Footprint, slab: i32, n: u32, seed: u32, lod: Lod, hull: (P,
         } else {
             (s * (f.hx - 420), (h as i32 - 500) * (f.hz - len) / 600)
         };
-        let (x, z) = (x.clamp(-f.hx + len / 2 + 50, f.hx - len / 2 - 50), z.clamp(-f.hz + len / 2 + 50, f.hz - len / 2 - 50));
-        let lo = if along_x { [x - len / 2, slab, z - 140] } else { [x - 140, slab, z - len / 2] };
-        let hi = if along_x { [x + len / 2, slab + 40, z + 140] } else { [x + 140, slab + 40, z + len / 2] };
-        cands.push(if lod.has(1) {
-            cuboid(lo, hi, TEAM)
+        let (x, z) = (
+            x.clamp(-f.hx + len / 2 + 50, f.hx - len / 2 - 50),
+            z.clamp(-f.hz + len / 2 + 50, f.hz - len / 2 - 50),
+        );
+        let lo = if along_x {
+            [x - len / 2, slab, z - 140]
         } else {
-            cuboid([lo[0], hi[1], lo[2]], hi, TEAM)
-        }.moved([f.cx, 0, f.cz]));
+            [x - 140, slab, z - len / 2]
+        };
+        let hi = if along_x {
+            [x + len / 2, slab + 40, z + 140]
+        } else {
+            [x + 140, slab + 40, z + len / 2]
+        };
+        cands.push(
+            if lod.has(1) {
+                cuboid(lo, hi, TEAM)
+            } else {
+                cuboid([lo[0], hi[1], lo[2]], hi, TEAM)
+            }
+            .moved([f.cx, 0, f.cz]),
+        );
     }
     (m, cands)
 }
 
 /// Damaged: one hole in the roof, soot round it, debris.
-fn damaged(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem: &str, teamed: bool) -> Vec<Node> {
+fn damaged(
+    f: &Footprint,
+    slab: i32,
+    parts: Parts,
+    lod: Lod,
+    seed: u32,
+    stem: &str,
+    teamed: bool,
+) -> Vec<Node> {
     let c = hole_at(&parts, slab, seed, 1);
     let r = (f.hx.min(f.hz) * 22 / 100).clamp(500, 1800);
     let mut m = parts.body.clone();
@@ -931,12 +1127,34 @@ fn damaged(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem: &s
     soot(&mut m, c, r * 15 / 10, CHAR, TEAM);
     soot(&mut m, c, r * 11 / 10, CHAR, PAINT2);
     // The burnt rim: chunks round the hole on the roof.
-    let rim = if lod.has(0) { 6 } else if lod.has(1) { 3 } else { 0 };
+    let rim = if lod.has(0) {
+        6
+    } else if lod.has(1) {
+        3
+    } else {
+        0
+    };
     for i in 0..rim {
         let [x, z] = crate::kit::on_circle(r, i as i32, 8);
-        m.add(chunk([c[0] + x, c[1] - 120, c[2] + z], 320, 260, seed + i, PAINT2, lod).toned(CHAR));
+        m.add(
+            chunk(
+                [c[0] + x, c[1] - 120, c[2] + z],
+                320,
+                260,
+                seed + i,
+                PAINT2,
+                lod,
+            )
+            .toned(CHAR),
+        );
     }
-    let n = if lod.has(0) { 10 } else if lod.has(1) { 5 } else { 2 };
+    let n = if lod.has(0) {
+        10
+    } else if lod.has(1) {
+        5
+    } else {
+        0
+    };
     let (d, mut cands) = debris_cands(f, slab, n, seed, lod, hull_bounds(&parts, slab));
     cands.extend(edge_cands(f, slab, lod));
     m.add(d);
@@ -946,12 +1164,25 @@ fn damaged(f: &Footprint, slab: i32, parts: Parts, lod: Lod, seed: u32, stem: &s
 }
 
 /// Heavily damaged: broken off along a slanted plane, rubble inside, two holes, soot, debris.
-fn heavy(f: &Footprint, slab: i32, mut parts: Parts, lod: Lod, seed: u32, stem: &str, teamed: bool, cut: i32) -> Vec<Node> {
+fn heavy(
+    f: &Footprint,
+    slab: i32,
+    mut parts: Parts,
+    lod: Lod,
+    seed: u32,
+    stem: &str,
+    teamed: bool,
+    cut: i32,
+) -> Vec<Node> {
     let (lo, hi) = hull_bounds(&parts, slab);
     let h = roof_level(&parts, slab) - slab;
     let tilt = if hash(seed) % 2 == 0 { 1 } else { -1 };
-    let rise = i64::from(h) * 300 / i64::from((hi[0] - lo[0]).max(1000)) * tilt;
-    let plane = Plane::slant(slab + h * cut / 1000, rise, i64::from(h) * 120 / i64::from((hi[2] - lo[2]).max(1000)));
+    let rise = (i64::from(h) * 300 / i64::from((hi[0] - lo[0]).max(1000))).min(250) * tilt;
+    let plane = Plane::slant(
+        slab + h * cut / 1000,
+        rise,
+        (i64::from(h) * 120 / i64::from((hi[2] - lo[2]).max(1000))).min(120),
+    );
     let c1 = hole_at(&parts, slab, seed, 2);
     let mut m = clip(&parts.body, plane);
     let r = (f.hx.min(f.hz) * 20 / 100).clamp(450, 1600);
@@ -970,36 +1201,82 @@ fn heavy(f: &Footprint, slab: i32, mut parts: Parts, lod: Lod, seed: u32, stem: 
     }
     // Rubble inside the shell: a heap of chunks up to just under the break.
     let mut tops = Vec::new();
-    let (ix, iz) = ((hi[0] - lo[0]) / 2 * 70 / 100, (hi[2] - lo[2]) / 2 * 70 / 100);
-    let grid = if lod.has(0) { 4 } else if lod.has(1) { 2 } else { 2 };
+    let (ix, iz) = (
+        (hi[0] - lo[0]) / 2 * 70 / 100,
+        (hi[2] - lo[2]) / 2 * 70 / 100,
+    );
+    let grid = if lod.has(0) {
+        4
+    } else if lod.has(1) {
+        2
+    } else {
+        2
+    };
     let floor = slab.max(0);
-    m.add(cuboid([mid[0] - ix, floor, mid[2] - iz], [mid[0] + ix, floor + 8, mid[2] + iz], RUBBER).toned(CHAR));
+    m.add(
+        cuboid(
+            [mid[0] - ix, floor, mid[2] - iz],
+            [mid[0] + ix, floor + 8, mid[2] + iz],
+            RUBBER,
+        )
+        .toned(CHAR),
+    );
     for i in 0..grid {
         for k in 0..grid {
             let x = mid[0] - ix + (2 * ix) * (2 * i + 1) / (2 * grid);
             let z = mid[2] - iz + (2 * iz) * (2 * k + 1) / (2 * grid);
-            let hh = ((plane.height_at(x, z) - floor) * (45 + hash(seed + (i * 7 + k) as u32) as i32 / 30) / 100).max(300);
+            let hh = ((plane.height_at(x, z) - floor)
+                * (45 + hash(seed + (i * 7 + k) as u32) as i32 / 30)
+                / 100)
+                .max(300);
             let rr = (ix.min(iz) * 3 / (2 * grid)).clamp(400, 2400);
             let mat = [PAINT, PAINT2, METAL][((i + k) % 3) as usize];
-            m.add(chunk([x, floor, z], rr, hh, seed + 50 + (i * grid + k) as u32, mat, lod).toned(SOOT));
+            m.add(
+                chunk(
+                    [x, floor, z],
+                    rr,
+                    hh,
+                    seed + 50 + (i * grid + k) as u32,
+                    mat,
+                    lod,
+                )
+                .toned(SOOT),
+            );
             // A piece of roof band fallen on the heap (a team candidate): two narrow planks.
             let planks = [(-rr / 3, 0u8), (0, 2u8), (rr / 3, 0u8)];
             for &(dz, q) in &planks[..if lod.has(0) { 3 } else { 1 }] {
                 let len = rr * 8 / 10;
                 let start = if q == 0 { x - len / 2 } else { x + len / 2 };
-                tops.push(fallen_plate([start, floor + hh * 9 / 10, z + dz], len, 280, 180, q, TEAM));
+                tops.push(fallen_plate(
+                    [start, floor + hh * 9 / 10, z + dz],
+                    len,
+                    280,
+                    180,
+                    q,
+                    TEAM,
+                ));
             }
         }
     }
-    let n = if lod.has(0) { 16 } else if lod.has(1) { 4 } else { 2 };
+    let n = if lod.has(0) {
+        16
+    } else if lod.has(1) {
+        4
+    } else {
+        2
+    };
     let (d, mut cands) = debris_cands(f, slab, n, seed ^ 0x99, lod, (lo, hi));
     cands.extend(edge_cands(f, slab, lod));
     // Fallen roof bands on the rubble floor, between the chunks.
     let mut fl = Vec::new();
     let mut z = mid[2] - iz + 200;
     while z + 260 < mid[2] + iz {
-        fl.push(strip([mid[0] - ix + 200, floor + 8, z], [mid[0] + ix - 200, floor + 24, z + 260], lod));
-        z += 1100;
+        fl.push(strip(
+            [mid[0] - ix + 200, floor + 8, z],
+            [mid[0] + ix - 200, floor + 24, z + 260],
+            lod,
+        ));
+        z += 700;
     }
     cands.extend(interleave(fl));
     cands.extend(interleave(tops));
@@ -1007,7 +1284,20 @@ fn heavy(f: &Footprint, slab: i32, mut parts: Parts, lod: Lod, seed: u32, stem: 
     if lod.has(0) {
         for i in 0..4u32 {
             let s = if i % 2 == 0 { 1 } else { -1 };
-            m.add(fallen_plate([mid[0] + s * ix / 2, floor, mid[2] - s * iz], 1600, 700, 500, i as u8, PAINT2).toned(SOOT));
+            if ix >= 1800 && iz >= 1800 {
+                let len = ix.min(iz) / 2;
+                m.add(
+                    fallen_plate(
+                        [mid[0] + s * ix / 3, floor, mid[2] - s * iz / 2],
+                        len,
+                        700,
+                        500,
+                        i as u8,
+                        PAINT2,
+                    )
+                    .toned(SOOT),
+                );
+            }
         }
     }
     // A turret sinks onto the break.
@@ -1017,7 +1307,12 @@ fn heavy(f: &Footprint, slab: i32, mut parts: Parts, lod: Lod, seed: u32, stem: 
     let anchors: Vec<(String, P)> = parts
         .anchors
         .iter()
-        .map(|(n, p)| (n.clone(), [p[0], p[1].min(plane.height_at(p[0], p[2])), p[2]]))
+        .map(|(n, p)| {
+            (
+                n.clone(),
+                [p[0], p[1].min(plane.height_at(p[0], p[2])), p[2]],
+            )
+        })
         .collect();
     let fixed = turret_tris(&parts.turret);
     fit(teamed, &mut m, &fixed, cands, stem);

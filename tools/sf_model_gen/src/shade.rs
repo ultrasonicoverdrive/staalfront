@@ -208,6 +208,20 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
             .map(|r| norm(add(add(mul(tan, r[0]), mul(bit, r[1])), mul(n, r[2]))))
             .collect();
         let centre = occ[i].centre;
+        // Only occluders that a ray from this face can reach within AO_REACH_MM (WP11.6c, speed):
+        // a hit lies within the occluder's radius of its centre and the ray starts within this
+        // face's radius (plus the 8 mm lift) of its centre, so the rest can never be hit. The
+        // test is `any`, so leaving them out changes no result.
+        let near: Vec<&Occluder> = occ
+            .iter()
+            .enumerate()
+            .filter(|&(j, o)| {
+                let reach = occ[i].radius + 8.0 + AO_REACH_MM + o.radius + 10.0;
+                let d = sub(o.centre, centre);
+                j != i && dot(d, d) <= reach * reach
+            })
+            .map(|(_, o)| o)
+            .collect();
         let variation = 1.0 + VARIATION * (hash(i as u32) as f32 / 500.0 - 1.0);
         let tone = f32::from(t.tone) / 1000.0;
         let up = n[1];
@@ -238,11 +252,7 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
             let o = add(add(corner, mul(sub(centre, corner), 0.12)), mul(n, 8.0));
             let blocked = dirs
                 .iter()
-                .filter(|&&d| {
-                    occ.iter()
-                        .enumerate()
-                        .any(|(j, tri)| j != i && hits(o, d, tri))
-                })
+                .filter(|&&d| near.iter().any(|tri| hits(o, d, tri)))
                 .count();
             let share = (AO_GAIN * blocked as f32 / AO_RAYS as f32).min(1.0);
             let ao = 1.0 - AO_STRENGTH * share;

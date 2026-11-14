@@ -213,7 +213,15 @@ pub(crate) fn bolt_z(at: P, r: i32, h: i32) -> Mesh {
 }
 
 /// A vertical panel line on a face that looks along `+X`, at `x`, from `y0` to `y1` at `z`.
-pub(crate) fn seam_side_x(x: i32, y0: i32, y1: i32, z: i32, width: i32, raise: i32, mat: Mat) -> Mesh {
+pub(crate) fn seam_side_x(
+    x: i32,
+    y0: i32,
+    y1: i32,
+    z: i32,
+    width: i32,
+    raise: i32,
+    mat: Mat,
+) -> Mesh {
     closed_box([x, y0, z - width / 2], [x + raise, y1, z + width / 2], mat).toned(crate::kit::SEAM)
 }
 

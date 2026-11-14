@@ -33,23 +33,30 @@ pub mod stages;
 pub fn files() -> Vec<(String, Vec<u8>)> {
     let models = set::all();
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get().min(8));
-    let mut out: Vec<Option<(String, Vec<u8>)>> = vec![None; models.len()];
-    std::thread::scope(|s| {
-        let chunks: Vec<_> = out.chunks_mut(models.len().div_ceil(threads).max(1)).collect();
-        let mut start = 0;
-        for chunk in chunks {
-            let models = &models;
-            let from = start;
-            start += chunk.len();
-            s.spawn(move || {
-                for (k, slot) in chunk.iter_mut().enumerate() {
-                    let m = &models[from + k];
-                    *slot = Some((format!("{}.glb", m.stem), glb::write(m)));
-                }
-            });
-        }
+    // Thread `k` writes models k, k + threads, ... (the big ones are spread out), then the files
+    // go back into the sorted order.
+    let mut parts: Vec<Vec<(usize, String, Vec<u8>)>> = std::thread::scope(|s| {
+        let handles: Vec<_> = (0..threads)
+            .map(|k| {
+                let models = &models;
+                s.spawn(move || {
+                    (k..models.len())
+                        .step_by(threads)
+                        .map(|i| (i, format!("{}.glb", models[i].stem), glb::write(&models[i])))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a writer thread panicked"))
+            .collect()
     });
-    out.into_iter().map(|f| f.expect("every file written")).collect()
+    let mut out: Vec<(usize, String, Vec<u8>)> = parts.drain(..).flatten().collect();
+    out.sort_by_key(|f| f.0);
+    out.into_iter()
+        .map(|(_, name, bytes)| (name, bytes))
+        .collect()
 }
 
 /// The scene whose rigs are restyled, relative to `assets/`.
