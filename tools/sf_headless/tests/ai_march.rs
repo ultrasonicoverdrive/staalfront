@@ -288,12 +288,15 @@ fn exit_spread(game: u32, rules_off: bool) -> [Option<u32>; 2] {
     spread
 }
 
+/// A value per seat, `[seat 0, seat 1]`.
+type Seats = [Option<u32>; 2];
+
 /// The staging-exit spread, pinned exactly per game (`[seat 0, seat 1]`, `None` = that seat's first strike does
 /// not leave a staging cell before tick 20,000). Only one seat of each game gets there, so three games are used:
 /// game 0 (seat 0 on SW), game 4 (seat 0 on NE) and game 3 (seat 1 on NE, the north-east game with a rules-off
 /// exit; in games 0 and 4 the north-east seat has none with the rules off). With the rules on: SW 0, NE 1 and 1;
 /// with them off: SW 3 (game 0) and 4 (game 4), NE 4 (game 3).
-const EXIT_SPREAD: [(u32, [Option<u32>; 2], [Option<u32>; 2]); 3] = [
+const EXIT_SPREAD: [(u32, Seats, Seats); 3] = [
     (0, [Some(0), None], [Some(3), None]),
     (4, [Some(1), None], [None, Some(4)]),
     (3, [None, Some(1)], [None, Some(4)]),
