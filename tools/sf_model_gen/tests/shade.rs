@@ -2,7 +2,7 @@
 //! small solid with a known answer: the top-edge highlight, edge wear, the AO strength and grime.
 //! Every check runs on [`shade::bake`] itself, the function the GLB writer uses.
 
-use sf_model_gen::kit::{Mat, Mesh, Tri, bevel_box, cuboid};
+use sf_model_gen::kit::{Mat, Mesh, Tri, bevel_box, cuboid, lathe};
 use sf_model_gen::shade::{self, NOMINAL, bake, factor, unit_normal};
 
 /// A saturated colour (linear), so desaturation shows.
@@ -162,4 +162,42 @@ fn a_crease_is_clearly_darker_and_grime_darkens_the_foot() {
     };
     println!("ground {:.4}, high {:.4}", top(&low), top(&high));
     assert!(top(&low) < top(&high) * 0.7, "grime");
+}
+
+/// Refinement round 2: the narrow segments of a turned surface (the Meridian dome) are facets of a
+/// round body, not exposed bevels, so they get no edge wear (before, the dome showed light
+/// streaks). The same dome profile as the construction center, high and alone.
+#[test]
+fn a_lathed_dome_gets_no_edge_wear() {
+    let dome = lathe(
+        &[
+            (3000, 0),
+            (2850, 900),
+            (2400, 1700),
+            (1600, 2300),
+            (700, 2600),
+            (0, 2700),
+        ],
+        32,
+        &[Mat(0)],
+        None,
+        None,
+    )
+    .moved([0, 5000, 0]);
+    assert!(dome.tris.iter().all(|t| t.lathed));
+    let c = colours(&dome);
+    let sats: Vec<f32> = c.iter().map(|(_, c)| sat(*c)).collect();
+    let top = sats.iter().copied().fold(0.0, f32::max);
+    let worn = sats.iter().filter(|s| **s < top * 0.85).count();
+    assert_eq!(worn, 0, "{worn} of {} dome corners are worn", sats.len());
+    // The same mesh without the mark does wear: the rule is what keeps the dome clean.
+    let mut plain = dome.clone();
+    for t in &mut plain.tris {
+        t.lathed = false;
+    }
+    let sats: Vec<f32> = colours(&plain).iter().map(|(_, c)| sat(*c)).collect();
+    assert!(
+        sats.iter().any(|s| *s < top * 0.85),
+        "the control mesh shows no wear"
+    );
 }

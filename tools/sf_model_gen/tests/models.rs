@@ -100,6 +100,46 @@ fn the_team_colour_is_bands_and_panels_never_one_triangle() {
     }
 }
 
+/// Refinement round 2 (14-11-2026): the team colour reads as markings, not as a frame, so every
+/// band is narrow. Every team triangle that faces up (seen from the game camera) is at most
+/// [`MAX_BAND_MM`] across: its height over its longest edge (a strip of width `w` split into two
+/// triangles gives at most `w`). The thick roof frames of the tuning round (850 mm) fail this.
+/// LOD0 and LOD1 only: LOD2 is the far view on 150-300 triangles, where the harvester's drum keeps
+/// two wider bands (four narrow ones cost 32 triangles more than its budget allows).
+const MAX_BAND_MM: f64 = 350.0;
+
+#[test]
+fn every_team_band_is_narrow() {
+    for m in models() {
+        let team = m.team().expect("a team material");
+        for (n, level) in m.lods.iter().enumerate().take(2) {
+            for t in level.world_tris().iter().filter(|t| t.mat == team) {
+                let p = t.v.map(|v| v.map(f64::from));
+                let e = |a: usize, b: usize| [0, 1, 2].map(|k| p[b][k] - p[a][k]);
+                let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+                let (ab, ac) = (e(0, 1), e(0, 2));
+                let x = [
+                    ab[1] * ac[2] - ab[2] * ac[1],
+                    ab[2] * ac[0] - ab[0] * ac[2],
+                    ab[0] * ac[1] - ab[1] * ac[0],
+                ];
+                let area2 = len(x);
+                if area2 == 0.0 || x[1] / area2 < 0.7 {
+                    continue; // a wall or a downward face: not seen from above
+                }
+                let longest = len(ab).max(len(ac)).max(len(e(1, 2)));
+                let width = area2 / longest;
+                assert!(
+                    width <= MAX_BAND_MM,
+                    "{} LOD{n}: a team band {width:.0} mm wide at {:?}",
+                    m.stem,
+                    t.v
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn every_level_has_the_nodes_of_its_role() {
     for m in models() {
@@ -175,10 +215,10 @@ fn the_shipped_palette_has_the_style_g_values() {
     assert_eq!(
         p.factions["veyran"],
         FactionColours {
-            paint: [100, 120, 140],
-            paint_light: [124, 144, 164],
-            paint2: [60, 60, 80],
-            paint2_shade: [80, 80, 100],
+            paint: [120, 148, 178],
+            paint_light: [150, 176, 204],
+            paint2: [74, 78, 104],
+            paint2_shade: [98, 102, 128],
             metal: [40, 40, 40],
             rubber: [20, 20, 20],
             accent: [160, 32, 48],

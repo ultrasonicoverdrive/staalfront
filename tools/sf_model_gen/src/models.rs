@@ -159,6 +159,51 @@ fn team_frame(
     m
 }
 
+/// Concentric narrow team bands on a roof (refinement round 2: markings, not a frame): `rings`
+/// from the outside in; the space from ring `i` to `i + 1` is a team band for even `i` (a [`frame`]
+/// standing from `y0` to `y1`) and roof filled flush in `fill` for odd `i`, and the inside of the
+/// last ring is filled too. The flush fill keeps the baked shade clean (see [`team_frame`]).
+fn team_rings(rings: &[Vec<[i32; 2]>], y0: i32, y1: i32, lod: Lod, fill: Mat) -> Mesh {
+    let mut m = Mesh::new();
+    for (i, pair) in rings.windows(2).enumerate() {
+        if i % 2 == 0 {
+            m.add(frame(
+                &pair[0],
+                &pair[1],
+                if lod.has(1) { y0 } else { y1 },
+                y1,
+                TEAM,
+            ));
+        } else {
+            m.add(frame(&pair[0], &pair[1], y1, y1, fill));
+        }
+    }
+    let last = &rings[rings.len() - 1];
+    let top: Vec<P> = last.iter().map(|p| [p[0], y1, p[1]]).collect();
+    m.face(&top, fill, [0, 1, 0]);
+    m
+}
+
+/// Nested chamfered rectangles for [`team_rings`]: the outline `(hx, hz, c)` and then each step
+/// further in by `steps[i]`, everywhere the same distance (also across the 45° chamfer, whose
+/// size shrinks by `(2 - sqrt 2)` times the step, down to 1 mm).
+fn insets(hx: i32, hz: i32, c: i32, steps: &[i32]) -> Vec<Vec<[i32; 2]>> {
+    let mut out = vec![chamfer_rect(hx, hz, c)];
+    let (mut hx, mut hz, mut c) = (hx, hz, c);
+    for w in steps {
+        hx -= w;
+        hz -= w;
+        // Keep the corner count of the outline ([`frame`] pairs corners): at least 1 mm.
+        c = if c > 0 {
+            (c - w * 586 / 1000).max(1)
+        } else {
+            0
+        };
+        out.push(chamfer_rect(hx, hz, c));
+    }
+    out
+}
+
 /// A bolt head on a face that looks along `-Z`, its base at `at`.
 fn bolt_z(at: P, r: i32, h: i32) -> Mesh {
     lathe_z(&[(r, 0), (r, h)], 4, &[METAL], Some(METAL), None)
@@ -303,7 +348,7 @@ pub fn meridian_light_tank() -> Model {
         turret.add(
             team_frame(
                 &chamfer_rect(990, 850, c(325)),
-                &chamfer_rect(770, 630, c(220)),
+                &chamfer_rect(710, 570, c(200)),
                 590,
                 640,
                 lod,
@@ -391,7 +436,10 @@ pub fn veyran_light_tank() -> Model {
                 PAINT2,
             ));
         }
-        hull.add(team_strip([-2150, 1000, -880], [-1700, 1035, 880], lod));
+        hull.add(team_strip([-2150, 1000, -880], [-1850, 1035, 880], lod));
+        // A narrow band across the glacis, in front of the turret (refinement round 2: two narrow
+        // cross bands instead of one wide one).
+        hull.add(team_strip([1480, 1000, -540], [1780, 1018, 540], lod));
         hull.add(both_sides(team_strip(
             [-50, 1000, 580],
             [1450, 1018, 880],
@@ -563,28 +611,35 @@ pub fn meridian_harvester() -> Model {
             METAL,
             METAL,
         ));
-        // The ore drum lying along X, team bands.
+        // The ore drum lying along X, four narrow team bands (300 mm, refinement round 2).
         let r = 1250;
         let drum = if lod.has(1) {
             lathe_x(
                 &[
                     (900, 0),
                     (r, 300),
-                    (r, 700),
-                    (r, 1350),
-                    (r, 2250),
-                    (r, 2900),
+                    (r, 600),
+                    (r, 900),
+                    (r, 1250),
+                    (r, 1550),
+                    (r, 2050),
+                    (r, 2350),
+                    (r, 2700),
+                    (r, 3000),
                     (r, 3300),
                     (900, 3600),
                 ],
                 lod.segs(16),
-                &[PAINT2, PAINT2, TEAM, PAINT2, TEAM, PAINT2, PAINT2],
+                &[
+                    PAINT2, PAINT2, TEAM, PAINT2, TEAM, PAINT2, TEAM, PAINT2, TEAM, PAINT2, PAINT2,
+                ],
                 Some(METAL),
                 Some(METAL),
             )
         } else {
             lathe_x(
-                &[(r, 0), (r, 700), (r, 1350), (r, 2250), (r, 2900), (r, 3600)],
+                // LOD2 (far view, 150 triangles): two wider bands in the same places.
+                &[(r, 0), (r, 600), (r, 1250), (r, 2350), (r, 3000), (r, 3600)],
                 lod.segs(16),
                 &[PAINT2, TEAM, PAINT2, TEAM, PAINT2],
                 Some(PAINT2),
@@ -592,18 +647,19 @@ pub fn meridian_harvester() -> Model {
             )
         };
         hull.add(drum.moved([-3050, 2150, 0]));
+        // Team: a narrow stripe on the deck beside the drum's rear half, each side.
+        if lod.has(1) {
+            hull.add(both_sides(team_strip(
+                [-3000, 900, 1270],
+                [-1300, 918, 1550],
+                lod,
+            )));
+        }
         hull.add(closed_box([-2700, 900, -900], [-2400, 1200, 900], METAL));
         hull.add(closed_box([0, 900, -900], [300, 1200, 900], METAL));
         if lod.has(0) {
             hull.add(hatch([2250, 2280, 0], 300, 8, PAINT));
-            // A ladder up the drum side, grab rails on the cab, a beacon, drum straps' bolts.
-            for k in 0..5 {
-                hull.add(closed_box(
-                    [1450 - k * 10, 950 + k * 260, 1560],
-                    [1650 - k * 10, 990 + k * 260, 1600],
-                    METAL,
-                ));
-            }
+            // Grab rails on the cab, a railing, a beacon.
             hull.add(both_sides(closed_box(
                 [1700, 1000, 1500],
                 [1740, 2200, 1540],
@@ -620,8 +676,8 @@ pub fn meridian_harvester() -> Model {
                 lathe(&[(110, 0), (110, 160), (60, 220)], 8, &[ACCENT], None, None)
                     .moved([1950, 2280, 700]),
             );
-            for i in 0..4 {
-                let x = -2900 + i * 300;
+            for i in 0..2 {
+                let x = -2900 + i * 600;
                 hull.add(seam_side_z(x, 650, 880, 1550, 50, 12, PAINT2));
                 hull.add(seam_side_z(x, 650, 880, -1550, 50, 12, PAINT2));
             }
@@ -635,9 +691,6 @@ pub fn meridian_harvester() -> Model {
                 )
                 .moved([1500, 900, 1200]),
             );
-            for i in 0..4 {
-                hull.add(bolt([3000, 650, -1200 + i * 800], 45, 25, 4, METAL));
-            }
             hull.add(both_sides(closed_box(
                 [2400, 1000, 1400],
                 [2700, 1600, 1440],
@@ -678,11 +731,14 @@ pub fn veyran_power_plant() -> Model {
             )
             .moved([0, 0, -1500]),
         );
-        // Team: the roof edge.
+        // Team: a narrow stripe along each long platform edge.
+        for x in [-3680, 3420] {
+            body.add(team_strip([x, 400, -5450], [x + 260, 418, 5450], lod));
+        }
+        // Team: two narrow bands on the roof (refinement round 2: markings, not a frame).
         body.add(
-            team_frame(
-                &chamfer_rect(2400, 3000, lod.bevel(300)),
-                &chamfer_rect(1550, 2150, lod.bevel(200)),
+            team_rings(
+                &insets(2400, 3000, lod.bevel(300), &[300, 350, 300]),
                 3700,
                 3750,
                 lod,
@@ -825,8 +881,8 @@ pub fn veyran_power_plant() -> Model {
                     );
                 }
             }
-            // The roof: fans on the roof units, a grille row, panel lines, a railing round the
-            // inner roof and bolts along the platform edge.
+            // The roof: fans on the roof units, a grille row, a railing round the inner roof and
+            // bolts along the platform edge.
             for x in [-900, 900] {
                 body.add(
                     lathe(&[(420, 0), (420, 120)], 16, &[METAL], None, None)
@@ -844,11 +900,6 @@ pub fn veyran_power_plant() -> Model {
                     12,
                     METAL,
                 ));
-            }
-            for i in 0..5 {
-                let x = -1200 + i * 600;
-                body.add(seam_top([x, 3750, -3600], [x, 3750, -3400], 50, 12, PAINT));
-                body.add(seam_top([x, 3750, 200], [x, 3750, 600], 50, 12, PAINT));
             }
             let (rx, rz0, rz1) = (1500, -3600, 600);
             body.add(railing([-rx, 3750, rz0], [rx, 3750, rz0], 450, 6, METAL));
@@ -947,11 +998,17 @@ pub fn meridian_construction_center() -> Model {
                 )
                 .moved([-1600, 0, -1500]),
             );
-            // Team: the hall roof edge.
+            // Team: a narrow stripe along the platform edge, inside the railings.
+            for z in [-7150, 6850] {
+                body.add(team_strip([-7150, 500, z], [7150, 518, z + 300], lod));
+            }
+            for x in [-7150, 6850] {
+                body.add(team_strip([x, 500, -6850], [x + 300, 518, 6850], lod));
+            }
+            // Team: two narrow bands on the hall roof (refinement round 2: markings, not a frame).
             body.add(
-                team_frame(
-                    &chamfer_rect(4800, 4400, lod.bevel(900)),
-                    &chamfer_rect(3500, 3100, lod.bevel(600)),
+                team_rings(
+                    &insets(4800, 4400, lod.bevel(900), &[300, 350, 300]),
                     3500,
                     3550,
                     lod,
@@ -982,13 +1039,20 @@ pub fn meridian_construction_center() -> Model {
                 None,
             );
             body.add(dome.with(ring).moved([-1600, 3500, -1500]));
-            // Two round tanks, team on the shoulder.
+            // Two round tanks, team on the shoulder and a ring on the top.
             for (x, z) in [(4600, 3800), (4600, 800)] {
                 body.add(
                     lathe(
-                        &[(1200, 0), (1200, 3000), (1000, 3400), (650, 3550)],
+                        // The top ring stays out of LOD2 (its 300-triangle budget).
+                        &[
+                            (1200, 0),
+                            (1200, 3000),
+                            (1000, 3400),
+                            (650, 3550),
+                            (350, 3600),
+                        ][..if lod.has(1) { 5 } else { 4 }],
                         lod.segs(16),
-                        &[PAINT2, TEAM, PAINT2],
+                        &[PAINT2, TEAM, PAINT2, TEAM][..if lod.has(1) { 4 } else { 3 }],
                         Some(PAINT2),
                         None,
                     )
@@ -1004,9 +1068,8 @@ pub fn meridian_construction_center() -> Model {
                 METAL,
             ));
             body.add(
-                team_frame(
-                    &chamfer_rect(1500, 1500, lod.bevel(400)),
-                    &chamfer_rect(1000, 1000, lod.bevel(250)),
+                team_rings(
+                    &insets(1500, 1500, lod.bevel(400), &[300, 300, 300]),
                     650,
                     680,
                     lod,
@@ -1017,6 +1080,10 @@ pub fn meridian_construction_center() -> Model {
             // Crane: a mast and an arm (in every level: it sets the height).
             body.add(closed_box([-6600, 500, 4600], [-6000, 6500, 5200], PAINT));
             body.add(closed_box([-6800, 6500, 3000], [-1000, 7000, 5400], PAINT));
+            // Team: a narrow stripe along each edge of the crane arm's top.
+            for z in [3000, 5100] {
+                body.add(team_strip([-6800, 7000, z], [-1000, 7018, z + 300], lod));
+            }
             if lod.has(1) {
                 body.add(closed_box([-1300, 4000, 4100], [-1150, 6500, 4250], METAL));
                 // Pipes between the tanks and the hall.
@@ -1107,7 +1174,7 @@ pub fn meridian_construction_center() -> Model {
                     );
                 }
                 for i in 0..5 {
-                    let z = 3200 + i * 400;
+                    let z = 3500 + i * 350;
                     body.add(seam_top([-6600, 7000, z], [-1000, 7000, z], 60, 20, METAL));
                 }
                 // Crane: cross braces on the mast, a cable and a hook block.

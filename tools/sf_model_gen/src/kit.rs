@@ -32,6 +32,9 @@ pub struct Tri {
     pub v: [P; 3],
     pub mat: Mat,
     pub tone: Tone,
+    /// Part of a turned (lathe) surface: its narrow segments are facets of a round body, not
+    /// exposed bevels, so they get no edge wear ([`crate::shade`], refinement round 2).
+    pub lathed: bool,
 }
 
 impl Tri {
@@ -86,6 +89,7 @@ impl Mesh {
                 v: [pts[0], pts[i], pts[i + 1]],
                 mat,
                 tone: PLAIN,
+                lathed: false,
             };
             let n = t.normal();
             if n == [0, 0, 0] {
@@ -147,6 +151,14 @@ impl Mesh {
     pub fn toned(mut self, tone: Tone) -> Self {
         for t in &mut self.tris {
             t.tone = tone;
+        }
+        self
+    }
+
+    /// Mark every triangle as part of a turned surface (no edge wear, see [`Tri::lathed`]).
+    pub fn lathed(mut self) -> Self {
+        for t in &mut self.tris {
+            t.lathed = true;
         }
         self
     }
@@ -450,7 +462,7 @@ pub fn lathe(
             m.face(&ring(rb, hb), mat, [0, -1, 0]);
         }
     }
-    m
+    m.lathed()
 }
 
 /// [`lathe`] with its axis along `+X` (barrels, exhausts lying down): height becomes `+X`.

@@ -18,12 +18,16 @@ later texture step can key on them: `paint` (main hull paint), `paint2` (second 
 
 | Slot | Meridian | Veyran |
 |---|---|---|
-| `paint` | bright sand yellow `#dcb450` (220, 180, 80); highlight `#e8c868` | cool steel blue-grey `#64788c` (100, 120, 140); highlight `#7c90a4` |
-| `paint2` | lively olive `#7a7a40` (122, 122, 64); shade `#50503c` | gunmetal `#3c3c50` (60, 60, 80); shade `#505064` |
+| `paint` | bright sand yellow `#dcb450` (220, 180, 80); highlight `#e8c868` | cool steel blue-grey `#7894b2` (120, 148, 178); highlight `#96b0cc` |
+| `paint2` | lively olive `#7a7a40` (122, 122, 64); shade `#50503c` | blue gunmetal `#4a4e68` (74, 78, 104); shade `#626680` |
 | `metal` | dark olive `#282814` | `#282828` |
 | `rubber` | `#141414` | `#141414` |
 | `accent` | glass, weathered blue `#46606e` | fixed crimson `#a02030` (160, 32, 48) |
 | `team` | the player colour (the file stores a neutral `#ebebeb`; the engine replaces it) | same |
+
+Refinement round 2 (14-11-2026): Veyran's two steel tones are about 25 % lighter and a little
+cooler (was `#64788c` / `#3c3c50`), so it reads on dark terrain next to Meridian; the crimson accent
+stays darker than any player colour.
 
 A test pins the shipped values (`tools/sf_model_gen/tests/models.rs`,
 `the_shipped_palette_has_the_style_g_values`).

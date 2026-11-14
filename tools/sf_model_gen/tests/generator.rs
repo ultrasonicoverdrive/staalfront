@@ -9,17 +9,19 @@ use sf_model_gen::files;
 /// (file, byte length, FNV-1a 64 of the bytes), pinned as literals, sorted by file name.
 // Re-pinned 14-11-2026 (tuning round): team as bands and trim, stronger AO and grime, the top-edge
 // highlight and edge wear (RGB vertex colour, a grey material factor), the building detail.
+// Re-pinned 14-11-2026 (refinement round 2): narrow team stripes (<= 350 mm, more of them),
+// Veyran's steel tones 25 % lighter and cooler, no edge wear on lathed surfaces (the dome).
 const PINNED: [(&str, usize, u64); 6] = [
     (
         "meridian_construction_center.glb",
-        467696,
-        0x7cc84bc66bda2692,
+        519268,
+        0x703bf9b24e8e6b0f,
     ),
-    ("meridian_harvester.glb", 242380, 0x98f689bd8c9c7181),
-    ("meridian_light_tank.glb", 242188, 0xb36968875a2cc372),
-    ("veyran_defence_tower.glb", 343516, 0x3cda5c0218fec60a),
-    ("veyran_light_tank.glb", 221024, 0xf5f43c70b26a35b6),
-    ("veyran_power_plant.glb", 467204, 0xd1fdd6f5a27bd3af),
+    ("meridian_harvester.glb", 251960, 0xfdc6d76c5edada0d),
+    ("meridian_light_tank.glb", 242188, 0xa78c91f749af33da),
+    ("veyran_defence_tower.glb", 343516, 0xe2b3fb24edd0e4d5),
+    ("veyran_light_tank.glb", 223532, 0x520461c2447f5b49),
+    ("veyran_power_plant.glb", 473580, 0xd0deb10bf3a80a22),
 ];
 
 fn fnv1a(bytes: &[u8]) -> u64 {
