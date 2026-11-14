@@ -1320,7 +1320,7 @@ Per seed (fixture duel: wins from SW of 48 / from NE of 48 / mean; mirror duel: 
 | `r433` | 23 / 18 / 42.7 %; mirror 32 (22 : 10) | 22 / 26 / 50.0 %; mirror 37 (28 : 9) | 26 / 26 / 54.2 %; mirror 39 (29 : 10) |
 | `r533` | 24 / 18 / 43.8 %; mirror 33 (23 : 10) | 23 / 26 / 51.0 %; mirror 38 (29 : 9) | 26 / 26 / 54.2 %; mirror 41 (30 : 11) |
 
-One seed has a standard error of about 7 points; differences of a game or two between rows are noise. The fixture duel of `r433` is the same, game for game, as `rock` (same final checksums): with the infantry weights 4 : 3 and 4 : 4 the barracks makes the same units until about the seventh infantry unit alive, which these games do not reach; the mirror duels differ in two games. The mirror rows of `ctl` and `rock` are the reviewer's (`ctl` reproduces the 139 of WP9.2a-2); the `r433`/`r533` rows and a check of `ctl`'s first seat (11 / 13 / 24, as before) are fix round 1's.
+One seed has a standard error of about 7 points; differences of a game or two between rows are noise. The fixture duel of `r433` has the same wins, losses and draws per site as `rock` on all three seeds, but the games are not the same: 82 of the 288 final checksums differ (19, 31 and 32 of 96 per seed) and two results differ, both on seed 777, where they cancel within each site. With the infantry weights 4 : 3 and 4 : 4 the barracks makes the same units until 4 riflemen and 3 rocket troopers are alive; the eighth infantry unit is the first that differs. In the mirror duels 61 of the 300 final checksums and two results differ. The mirror rows of `ctl` and `rock` are the reviewer's (`ctl` reproduces the 139 of WP9.2a-2); the `r433`/`r533` rows and a check of `ctl`'s first seat (11 / 13 / 24, as before) are fix round 1's.
 
 Wins / losses / draws per site and seat, per seed, are in the PR body.
 
@@ -1332,7 +1332,7 @@ No pin moved in the end. The first build of this work package shipped 4 : 4 : 3 
 
 ### Cost
 
-`ai_perf.rs` (`what_the_counter_mix_costs_with_a_visible_army_of_200_units`, release, 200 armed enemy units in sight, rifleman, rocket trooper, light and heavy tank, the fastest of five runs per think so that a container spike is not read as the code): one think mean **7.7 us**, worst **46 us** (all four managers; the budget is 20 us and 1 ms); the tally alone 0.9 us mean, 1.4 us worst; the weights of one production turn 0.55 us mean, 0.8 us worst. Asserted in release.
+`ai_perf.rs` (`what_the_counter_mix_costs_with_a_visible_army_of_200_units`, release, 200 armed enemy units in sight, rifleman, rocket trooper, light and heavy tank, the fastest of five runs per think so that a container spike is not read as the code): one think mean **7.7 us**, worst **46 us** (builder's run; the reviewer measured 8.7 us and 53 us) (all four managers; the budget is 20 us and 1 ms); the tally alone 0.9 us mean, 1.4 us worst; the weights of one production turn 0.55 us mean, 0.8 us worst. Asserted in release.
 
 ### Tests
 
