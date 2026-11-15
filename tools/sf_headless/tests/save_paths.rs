@@ -186,3 +186,44 @@ fn the_other_movement_scenarios_continue_through_saves() {
         check(name, nothing);
     }
 }
+
+/// The other CI scenarios without an AI hold state of a section WP13.1c saves by the first save
+/// tick: their save is refused, naming the section (this list shrinks as those sections save).
+#[test]
+fn probe_which_scenarios_save() {
+    for (name, section) in [
+        ("weapons_reload", "projectiles"),
+        ("projectiles", "projectiles"),
+        ("armour_splash", "projectiles"),
+        ("tanks_vs_infantry", "targeting"),
+        ("destruction", "projectiles"),
+        ("placement", "buildings"),
+        ("construction", "buildings"),
+        ("ore_256", "economy"),
+        ("harvest", "economy"),
+        ("storage", "economy"),
+        ("money", "economy"),
+        ("production", "economy"),
+        ("production_repeat", "economy"),
+        ("match", "economy"),
+        ("power", "economy"),
+        ("defences", "projectiles"),
+        ("repair_sell", "projectiles"),
+        ("vision", "vision"),
+        ("vision_targeting", "projectiles"),
+        ("silo", "economy"),
+    ] {
+        let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
+        let mut world = Box::new(scenario.build_world().unwrap());
+        let mut arrivals = scenario.arrivals();
+        for _ in 0..EVERY {
+            arrivals.schedule_due(&mut world).unwrap();
+            world.step();
+        }
+        assert_eq!(
+            world.save().err(),
+            Some(SaveError::Unsupported(section)),
+            "{name}"
+        );
+    }
+}
