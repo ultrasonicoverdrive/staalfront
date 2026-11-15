@@ -161,10 +161,17 @@ pub fn fit_team(body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
     let mut all: Vec<Tri> = fixed.to_vec();
     all.extend(body.tris.iter().copied());
     let mut count = all.iter().filter(is_team).count();
+    let start = body.len();
     let mut cands = cands.into_iter();
     loop {
         let share = team_share(&all, FIT_RES);
         if share >= TEAM_AIM && count >= TEAM_MIN_TRIS {
+            if std::env::var_os("SF_FIT_DEBUG").is_some() {
+                eprintln!(
+                    "FIT {stem}: body {start} -> {} share {share:.3}",
+                    body.len()
+                );
+            }
             break;
         }
         let Some(c) = cands.next() else {
@@ -234,7 +241,7 @@ pub fn pad_model(m: &mut Model, floor: usize, ceil: usize, pad: (i32, i32, i32))
             z += step;
         }
         for [x, z] in spots {
-            if have >= need {
+            if have >= need || have + 10 > ceil {
                 break;
             }
             let b = crate::kit::bolt([x, y, z], 45, 30, 4, PAINT2);
@@ -338,32 +345,29 @@ pub fn bounds(tris: &[Tri]) -> (P, P) {
     (lo, hi)
 }
 
-/// A rough chunk of masonry or plate: an irregular eight-sided block, narrower on top, at `at`
-/// (on its base), `r` across and `h` high; `seed` fixes its shape. 8 x 2 + 6 = 22 triangles; at
-/// LOD2 a plain block of 10.
+/// The sides of a rubble [`chunk`].
+pub const CHUNK_SIDES: u32 = 8;
+
+/// A rough chunk of masonry or plate: an irregular block of [`CHUNK_SIDES`] sides, narrower on
+/// top, at `at` (on its base), `r` across and `h` high; `seed` fixes its shape. 8 x 2 + 6 = 22
+/// triangles; at LOD2 a plain block of 10.
 pub fn chunk(at: P, r: i32, h: i32, seed: u32, mat: Mat, lod: Lod) -> Mesh {
     if !lod.has(1) {
         let q = r * 8 / 10;
         return cuboid([-q, 0, -q], [q, h, q], mat).moved(at);
     }
     let ring = |scale: i32, salt: u32| -> Vec<[i32; 2]> {
-        (0..8)
+        (0..CHUNK_SIDES)
             .map(|k| {
                 let j = 750 + hash(seed.wrapping_mul(31) ^ (k * 7 + salt)) / 4; // 750..999
                 let rr = r * scale / 1000 * j as i32 / 1000;
-                crate::kit::on_circle(rr, k as i32, 8)
+                crate::kit::on_circle(rr, k as i32, CHUNK_SIDES)
             })
             .collect()
     };
     let lean = (hash(seed ^ 0x77) as i32 - 500) * r / 2500;
     let top: Vec<[i32; 2]> = ring(560, 3).iter().map(|p| [p[0] + lean, p[1]]).collect();
-    loft(
-        &[(ring(1000, 1), 0), (ring(860, 2), h * 2 / 3), (top, h)],
-        &[mat, mat],
-        Some(mat),
-        None,
-    )
-    .moved(at)
+    loft(&[(ring(1000, 1), 0), (top, h)], &[mat], Some(mat), None).moved(at)
 }
 
 /// A bent plate lying askew on the ground, `len` long along X, tilted by `rise` over its length:
@@ -563,7 +567,11 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
     let lods: Vec<Node> = Lod::ALL
         .iter()
         .map(|&lod| {
-            let parts = split(&built.lods[usize::from(lod.0)]);
+            // A stage's LOD1 starts from the finished model's far level too (WP11.6c review: so its
+            // reduced levels keep their share without padding LOD0).
+            let source = if lod.has(0) { 0 } else { 2 };
+            let mut parts = split(&built.lods[source]);
+            strip_filler(&mut parts.body, slab);
             let children = match stage {
                 Stage::Foundation => foundation(&f, slab, &parts, lod, seed, &stem, teamed),
                 Stage::Scaffolding => scaffolding(&f, slab, parts, lod, seed, &stem, teamed),
@@ -583,23 +591,51 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
         materials: built.materials.clone(),
         lods,
     };
-    // A stage keeps a detail level in proportion to its finished model (docs/art-style.md §11).
-    let share = match stage {
-        Stage::Foundation => STAGE_FLOOR_PERMILLE[0],
-        Stage::Scaffolding => STAGE_FLOOR_PERMILLE[1],
-        Stage::Damaged => STAGE_FLOOR_PERMILLE[2],
-        Stage::Heavy => STAGE_FLOOR_PERMILLE[3],
-    };
-    let floor = built.triangles()[0] * share / 1000;
-    pad_model(&mut m, floor, STAGE_CEIL, (f.hx - 60, f.hz - 60, slab));
+    // A stage keeps only what its derived geometry gives: no detail floor. Only where a reduced
+    // level would exceed its share of LOD0 does LOD0 get anchor bolts, never past the stage's
+    // ceiling (a share of the finished model's LOD0, docs/art-style.md §11).
+    let k = Stage::ALL
+        .iter()
+        .position(|s| *s == stage)
+        .expect("a stage");
+    let ceil = built.triangles()[0] * STAGE_CEIL_PERMILLE[k] / 1000;
+    pad_model(&mut m, 0, ceil, (f.hx - 60, f.hz - 60, slab));
     m
 }
 
-/// The least LOD0 triangles of a stage, in thousandths of its finished model's LOD0: foundation,
-/// scaffolding, damaged, heavily damaged.
-pub const STAGE_FLOOR_PERMILLE: [usize; 4] = [300, 700, 850, 700];
-/// No stage pads past this (the building budget is 5000).
-pub const STAGE_CEIL: usize = 4800;
+/// The most LOD0 triangles of a stage, in thousandths of its finished model's LOD0: foundation,
+/// scaffolding, damaged, heavily damaged (WP11.6c review: a stage is never richer than the
+/// finished structure).
+pub const STAGE_CEIL_PERMILLE: [usize; 4] = [300, 700, 900, 700];
+
+/// How far round a damage hole the small detail is gone, in thousandths of the hole's radius.
+pub const DETAIL_GONE_PERMILLE: i32 = 8000;
+
+/// Remove the small detail of `m` (toned triangles: panel lines, bolts, recesses, and the glass of
+/// the accent slot when it is toned or a window), everywhere or within `r` of `c`. Team triangles
+/// stay.
+fn strip_detail(m: &mut Mesh, near: Option<(P, i32)>) {
+    m.tris.retain(|t| {
+        let detail = t.mat != TEAM && t.tone < crate::kit::PLAIN;
+        let inside = near.is_none_or(|(c, r)| {
+            let d = sub(centroid(t), c);
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= i64::from(r) * i64::from(r)
+        });
+        !(detail && inside)
+    });
+}
+
+/// Take the anchor-bolt filler of [`pad_model`] (slab-coloured bolt heads standing on the
+/// platform top `slab`) out of a finished body before a stage is derived from it: a stage does not
+/// inherit the finished model's padding.
+fn strip_filler(body: &mut Mesh, slab: i32) {
+    body.tris.retain(|t| {
+        let filler = t.mat == PAINT2
+            && t.tone == crate::kit::RECESS
+            && t.v.iter().all(|p| p[1] >= slab && p[1] <= slab + 30);
+        !filler
+    });
+}
 
 /// Anchors moved onto the slab (a stage under construction smokes from the ground).
 fn grounded(anchors: &[(String, P)], y: i32) -> Vec<(String, P)> {
@@ -647,34 +683,34 @@ fn foundation(
     let nx = ((2 * hx) / step).max(1);
     let nz = ((2 * hz) / step).max(1);
     let mut cands = Vec::new();
-    let beam_h = 140;
+    let beam_h = 18;
     for i in 1..nx.max(2) {
         let x = -hx + 2 * hx * i / nx.max(2);
-        cands.push(cuboid(
+        cands.push(strip(
             [x - 150, y, -hz + 300],
             [x + 150, y + beam_h, hz - 300],
-            TEAM,
+            lod,
         ));
     }
     for k in 1..nz.max(2) {
         let z = -hz + 2 * hz * k / nz.max(2);
-        cands.push(cuboid(
+        cands.push(strip(
             [-hx + 300, y, z - 150],
             [hx - 300, y + beam_h, z + 150],
-            TEAM,
+            lod,
         ));
     }
     // Survey stripes along the slab edge (inside the boards).
     for s in [-1, 1] {
-        cands.push(cuboid(
+        cands.push(strip(
             [-hx + 200, y, s * (hz - 330) - 130],
             [hx - 200, y + 18, s * (hz - 330) + 130],
-            TEAM,
+            lod,
         ));
-        cands.push(cuboid(
+        cands.push(strip(
             [s * (hx - 330) - 130, y, -hz + 520],
             [s * (hx - 330) + 130, y + 18, hz - 520],
-            TEAM,
+            lod,
         ));
     }
     // Interleave: beams and edge stripes alternate so the markings spread evenly.
@@ -684,7 +720,7 @@ fn foundation(
             for k in 0..=nz.max(2) {
                 let x = -hx + 400 + (2 * hx - 800) * i / nx.max(2);
                 let z = -hz + 400 + (2 * hz - 800) * k / nz.max(2);
-                for (dx, dz) in [(-90, -90), (90, 90)] {
+                for (dx, dz) in [(0, 0)].into_iter().filter(|_| (i + k) % 2 == 0) {
                     m.add(cuboid(
                         [x + dx - 20, y, z + dz - 20],
                         [x + dx + 20, y + 620, z + dz + 20],
@@ -811,6 +847,10 @@ fn scaffolding(
     let cut = slab + (roof_level(&parts, slab) - slab) * 60 / 100;
     let _ = f.top;
     let mut m = clip(&parts.body, Plane::level(cut));
+    // Bare walls: the facade detail (panel lines, bolts, louvres, glass) comes last.
+    strip_detail(&mut m, None);
+    // Nor are the fittings in yet (pipes, railings, ladders: the steel slot).
+    m.tris.retain(|t| t.mat != METAL);
     // The team of the finished model under the cut stays; its roof bands are gone. The paint of
     // the cut walls is bare: soot-free but a little darker (primer).
     let (lo, hi) = hull_bounds(&parts, slab);
@@ -846,7 +886,7 @@ fn scaffolding(
     );
     let top = cut + 1100;
     let spacing = if lod.has(0) {
-        1800
+        3400
     } else if lod.has(1) {
         5000
     } else {
@@ -903,17 +943,6 @@ fn scaffolding(
             ));
         }
     }
-    if lod.has(0) {
-        // Diagonal braces as stepped struts, and ladders.
-        for (x, z) in poles.iter().step_by(3) {
-            for k in 0..4 {
-                let y = slab + 300 + k * (top - slab - 600) / 4;
-                m.add(
-                    cuboid([x - 25, y, z - 25], [x + 25, y + 40, z + 25], METAL).moved([0, 0, 0]),
-                );
-            }
-        }
-    }
     // The crane on the +X+Z corner (all levels: it sets the height).
     let (cx, cz) = (px1 - 300, pz1 - 300);
     let mast_top = f.top + 1500;
@@ -953,7 +982,7 @@ fn scaffolding(
         ));
     }
     if lod.has(0) {
-        for k in 0..((mast_top - slab) / 600) {
+        for k in 0..((mast_top - slab) / 1200) {
             let y = slab + k * 600;
             m.add(cuboid(
                 [cx - w - 20, y, cz - w - 20],
@@ -1025,19 +1054,19 @@ fn edge_cands(f: &Footprint, y: i32, lod: Lod) -> Vec<Mesh> {
     c.into_iter().map(|m| m.moved([f.cx, 0, f.cz])).collect()
 }
 
-/// A team stripe: a thin box at LOD0, its top only at LOD1 and LOD2 (16 mm walls nobody sees at
-/// that distance). At LOD2, the far view, a stripe is [`FAR_STRIPE_MM`] wide (the narrow-band
+/// A team stripe: its top only, 16-20 mm over the surface (walls that thin are never seen and cost
+/// eight triangles each; WP11.6c review). At LOD2, the far view, a stripe is [`FAR_STRIPE_MM`] wide (the narrow-band
 /// rule holds for LOD0 and LOD1), so fewer of them reach the share on its 300 triangles.
 fn strip(lo: P, hi: P, lod: Lod) -> Mesh {
-    if lod.has(0) {
-        return cuboid(lo, hi, TEAM);
-    }
     let (mut lo, mut hi) = (lo, hi);
     if !lod.has(1) {
         let k = if hi[0] - lo[0] < hi[2] - lo[2] { 0 } else { 2 };
         let mid = (lo[k] + hi[k]) / 2;
-        lo[k] = mid - FAR_STRIPE_MM / 2;
-        hi[k] = mid + FAR_STRIPE_MM / 2;
+        // Never wider than a tenth of its length (a short stripe on a small slab stays narrow).
+        let len = (hi[2 - k] - lo[2 - k]).abs();
+        let w = FAR_STRIPE_MM.min(len / 10).max(hi[k] - lo[k]);
+        lo[k] = mid - w / 2;
+        hi[k] = mid + w / 2;
     }
     cuboid([lo[0], hi[1], lo[2]], hi, TEAM)
 }
@@ -1096,18 +1125,11 @@ fn debris_cands(
             [x - 140, slab, z - len / 2]
         };
         let hi = if along_x {
-            [x + len / 2, slab + 40, z + 140]
+            [x + len / 2, slab + 20, z + 140]
         } else {
-            [x + 140, slab + 40, z + len / 2]
+            [x + 140, slab + 20, z + len / 2]
         };
-        cands.push(
-            if lod.has(1) {
-                cuboid(lo, hi, TEAM)
-            } else {
-                cuboid([lo[0], hi[1], lo[2]], hi, TEAM)
-            }
-            .moved([f.cx, 0, f.cz]),
-        );
+        cands.push(cuboid([lo[0], hi[1], lo[2]], hi, TEAM).moved([f.cx, 0, f.cz]));
     }
     (m, cands)
 }
@@ -1152,21 +1174,25 @@ fn damaged(
         .expect("four places");
     let mut m = parts.body.clone();
     hole(&mut m, c, r);
+    // The blast took the small detail off the walls round the hole.
+    strip_detail(&mut m, Some((c, r * DETAIL_GONE_PERMILLE / 1000)));
     soot(&mut m, c, r * 2, SOOT, TEAM);
     soot(&mut m, c, r * 15 / 10, CHAR, TEAM);
     soot(&mut m, c, r * 11 / 10, CHAR, PAINT2);
     // The burnt rim: chunks round the hole on the roof.
-    let rim = if f.hx.min(f.hz) < 3000 {
-        0
+    // On a structure without a platform (a bridge deck) the chunks lie in the hole itself.
+    let rim = if slab == 0 || f.hx.min(f.hz) < 3000 {
+        // A small structure: two at LOD0, one at LOD1 (so LOD1 stays richer than LOD2).
+        u32::from(lod.has(1)) + u32::from(lod.has(0))
     } else if lod.has(0) {
-        6
+        4
     } else if lod.has(1) {
-        3
+        2
     } else {
         0
     };
     for i in 0..rim {
-        let [x, z] = crate::kit::on_circle(r, i as i32, 8);
+        let [x, z] = crate::kit::on_circle(if slab == 0 { r / 4 } else { r }, i as i32, 8);
         m.add(
             chunk(
                 [c[0] + x, c[1] - 120, c[2] + z],
@@ -1179,10 +1205,12 @@ fn damaged(
             .toned(CHAR),
         );
     }
-    let n = if lod.has(0) {
-        10
+    let n = if slab == 0 {
+        0 // no platform to lie on (a bridge deck)
+    } else if lod.has(0) {
+        6
     } else if lod.has(1) {
-        5
+        2
     } else {
         0
     };
@@ -1216,6 +1244,8 @@ fn heavy(
     );
     let c1 = hole_at(&parts, slab, seed, 2);
     let mut m = clip(&parts.body, plane);
+    // Burnt out: no small detail survives.
+    strip_detail(&mut m, None);
     let r = (f.hx.min(f.hz) * 20 / 100).clamp(450, 1600);
     hole(&mut m, [c1[0], plane.height_at(c1[0], c1[2]), c1[2]], r);
     // Soot over the break, deep at the top.
@@ -1237,9 +1267,11 @@ fn heavy(
         (hi[2] - lo[2]) / 2 * 70 / 100,
     );
     let grid = if lod.has(0) && ix.min(iz) >= 1500 {
-        4
-    } else {
+        3
+    } else if lod.has(1) {
         2
+    } else {
+        i32::from(cut >= 300) // a low heap has no room for one at the far level
     };
     let floor = slab.max(0);
     m.add(
@@ -1291,11 +1323,11 @@ fn heavy(
         }
     }
     let n = if lod.has(0) {
-        16
+        6
     } else if lod.has(1) {
-        4
-    } else {
         2
+    } else {
+        0
     };
     let (d, mut cands) = debris_cands(f, slab, n, seed ^ 0x99, lod, (lo, hi));
     cands.extend(edge_cands(f, slab, lod));
@@ -1314,7 +1346,7 @@ fn heavy(
     cands.extend(interleave(tops));
     m.add(d);
     if lod.has(0) {
-        for i in 0..4u32 {
+        for i in 0..2u32 {
             let s = if i % 2 == 0 { 1 } else { -1 };
             if ix >= 1800 && iz >= 1800 {
                 let len = ix.min(iz) / 3;
@@ -1331,6 +1363,10 @@ fn heavy(
                 );
             }
         }
+    }
+    // A heap broken off low (`_rubble`, `_destroyed`, below 30 % of the roof) has lost its turret.
+    if cut < 300 {
+        parts.turret = None;
     }
     // A turret sinks onto the break.
     if let Some((_, at)) = &mut parts.turret {
