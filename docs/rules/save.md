@@ -245,24 +245,39 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   `MAX_SLOTS`, more cells integrated than the region has, a build of an entry that does not exist,
   a build cursor past what its stage walks (slots, sectors, the spiral), a chain node out of range,
   an integration heap element outside the region of the field being built, a serial, born or order
-  counter at 0 (they skip it), more claims or looks left than a tick gives.
+  counter at 0 (they skip it), more claims or looks left than a tick gives, more units found than
+  the build looked at (at most the cursor while gathering, the slots after).
+* **A search in flight** (checked after the graphs are rebuilt, `Pathing::check_in_flight`): a job
+  whose local search is begun and not over (`searching`) goes on with the rectangle its stage
+  computes (the start sector, the goal sector, the sector of the nearest portal, or the leg of
+  `next_leg`), without beginning it again; a field build searching from its goal goes on in the
+  goal's sector. The cells in the local heap and the parent of every cell of that rectangle must lie
+  in it. Otherwise a cell number past the rectangle gives a row below it, and on a rectangle at the
+  bottom edge of the map the step costs are read past the grid (a panic); refused as "a job's search
+  does not fit its stage" / "a field build's search does not fit its stage".
 * **Formations**: the serial counter at 0, a formation numbered 0 or twice, `turn_wait` at or above
   the longest turn period (40), `patience` above the setting, `loose` above 20 (`LOOSE_TICKS`),
   members not strictly ascending or not slots, a leader that is not a member, a slot whose `form`
-  names no formation that lists it, a member whose `form` names another formation, an unknown state
-  or member mode.
+  names no formation that lists it, an unknown state or member mode. A listed member whose own `form`
+  names no formation (or another) is **not** refused: the formation pass prunes its list before the
+  movement stage, and an order that ends afterwards (arrival, give-up) clears the unit's `form`, so
+  for one tick the list still names it (found with a save after every tick of `crowd_jam`, tick 219;
+  `formation_scenarios_restore_after_every_tick`).
 * **Turning**: a turn carry of 1000 or more (`turn_carrying` keeps the rest of a division by 1000).
 * `prev_pos` outside the map.
 
 `path_and_formation_counters_at_their_maximum_restore_and_step` restores a world with the turn carry
-at 999 and every formation counter at its most and steps it 60 ticks.
+at 999, every formation counter at its most, a listed member that left, the field builds counted at
+`u64::MAX` and a local search's expansions at `u32::MAX`, and steps it 60 ticks. Those two counters
+only count up and are now saturating (`built`, `Run::expanded`; the same values below their maximum,
+so no checksum moves); before, a restored maximum overflowed on the next increment.
 
 Not checked, on purpose: the wrapping counters (`epoch`, sector epochs, tickets, field clock,
 `version`, `born`, the generations), which reach every value; the costs in the search arrays (added
-with saturation); flags. **A known gap**: the memory of a search in flight is checked for structure,
-not for being the search its job describes (for example that the local heap's cells lie in the
-rectangle the job's stage would search). A hand-made save can therefore make a job plan a strange
-route. Single-bit flips of real saves are tried in `no_flip_in_the_path_sections_panics` (every bit
+with saturation); flags. **A known gap**: beyond the rectangle above, the memory of a search in
+flight is checked for structure, not for being the search its job describes (for example that its
+costs are the costs of that search). A hand-made save can therefore make a job plan a strange route.
+Single-bit flips of real saves are tried in `no_flip_in_the_path_sections_panics` (every bit
 of the first 48 bytes of `P`, `F`, `M`, then one bit in every 509th byte; each restored world steps
 four ticks) and none panics; that is a sample, not a proof for every byte string.
 
@@ -270,23 +285,29 @@ four ticks) and none panics; that is a sample, not a proof for every byte string
 
 `tools/sf_headless/tests/save_paths.rs` runs `bridge_200`, `replan`, `formation_move`, `crowd_jam`,
 `turning`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn`, `orders`, `terrain_costs`,
-`pathing` and `pathing_256` with a save every 97 ticks (plus up to six saves at ticks where a rare
-state is there: a job in flight, a field being built, a turn carry), each restored onto
+`pathing` and `pathing_256` with a save every 97 ticks (plus, per claimed state, up to four saves at ticks where it
+holds, at least three ticks apart), each restored onto
 `Scenario::build_fresh_world` (the rules without any entity or command), the resave byte-equal and
 the run continued with the restored world; the final checksum is the committed `.expected` pin. At
-the save ticks it asserts the state is there: `bridge_200` a route being planned (2 saves), a field
-being built (6), fields, routes, turn carries; `formation_move` formations, a field being built, turn
-carries; `replan` and `crowd_jam` routes, fields and formations; `turning` turn carries.
+the save ticks it asserts the state is there: `bridge_200` a route being planned, a field
+being built, fields, routes, turn carries; `formation_move` formations, a field being built, turn
+carries, routes; `replan` routes, fields, formations and a stuck unit's request with an overlay;
+`crowd_jam` routes, fields and formations; `turning` turn carries. Each claimed state is asserted at
+each of its save ticks, in the world and in the restored one (`save_contents` equal). `formation_move`
+and `crowd_jam` also run with a save after every tick.
 `probe_which_scenarios_save` pins which section refuses each of the other non-AI CI scenarios.
 
 ## Guards against a forgotten field
 
 * `World::save` destructures `World` without `..`; every field is bound by name or as `_` with a
   comment that says why it is rules, derived, a report or gated. `save_entities` does the same for
-  the entity columns, `CommandQueue::parts`, `Pathing::unsaved_section`, `Formations::at_start`,
+  the entity columns, `CommandQueue::parts`, `Pathing::save`, `Fields::save`, `Field::save`,
+  `Work::save`, `Job::save`, `Route::save`, `Local::save`, `AbstractSearch::save`, `Corridor::save`,
+  `Scratch::save`, `IndexedHeap::save`, `Formations::save`, `put_member`,
   `Arsenal::unsaved_section`, `Ore::at_start`, `Crowd::has_state`, `Targeting::has_state`,
-  `check_unsaved_sections` (destruction, money, repair, placement), `check_crowd`, `put_crowd` and
-  `rules_digest` (the collision and formation settings) for theirs. A field added to any of them is
+  `check_unsaved_sections` (destruction, money, repair, placement), `check_crowd`, `put_crowd`,
+  `rules_digest` (the collision, formation and replan settings) and `Turning::write_hash` (in the
+  movement digest) for theirs. A field added to any of them is
   a compile error until it is handled here (shown in the PR of WP13.1a: a field `pub(crate) probe:
   u8` on `World` gives `error[E0027]: pattern does not mention field `probe``).
 * `restore(fresh, save(w)) == w` by `PartialEq`, and a resave byte-equal to the save.

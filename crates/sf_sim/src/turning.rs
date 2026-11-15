@@ -140,10 +140,18 @@ impl Turning {
     }
 
     pub(crate) fn write_hash(&self, h: &mut sf_math::hash::Fnv1a64) {
-        h.write_u8(self.mode.tag());
-        h.write_u8(self.drive_tolerance);
-        h.write_fx(self.min_radius);
-        h.write_bytes(&self.pivot_permille.to_le_bytes());
+        // Destructured without `..`: a new field fails to compile until it is hashed (the
+        // movement digest is part of the rules digest of a save).
+        let Turning {
+            mode,
+            drive_tolerance,
+            min_radius,
+            pivot_permille,
+        } = *self;
+        h.write_u8(mode.tag());
+        h.write_u8(drive_tolerance);
+        h.write_fx(min_radius);
+        h.write_bytes(&pivot_permille.to_le_bytes());
     }
 }
 

@@ -1227,8 +1227,9 @@ impl World {
     /// A digest of the rules the world was made with: the configuration, the terrain and every
     /// table and setting the checksum hashes as rules. Two worlds built from the same match and
     /// assets have the same digest; a save only restores onto a world with the digest it was made
-    /// with. Rules of the sections that WP13.1b/c add (and the AI profiles, WP13.1d) join this
-    /// digest with them; a world with those rules does not save yet.
+    /// with. The path, flowfield, replan, formation and turning settings (WP13.1b) are in it; the
+    /// numbers of the rule sets WP13.1c saves (and the AI profiles, WP13.1d) join it with them, and
+    /// a world with those rules does not save yet.
     pub fn rules_digest(&self) -> u64 {
         let mut h = Fnv1a64::new();
         h.write_bytes(b"sf-rules-1");
@@ -1290,10 +1291,15 @@ impl World {
         }
         h.write_u32(self.pathing.budget());
         h.write_u32(self.pathing.flowfield_threshold());
-        let rp = self.pathing.replan_config();
-        h.write_u32(u32::from(rp.cooldown));
-        h.write_u32(u32::from(rp.max));
-        h.write_u32(u32::from(rp.retarget_cooldown));
+        // Destructured without `..`: a new replan setting fails to compile until it is hashed.
+        let crate::path::ReplanConfig {
+            cooldown,
+            max,
+            retarget_cooldown,
+        } = self.pathing.replan_config();
+        h.write_u32(u32::from(cooldown));
+        h.write_u32(u32::from(max));
+        h.write_u32(u32::from(retarget_cooldown));
         match &self.targeting.config {
             Some(t) => {
                 h.write_u8(1);

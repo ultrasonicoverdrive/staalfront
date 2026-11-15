@@ -161,11 +161,9 @@ fn moving(mut w: World) -> World {
             },
         );
     }
-    for (t, cell) in [
-        (9, Cell::new(50, 22)),
-        (41, Cell::new(50, 34)),
-        (77, Cell::new(76, 26)),
-    ] {
+    // Structures one at a time: two inside sectors, one across the border of two sectors (x 47 and
+    // 48; sectors are 16 cells), one in the bottom-right corner sector of the map.
+    for (t, cell) in PLACEMENTS {
         s(
             &mut w,
             t,
@@ -176,10 +174,21 @@ fn moving(mut w: World) -> World {
             },
         );
     }
-    // The first structure (slot 18) is taken away: its sectors are rebuilt once more.
+    // The first structure (slot 18) and the one in the corner (slot 22) are taken away again: their
+    // sectors are rebuilt once more.
     s(&mut w, 130, Command::Despawn { id: id(18) });
+    s(&mut w, 150, Command::Despawn { id: id(22) });
     w
 }
+
+/// When and where `moving` places its structures (slots 18 to 22 in this order).
+const PLACEMENTS: [(u64, Cell); 5] = [
+    (9, Cell::new(50, 22)),
+    (41, Cell::new(50, 34)),
+    (60, Cell::new(47, 18)),
+    (77, Cell::new(76, 26)),
+    (90, Cell::new(94, 62)),
+];
 
 /// The world with what a restore does not bring back put equal on both sides (`settled` of the
 /// core tests): the reports and stats of the last tick, the interpolation of facings and turrets,
@@ -200,24 +209,35 @@ fn settled(mut w: World) -> World {
     w
 }
 
-/// Ticks to save at: every one from 1 to 60 (the start of the group order, the first builds and
-/// placements), then every seventh.
-fn save_ticks() -> Vec<u64> {
-    (1..=60).chain((61..=320).step_by(7)).collect()
-}
+/// A state a test claims a save carries across: its name and when it is there.
+type Claim = (&'static str, fn(&SaveContents) -> bool);
 
+const CLAIMS: [Claim; 6] = [
+    ("a route being planned", |c| c.path_job),
+    ("a flowfield being built", |c| c.field_building),
+    ("a flowfield", |c| c.fields > 0),
+    ("a formation", |c| c.formations > 0),
+    ("a turn carry", |c| c.turning > 0),
+    ("routes", |c| c.routes >= 6),
+];
+
+/// Saves after every one of the first 60 ticks and every seventh after that, and for each claim at
+/// up to four ticks where it holds (at least three apart). At every save: the restored world is
+/// equal, its resave is the save, its graphs are the original's; at a claim's save ticks the
+/// claimed state is in the world and in the restored one.
 #[test]
 fn a_moving_world_round_trips_at_every_save_tick() {
     let mut w = moving(fresh());
-    let mut seen = SaveContents::default();
-    let mut jobs = 0;
-    let mut building = 0;
-    let mut sectors_rebuilt = false;
-    let mut last = 0;
-    for t in save_ticks() {
-        while last < t {
-            w.step();
-            last += 1;
+    let mut made = [0u32; CLAIMS.len()];
+    let mut last_at = [0u64; CLAIMS.len()];
+    for t in 1..=320u64 {
+        w.step();
+        let now = w.save_contents();
+        let due: Vec<usize> = (0..CLAIMS.len())
+            .filter(|&k| made[k] < 4 && t >= last_at[k] + 3 && (CLAIMS[k].1)(&now))
+            .collect();
+        if !(t <= 60 || t % 7 == 0 || !due.is_empty()) {
+            continue;
         }
         let bytes = w.save().unwrap();
         let back = World::restore(fresh(), &bytes).unwrap();
@@ -227,29 +247,27 @@ fn a_moving_world_round_trips_at_every_save_tick() {
         );
         assert_eq!(back.save().unwrap(), bytes, "resave after {t} ticks");
         assert_eq!(back.checksum(), w.checksum(), "checksum after {t} ticks");
+        assert_eq!(back.save_contents(), now, "contents after {t} ticks");
+        for k in due {
+            let (what, holds) = CLAIMS[k];
+            assert!(
+                holds(&now) && holds(&back.save_contents()),
+                "{what} after {t} ticks"
+            );
+            made[k] += 1;
+            last_at[k] = t;
+        }
         assert_eq!(settled(back), settled(w.clone()), "after {t} ticks");
-        let c = w.save_contents();
-        jobs += u32::from(c.path_job);
-        building += u32::from(c.field_building);
-        sectors_rebuilt |= w.path_stats().sectors_rebuilt > 0;
-        seen.routes = seen.routes.max(c.routes);
-        seen.fields = seen.fields.max(c.fields);
-        seen.formations = seen.formations.max(c.formations);
-        seen.turning = seen.turning.max(c.turning);
     }
-    // The state each section carries was there at save ticks.
-    assert!(jobs >= 5, "a route was being planned at {jobs} save ticks");
-    assert!(
-        building >= 2,
-        "a flowfield was being built at {building} save ticks"
-    );
-    assert!(seen.fields >= 1 && seen.formations >= 1, "{seen:?}");
-    assert!(seen.turning >= 1 && seen.routes >= 6, "{seen:?}");
-    assert!(sectors_rebuilt, "structures changed the graphs");
+    for (k, (what, _)) in CLAIMS.iter().enumerate() {
+        assert!(made[k] >= 2, "{what}: {} saves", made[k]);
+    }
 }
 
-/// Saves at a few ticks, restores, runs on: every checksum equals the uninterrupted run. Also a
-/// chain of saves every 13 ticks, each world restored from the one before.
+/// For each claim, a save at the first tick from 5 on where it holds (asserted there, in the world
+/// and in the restored one), then the run goes on: every checksum equals the uninterrupted run.
+/// Also a chain of saves every 13 ticks, each world restored from the one before, with the
+/// contents equal at every link.
 #[test]
 fn a_moving_world_continues_like_the_original() {
     let total = 400;
@@ -257,19 +275,28 @@ fn a_moving_world_continues_like_the_original() {
     for _ in 0..total {
         straight.step();
     }
-    for n in [1u64, 5, 12, 33, 60, 97, 151, 250] {
+    for (what, holds) in CLAIMS {
         let mut w = moving(fresh());
-        for _ in 0..n {
+        for _ in 0..5 {
             w.step();
         }
+        while !holds(&w.save_contents()) {
+            w.step();
+            assert!(w.tick.0 < total, "{what} never holds");
+        }
+        let n = w.tick.0;
         let mut back = World::restore(fresh(), &w.save().unwrap()).unwrap();
+        assert!(
+            holds(&back.save_contents()),
+            "{what} restored after {n} ticks"
+        );
         for _ in n..total {
             back.step();
         }
         assert_eq!(
             back.checksum_history(),
             &straight.checksum_history()[n as usize..],
-            "saved after {n} ticks"
+            "saved with {what} after {n} ticks"
         );
     }
     let mut chain = moving(fresh());
@@ -277,44 +304,65 @@ fn a_moving_world_continues_like_the_original() {
         chain.step();
         if t % 13 == 0 {
             let start = chain.checksum_history_start().0 as usize;
-            let before = chain.checksum_history().to_vec();
             assert_eq!(
-                before,
+                chain.checksum_history(),
                 &straight.checksum_history()[start..t as usize],
                 "the chain up to tick {t}"
             );
+            let contents = chain.save_contents();
             chain = World::restore(fresh(), &chain.save().unwrap()).unwrap();
+            assert_eq!(
+                chain.save_contents(),
+                contents,
+                "the chain link at tick {t}"
+            );
         }
     }
     assert_eq!(chain.checksum(), straight.checksum());
 }
 
 /// Risk 1 of the design memo: the graphs a restore rebuilds in one go equal the ones the original
-/// changed one placement at a time. And the rebuild is needed: the fresh world's graphs are not
-/// those, so a restore that kept them would be wrong.
+/// changed one placement at a time, also for a structure across a sector border (portal runs on
+/// that border are split) and one in the corner sector of the map, and after two were taken away.
+/// And the rebuild is needed: the fresh world's graphs are not those.
 #[test]
 fn rebuilt_graphs_equal_the_ones_placements_made() {
     let mut w = moving(fresh());
     let mut checked = 0;
-    for t in 1..=140 {
+    let after: Vec<u64> = PLACEMENTS
+        .iter()
+        .map(|&(t, _)| t + 1)
+        .chain([131, 151])
+        .collect();
+    for t in 1..=160 {
         w.step();
-        // After each placement, and after the structure was taken away.
-        if [10, 42, 78, 131].contains(&t) {
+        if t == 91 {
+            assert!(w.is_occupied(Cell::new(95, 63)), "the corner structure stands");
+            assert!(w.is_occupied(Cell::new(48, 19)), "the border structure stands");
+        }
+        if after.contains(&t) {
             let back = World::restore(fresh(), &w.save().unwrap()).unwrap();
             assert!(back.pathing.same_graphs(&w.pathing), "after tick {t}");
-            if t < 131 {
-                assert!(
-                    !fresh().pathing.same_graphs(&w.pathing),
-                    "a placement changed the graphs by tick {t}"
-                );
-            }
+            assert!(
+                !fresh().pathing.same_graphs(&w.pathing),
+                "the structures changed the graphs by tick {t}"
+            );
             checked += 1;
         }
     }
-    assert_eq!(checked, 4);
-    assert_eq!(w.occupied_cells(), 8, "two structures stand at the end");
+    assert_eq!(checked, 7);
+    for &(_, cell) in &PLACEMENTS[1..4] {
+        assert!(w.is_occupied(cell), "{cell:?} stands");
+    }
+    assert_eq!(w.occupied_cells(), 12, "three structures stand at the end");
+    // The border one really lies across two sectors, the corner one in the last sector.
+    let s = |x, y| w.pathing.sector_of(Cell::new(x, y)).unwrap();
+    assert_ne!(s(47, 18), s(48, 18));
+    assert_eq!(
+        s(95, 63) as usize + 1,
+        (W as usize / 16) * (H as usize / 16)
+    );
 }
-
 /// A world whose save holds a job in flight and a flowfield being built, for the corruption
 /// cases: the first such tick.
 fn mid_flight() -> World {
@@ -487,6 +535,12 @@ fn path_and_formation_counters_at_their_maximum_restore_and_step() {
     }
 }
 
+fn turning_world(t: Turning) -> World {
+    fresh()
+        .with_movement(movement().with_turning(vec![(1, t)]).unwrap())
+        .unwrap()
+}
+
 /// Every setting of the path service, the flowfields, the replan and the turning that two worlds
 /// can differ in is a rule: a save made with one does not restore onto the other.
 #[test]
@@ -513,13 +567,12 @@ fn other_path_settings_are_other_rules() {
                 ..ReplanConfig::DEFAULT
             })
             .unwrap(),
-        fresh()
-            .with_movement(
-                movement()
-                    .with_turning(vec![(1, Turning::arc(Fx::from_int(3), 16, 250))])
-                    .unwrap(),
-            )
-            .unwrap(),
+        // Every field of a turning profile: the radius, the drive tolerance, the pivot share, the
+        // mode.
+        turning_world(Turning::arc(Fx::from_int(3), 16, 250)),
+        turning_world(Turning::arc(Fx::from_int(2), 17, 250)),
+        turning_world(Turning::arc(Fx::from_int(2), 16, 251)),
+        turning_world(Turning::pivot(16)),
         fresh()
             .with_formation(crate::formation::FormationConfig {
                 max_units: crate::formation::FormationConfig::DEFAULT.max_units - 1,
@@ -637,4 +690,10 @@ fn the_most_stuck_attempts_do_not_overflow() {
         back.crowd_stats().sidesteps > before,
         "a unit sidestepped at the limit"
     );
+    // The value itself, which the step uses: at the limit it stays there (a wrapping `+ 1` gives
+    // 0 in a release build, which no panic would show).
+    assert_eq!(crate::crowd::next_attempts(u8::MAX, u8::MAX), u8::MAX);
+    assert_eq!(crate::crowd::next_attempts(254, u8::MAX), u8::MAX);
+    assert_eq!(crate::crowd::next_attempts(3, 4), 4);
+    assert_eq!(crate::crowd::next_attempts(4, 4), 4);
 }
