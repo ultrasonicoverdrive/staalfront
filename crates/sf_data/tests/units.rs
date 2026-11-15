@@ -790,7 +790,19 @@ fn art_set_v4_is_wired_into_the_roles_it_has_a_usable_model_for() {
                 ("veyran", "light_tank"),
                 ("veyran", "power_plant"),
             ];
-            if v5.contains(&(faction, id)) {
+            // WP11.6c: every structure role is set v5.
+            let structure = [
+                "construction_center",
+                "power_plant",
+                "refinery",
+                "barracks",
+                "vehicle_factory",
+                "radar",
+                "defence_tower",
+                "advanced_defences",
+                "shipyard",
+            ];
+            if v5.contains(&(faction, id)) || structure.contains(&id) {
                 "set_v5"
             } else {
                 "set_v4"
@@ -840,7 +852,26 @@ fn art_set_v4_is_wired_into_the_roles_it_has_a_usable_model_for() {
     ] {
         let def = get(id);
         assert!(def.models.is_empty(), "{id}");
-        assert_eq!(def.model, glb(&format!("set_v4/{file}.glb")), "{id}");
+        // WP11.6c: the structures and mission objects are set v5.
+        let v4_still = [
+            "sniper",
+            "medic",
+            "combat_engineer",
+            "transport_truck",
+            "light_transport",
+            "amphibious_transport",
+            "gunboat",
+            "civilian",
+            "technician",
+            "ferry",
+            "ore_field",
+        ];
+        let set = if v4_still.contains(&id) {
+            "set_v4"
+        } else {
+            "set_v5"
+        };
+        assert_eq!(def.model, glb(&format!("{set}/{file}.glb")), "{id}");
     }
 
     // The exceptions: the v4 files of demolition_team and heavy_gun_team fail
@@ -883,7 +914,9 @@ fn art_set_v4_is_wired_into_the_roles_it_has_a_usable_model_for() {
             }
         }
     }
-    assert_eq!(v5_files, 6, "the six roles of the v5 style proof");
+    // The six of the v5 style proof, the other 15 structure looks of both factions, the ore silo
+    // (2), the decoy and the bunker and nine mission objects (WP11.6c): 6 + 15 + 2 + 2 + 9.
+    assert_eq!(v5_files, 34, "the set v5 files the roles name");
 }
 
 #[test]
