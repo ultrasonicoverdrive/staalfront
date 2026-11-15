@@ -197,7 +197,7 @@ impl Fields {
     /// The build of entry `i` is over: it replaces the older ones of its group.
     fn finish(&mut self, i: usize) {
         self.entries[i].state = FieldState::Ready;
-        self.built += 1;
+        self.built = self.built.saturating_add(1);
         self.cur = None;
         let (serial, version) = (self.entries[i].serial, self.entries[i].version);
         for (j, o) in self.entries.iter_mut().enumerate() {
@@ -783,7 +783,20 @@ impl Scratch {
     pub(crate) fn corrupt_for_test(&mut self, what: u8) {
         match what {
             0 => self.walked[0] = self.walk_generation + 1,
-            _ => self.corridor.corrupt_for_test(),
+            1 => self.corridor.corrupt_for_test(),
+            _ => self.local.corrupt_for_test(2),
         }
+    }
+}
+
+impl Scratch {
+    /// Whether the builder's local search fits the build in flight (restore checks): in the stage
+    /// that searches from the goal, its heap and parents lie in the goal's sector.
+    pub(crate) fn search_fits(&self, c: &Cur, f: &Field, g: &ClassGraph) -> bool {
+        if c.stage != Stage::GoalLinks || !c.searching {
+            return true;
+        }
+        let (gx, gy) = g.grid.xy(f.goal);
+        self.local.fits(g.sectors.rect(g.sectors.of_cell(gx, gy)))
     }
 }

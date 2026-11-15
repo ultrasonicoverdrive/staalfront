@@ -1250,7 +1250,15 @@ impl Fields {
             ensure(
                 c.entry < self.entries.len()
                     && c.cursor <= most
-                    && c.chain.is_none_or(|n| b.node(n)),
+                    && c.chain.is_none_or(|n| b.node(n))
+                    // Units found are distinct slots looked at: at most the cursor while
+                    // gathering, at most the slots after.
+                    && c.found as usize
+                        <= if c.stage == Stage::Gather {
+                            c.cursor
+                        } else {
+                            b.slots
+                        },
                 "a field build out of range",
             )?;
             Some(c)
@@ -1299,12 +1307,27 @@ impl Fields {
     /// 0: the serial counter at zero; 1: more claims left than a tick gives; 2: the builder's
     /// memory with a walk mark from a later walk; 3: its corridor reaching a sector from another
     /// one (save tests).
+    /// 4: the builds counted at their most; 5: a build that found more units than it looked at;
+    /// 6: a build searching from the goal with a cell past the goal's sector in its heap.
     pub(crate) fn corrupt_for_test(&mut self, what: u8) {
         match what {
             0 => self.next_serial = 0,
             1 => self.claims_left = claim::CLAIMS_PER_TICK + 1,
             2 => self.scratch.as_mut().unwrap().corrupt_for_test(0),
-            _ => self.scratch.as_mut().unwrap().corrupt_for_test(1),
+            3 => self.scratch.as_mut().unwrap().corrupt_for_test(1),
+            4 => self.built = u64::MAX,
+            5 => {
+                let c = self.cur.get_or_insert(Cur::new(0, self.entries[0].born));
+                c.stage = Stage::Gather;
+                c.found = c.cursor as u32 + 1;
+            }
+            _ => {
+                let c = self.cur.get_or_insert(Cur::new(0, self.entries[0].born));
+                c.stage = Stage::GoalLinks;
+                c.started = true;
+                c.searching = true;
+                self.scratch.as_mut().unwrap().corrupt_for_test(2);
+            }
         }
     }
 }

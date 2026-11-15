@@ -1417,9 +1417,15 @@ impl Job {
                 self.leg_ready = true;
                 work.cells.clear();
             }
-            _ => {
+            3 => {
                 self.phase = Phase::Smooth;
                 self.sm_from = work.raw.len();
+            }
+            _ => {
+                // A search of the start sector in flight, with a cell past the sector in its heap.
+                self.phase = Phase::ConnectStart;
+                self.searching = true;
+                work.local.corrupt_for_test(2);
             }
         }
     }
@@ -1435,6 +1441,7 @@ impl Work {
             1 => self.nodes.push(u32::MAX),
             2 => self.local.corrupt_for_test(0),
             3 => self.local.corrupt_for_test(1),
+            5 => self.local.corrupt_for_test(3),
             _ => self.search.corrupt_for_test(),
         }
     }
@@ -1457,6 +1464,38 @@ pub(crate) fn tags_for_test() -> ([u8; 3], [u8; 9]) {
             Phase::Finish.tag(),
         ],
     )
+}
+
+impl Job {
+    /// The rectangle of the local search this job has begun and not finished, as the stage it is
+    /// in computes it when it goes on: `None` when no local search is in flight.
+    fn search_rect(&self, g: &ClassGraph, route: &Route, work: &Work) -> Option<Rect> {
+        if !self.searching {
+            return None;
+        }
+        match self.phase {
+            Phase::ConnectStart => Some(g.sectors.rect(Job::sector_of(g, self.start_cell))),
+            Phase::ConnectGoal => Some(g.sectors.rect(Job::sector_of(g, route.want))),
+            Phase::Nearest => match (self.near_stage, work.search.nearest()) {
+                (0, Some((_, _, n))) => Some(g.sectors.rect(node_sector(n))),
+                _ => Some(g.sectors.rect(Job::sector_of(g, self.start_cell))),
+            },
+            Phase::Refine => match Job::next_leg(g, route) {
+                Ok(Leg::Search { rect, .. }) => Some(rect),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Whether the planner's memory fits the local search this job will go on with (restore
+    /// checks, after the graphs are rebuilt): the cells in its heap and their parents lie in the
+    /// rectangle the job's stage searches. A search of another rectangle would read cells outside
+    /// it, past the edge of the map.
+    pub(crate) fn search_fits(&self, g: &ClassGraph, route: &Route, work: &Work) -> bool {
+        self.search_rect(g, route, work)
+            .is_none_or(|rect| work.local.fits(rect))
+    }
 }
 
 #[cfg(test)]

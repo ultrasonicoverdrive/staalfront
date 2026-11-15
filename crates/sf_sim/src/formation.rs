@@ -535,8 +535,10 @@ impl Formations {
     /// at zero (it skips zero), a formation numbered zero or twice, an unknown state, counters
     /// past what the update leaves (`turn_wait` below the longest turn period, `patience` at
     /// most the setting, `loose` at most [`LOOSE_TICKS`]), members not strictly ascending or not
-    /// slots, a leader that is not a member, and memberships that do not match the formations:
-    /// every member's `form` names its formation and every slot that names one is in it.
+    /// slots, a leader that is not a member, and a slot whose `form` names a formation that does
+    /// not list it. The other way round is not checked: a listed member may have left (an order
+    /// that ends clears `form` after the formation pass pruned its list for the tick, a death, a
+    /// reused slot); the next formation pass drops it.
     pub(crate) fn restore(
         &mut self,
         r: &mut sf_math::bytes::ByteReader<'_>,
@@ -593,14 +595,6 @@ impl Formations {
                 .find(|f| f.serial == serial)
                 .is_some_and(|f| f.members.binary_search(&(i as u32)).is_ok());
             ensure(serial == 0 || listed, "a membership of no formation")?;
-        }
-        for f in &list {
-            ensure(
-                f.members
-                    .iter()
-                    .all(|&m| e.form[m as usize].serial == f.serial),
-                "a member that is not in its formation",
-            )?;
         }
         self.list = list;
         Ok(())

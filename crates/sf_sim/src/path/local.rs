@@ -196,7 +196,7 @@ impl Local {
             used += 1;
             let at = top as usize;
             let (x, y) = Local::cell(rect, at as u16);
-            self.run.expanded += 1;
+            self.run.expanded = self.run.expanded.saturating_add(1);
             if let Some(t) = q.toward {
                 let key = (heur.octile((x, y), t), self.dist[at], grid.index(x, y));
                 if self.run.nearest_key.is_none_or(|best| key < best) {
@@ -380,15 +380,35 @@ impl Local {
 
 #[cfg(test)]
 impl Local {
-    /// 0: two cells each other's parent; 1: the heap holds an element twice (save tests).
+    /// 0: two cells each other's parent; 1: the heap holds an element twice; 2: cell 300 (past a
+    /// sector, inside the window) reached and in the heap; 3: the expansion count at its most
+    /// (save tests).
     pub(crate) fn corrupt_for_test(&mut self, what: u8) {
         match what {
             0 => {
                 self.parent[3] = 4;
                 self.parent[4] = 3;
             }
-            _ => self.heap.corrupt_for_test(),
+            1 => self.heap.corrupt_for_test(),
+            2 => {
+                self.dist[300] = 0;
+                self.heap.push_or_lower(300, (0, 0));
+            }
+            _ => self.run.expanded = u32::MAX,
         }
+    }
+}
+
+impl Local {
+    /// Whether a search begun in `rect` can go on from this memory (restore checks): every cell in
+    /// the heap is a cell of the rectangle, and so is the parent of every cell of it.
+    pub(crate) fn fits(&self, rect: Rect) -> bool {
+        let cells = cells_in(rect) as usize;
+        cells <= WINDOW_CELLS
+            && self.heap.elements().iter().all(|&e| (e as usize) < cells)
+            && self.parent[..cells]
+                .iter()
+                .all(|&p| p == NO_PARENT || usize::from(p) < cells)
     }
 }
 

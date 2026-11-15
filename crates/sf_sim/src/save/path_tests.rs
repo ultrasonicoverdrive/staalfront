@@ -375,6 +375,15 @@ fn corruptions() -> Vec<Corruption> {
             w.pathing.corrupt_for_test(13)
         }),
         ("a corridor search node", |w| w.pathing.corrupt_for_test(14)),
+        ("a job's search does not fit its stage", |w| {
+            w.pathing.corrupt_for_test(15)
+        }),
+        ("a field build out of range", |w| {
+            w.pathing.corrupt_for_test(17)
+        }),
+        ("a field build's search does not fit its stage", |w| {
+            w.pathing.corrupt_for_test(18)
+        }),
         ("a route names a cell off the map", |w| {
             w.entities.route[12].want = W * H
         }),
@@ -433,10 +442,6 @@ fn corruptions() -> Vec<Corruption> {
         ("a membership of no formation", |w| {
             w.entities.form[13].serial = 77
         }),
-        ("a member that is not in its formation", |w| {
-            let m = (0..12).find(|&i| w.entities.form[i].serial != 0).unwrap();
-            w.entities.form[m].serial = 0;
-        }),
         ("a turn carry of a whole step or more", |w| {
             w.entities.turn_carry[12] = 1000
         }),
@@ -470,6 +475,12 @@ fn path_and_formation_counters_at_their_maximum_restore_and_step() {
     let mut w = mid_flight();
     w.entities.turn_carry[12] = 999;
     w.formations.set_counters_to_maximum_for_test();
+    // Counters that only count up, at their most: they saturate.
+    w.pathing.corrupt_for_test(16);
+    w.pathing.corrupt_for_test(19);
+    // A member that left its formation this tick and is still listed (pruned next tick).
+    let m = (0..12).find(|&i| w.entities.form[i].serial != 0).unwrap();
+    w.entities.form[m] = crate::formation::Member::NONE;
     let mut back = World::restore(fresh(), &w.save().unwrap()).unwrap();
     for _ in 0..60 {
         back.step();

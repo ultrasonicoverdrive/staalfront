@@ -79,6 +79,8 @@ pub struct SaveContents {
     pub path_job: bool,
     /// Live slots whose route is not idle.
     pub routes: u32,
+    /// Live slots whose route request carries an overlay (a stuck unit's detour, WP4.7).
+    pub overlays: u32,
     /// Flowfields in the pool.
     pub fields: u32,
     /// A flowfield is being built.
@@ -101,6 +103,10 @@ impl World {
             routes: (0..e.len())
                 .filter(live)
                 .filter(|&i| e.route[i].state != crate::path::RouteState::Idle)
+                .count() as u32,
+            overlays: (0..e.len())
+                .filter(live)
+                .filter(|&i| !e.route[i].overlay.is_empty())
                 .count() as u32,
             fields,
             field_building,
@@ -1547,6 +1553,7 @@ impl World {
             ..
         } = &mut world;
         pathing.rebuild_graphs(terrain, movement, occupancy);
+        world.pathing.check_in_flight(&world.entities)?;
         Ok(world)
     }
 }

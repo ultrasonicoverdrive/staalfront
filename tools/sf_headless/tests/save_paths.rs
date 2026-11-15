@@ -2,9 +2,11 @@
 //!
 //! Every [`EVERY`] ticks the world is saved, restored onto a fresh world built from the same
 //! scenario ([`Scenario::build_fresh_world`]) and the run goes on with the restored one. The final
-//! checksum must be the one committed in `<name>.expected`, the resave of every restored world is
-//! byte for byte the save, and at the save ticks the state the section claims to carry across is
-//! really there (a route being planned, a flowfield, a formation, a unit in the middle of a turn).
+//! checksum must be the one committed in `<name>.expected` and the resave of every restored world
+//! is byte for byte the save. A test also names the states it claims to carry across (a route
+//! being planned, a flowfield being built, a formation, a unit in the middle of a turn): the run
+//! saves besides at ticks where a claim holds, asserts at each such tick that the state is in the
+//! world and in the restored world, and asserts that every claim had its saves.
 //!
 //! Only scenarios whose sections all save are here: the others hold weapon, targeting,
 //! destruction, building or economy state (WP13.1c), `probe_which_scenarios_save` lists them.
@@ -23,76 +25,81 @@ use sf_sim::world::World;
 /// (formation windows of 20, the flowfield expiry of 400).
 const EVERY: u64 = 97;
 
-/// Saves made besides the regular ones, at ticks where the state a test wants carried across is
-/// there.
-const EXTRA_SAVES: u32 = 6;
+/// Saves made per claim at most, at ticks where it holds, at least [`CLAIM_GAP`] ticks apart; a
+/// run must make at least one for every claim.
+const CLAIM_SAVES: u32 = 4;
+const CLAIM_GAP: u64 = 3;
 
-fn nothing(_: &SaveContents) -> bool {
-    false
-}
+/// A state a test claims a save carries across: its name and when it is there.
+type Claim = (&'static str, fn(&SaveContents) -> bool);
 
-/// What the save ticks of one run held.
-#[derive(Default, Debug)]
-struct Seen {
-    saves: u32,
-    path_job: u32,
-    routes: u32,
-    fields: u32,
-    field_building: u32,
-    formations: u32,
-    turning: u32,
-}
+const JOB: Claim = ("a route being planned", |c| c.path_job);
+const BUILDING: Claim = ("a flowfield being built", |c| c.field_building);
+const FIELDS: Claim = ("a flowfield", |c| c.fields > 0);
+const ROUTES: Claim = ("a route", |c| c.routes > 0);
+const OVERLAY: Claim = ("a stuck unit's request with an overlay", |c| c.overlays > 0);
+const FORMATION: Claim = ("a formation", |c| c.formations > 0);
+const TURNING: Claim = ("a turn carry", |c| c.turning > 0);
 
-impl Seen {
-    fn add(&mut self, c: SaveContents) {
-        self.saves += 1;
-        self.path_job += u32::from(c.path_job);
-        self.routes += u32::from(c.routes > 0);
-        self.fields += u32::from(c.fields > 0);
-        self.field_building += u32::from(c.field_building);
-        self.formations += u32::from(c.formations > 0);
-        self.turning += u32::from(c.turning > 0);
-    }
-}
-
-/// Runs `name` with a save and restore every `every` ticks, and also after the first
-/// [`EXTRA_SAVES`] ticks at which `also` holds (a state that is rare at the regular save ticks);
-/// the final checksum and what the save ticks held. `Err` with the section when a save is
-/// refused.
-fn run_through_saves(
-    name: &str,
-    every: u64,
-    also: fn(&SaveContents) -> bool,
-) -> Result<(u64, Seen), SaveError> {
+/// Runs `name` with a save and restore every `every` ticks, and for each claim at up to
+/// [`CLAIM_SAVES`] ticks where it holds. At each claim save the state is asserted in the world
+/// and in the restored one. The final checksum, or `Err` with the section of a refused save.
+fn run_through_saves(name: &str, every: u64, claims: &[Claim]) -> Result<u64, SaveError> {
     let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
     assert!(scenario.ais.is_empty(), "{name}: no AI here (WP13.1d)");
     let options = RunOptions::for_scenario(&scenario);
     let mut world = Box::new(scenario.build_world().unwrap());
     let mut arrivals = scenario.arrivals();
-    let mut seen = Seen::default();
     let mut last = world.checksum();
-    let mut extra = 0;
+    let mut made = vec![0u32; claims.len()];
+    let mut last_at = vec![0u64; claims.len()];
     for done in 1..=options.ticks {
         arrivals.schedule_due(&mut world).unwrap();
         last = world.step().checksum;
-        let wanted = extra < EXTRA_SAVES && also(&world.save_contents());
-        extra += u32::from(wanted);
-        if (done % every == 0 || wanted) && done < options.ticks {
-            let bytes = world.save()?;
-            seen.add(world.save_contents());
-            let fresh = scenario.build_fresh_world().unwrap();
-            let back: World = World::restore(fresh, &bytes)
-                .unwrap_or_else(|e| panic!("{name}: restore after tick {done}: {e}"));
-            assert_eq!(
-                back.save().unwrap(),
-                bytes,
-                "{name}: the resave after tick {done} is not the save"
-            );
-            assert_eq!(back.checksum(), world.checksum(), "{name}: tick {done}");
-            *world = back;
+        if done == options.ticks {
+            break;
         }
+        let now = world.save_contents();
+        let mut due: Vec<usize> = Vec::new();
+        for (k, &(_, holds)) in claims.iter().enumerate() {
+            if made[k] < CLAIM_SAVES && done >= last_at[k] + CLAIM_GAP && holds(&now) {
+                due.push(k);
+            }
+        }
+        if done % every != 0 && due.is_empty() {
+            continue;
+        }
+        let bytes = world.save()?;
+        let fresh = scenario.build_fresh_world().unwrap();
+        let back: World = World::restore(fresh, &bytes)
+            .unwrap_or_else(|e| panic!("{name}: restore after tick {done}: {e}"));
+        assert_eq!(
+            back.save().unwrap(),
+            bytes,
+            "{name}: the resave after tick {done} is not the save"
+        );
+        assert_eq!(back.checksum(), world.checksum(), "{name}: tick {done}");
+        let restored = back.save_contents();
+        assert_eq!(
+            restored, now,
+            "{name}: what the restored world holds, tick {done}"
+        );
+        for k in due {
+            let (what, holds) = claims[k];
+            assert!(
+                holds(&now) && holds(&restored),
+                "{name}: {what} at tick {done}"
+            );
+            made[k] += 1;
+            last_at[k] = done;
+        }
+        *world = back;
     }
-    Ok((last, seen))
+    for (k, &(what, _)) in claims.iter().enumerate() {
+        assert!(made[k] >= 1, "{name}: no save with {what}");
+        eprintln!("{name}: {} saves with {what}", made[k]);
+    }
+    Ok(last)
 }
 
 fn expected(name: &str) -> u64 {
@@ -100,9 +107,8 @@ fn expected(name: &str) -> u64 {
     parse_checksum(&text).unwrap()
 }
 
-fn check(name: &str, also: fn(&SaveContents) -> bool) -> Seen {
-    let (last, seen) =
-        run_through_saves(name, EVERY, also).unwrap_or_else(|e| panic!("{name}: {e}"));
+fn check(name: &str, every: u64, claims: &[Claim]) {
+    let last = run_through_saves(name, every, claims).unwrap_or_else(|e| panic!("{name}: {e}"));
     assert_eq!(
         last,
         expected(name),
@@ -110,65 +116,49 @@ fn check(name: &str, also: fn(&SaveContents) -> bool) -> Seen {
         log::hex(last),
         log::hex(expected(name))
     );
-    assert!(seen.saves > 0, "{name}: saved at least once");
-    eprintln!("{name}: {seen:?}");
-    seen
 }
 
 #[test]
 fn bridge_200_continues_through_saves() {
-    let seen = check("bridge_200", |c| c.path_job || c.field_building);
-    // Three flowfields and the hover craft on their own routes: fields at the save ticks, and
-    // routes being planned while the budget is spent.
-    assert!(
-        seen.fields > 0 && seen.routes > 0 && seen.turning > 0,
-        "{seen:?}"
-    );
-    assert!(
-        seen.path_job > 0,
-        "a route was being planned at a save: {seen:?}"
-    );
-    assert!(
-        seen.field_building > 0,
-        "a flowfield was being built at a save: {seen:?}"
+    check(
+        "bridge_200",
+        EVERY,
+        &[JOB, BUILDING, FIELDS, ROUTES, TURNING],
     );
 }
 
 #[test]
 fn replan_continues_through_saves() {
-    let seen = check("replan", |c| c.path_job || c.fields > 0);
-    assert!(
-        seen.routes > 0 && seen.fields > 0 && seen.formations > 0,
-        "{seen:?}"
-    );
+    check("replan", EVERY, &[ROUTES, FIELDS, FORMATION, OVERLAY]);
 }
 
 #[test]
 fn formation_move_continues_through_saves() {
-    let seen = check("formation_move", |c| c.formations > 0 && c.turning > 0);
-    assert!(
-        seen.formations > 0,
-        "a formation was alive at a save: {seen:?}"
+    check(
+        "formation_move",
+        EVERY,
+        &[FORMATION, BUILDING, TURNING, ROUTES],
     );
-    assert!(seen.field_building > 0 && seen.turning > 0, "{seen:?}");
 }
 
 #[test]
 fn crowd_jam_continues_through_saves() {
-    let seen = check("crowd_jam", |c| c.path_job);
-    assert!(
-        seen.routes > 0 && seen.fields > 0 && seen.formations > 0,
-        "{seen:?}"
-    );
+    check("crowd_jam", EVERY, &[ROUTES, FIELDS, FORMATION]);
 }
 
 #[test]
 fn turning_continues_through_saves() {
-    let seen = check("turning", |c| c.turning > 0);
-    assert!(
-        seen.turning > 0,
-        "a unit was in the middle of a turn at a save: {seen:?}"
-    );
+    check("turning", EVERY, &[TURNING]);
+}
+
+/// A save after every tick of the two scenarios with formations: a member leaves its formation on
+/// arrival (`orders`) after the formation pass pruned the list, so for a tick a formation lists a
+/// unit whose own memory is no longer in it. That world saves and must restore.
+#[test]
+fn formation_scenarios_restore_after_every_tick() {
+    for name in ["formation_move", "crowd_jam"] {
+        check(name, 1, &[FORMATION]);
+    }
 }
 
 #[test]
@@ -183,7 +173,7 @@ fn the_other_movement_scenarios_continue_through_saves() {
         "pathing",
         "pathing_256",
     ] {
-        check(name, nothing);
+        check(name, EVERY, &[]);
     }
 }
 

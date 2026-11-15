@@ -456,12 +456,19 @@ impl Pathing {
         }
     }
 
-    /// Breaks one piece of the service's state (save tests): 0..=3 the job (`Job`), 4..=8 the
-    /// planner's memory (`Work`), 9 the start slot, 10 a sector epoch too many, 11..=14 the
-    /// flowfields (`Fields`).
+    /// Breaks one piece of the service's state (save tests): 0..=3 and 15 the job (`Job`, 15 as
+    /// its case 4), 4..=8 the planner's memory (`Work`), 9 the start slot, 10 a sector epoch too
+    /// many, 11..=14 and 16..=18 the flowfields (`Fields`, as its cases 0..=3 and 4..=6), 19 the
+    /// local search's expansion count at its most (`Work` case 5).
     #[cfg(test)]
     pub(crate) fn corrupt_for_test(&mut self, what: u8) {
         match what {
+            15 => {
+                let job = self.job.as_mut().expect("a job in flight");
+                job.corrupt_for_test(4, &mut self.work);
+            }
+            16..=18 => self.fields.corrupt_for_test(what - 12),
+            19 => self.work.corrupt_for_test(5),
             0..=3 => {
                 let job = self.job.as_mut().expect("a job in flight");
                 job.corrupt_for_test(what, &mut self.work);
@@ -489,6 +496,30 @@ impl Pathing {
     #[cfg(test)]
     pub(crate) fn same_graphs(&self, other: &Pathing) -> bool {
         self.graphs == other.graphs
+    }
+
+    /// The checks of a restored service that need the graphs (after [`Pathing::rebuild_graphs`]):
+    /// the local search a job or a field build has in flight fits the rectangle its stage
+    /// searches ([`Job::search_fits`]).
+    pub(crate) fn check_in_flight(&self, e: &Entities) -> crate::save::SaveResult<()> {
+        if let Some(job) = &self.job {
+            crate::save::ensure(
+                job.search_fits(
+                    &self.graphs[job.graph],
+                    &e.route[job.slot as usize],
+                    &self.work,
+                ),
+                "a job's search does not fit its stage",
+            )?;
+        }
+        if let (Some(c), Some(s)) = (&self.fields.cur, &self.fields.scratch) {
+            let f = &self.fields.entries[c.entry];
+            crate::save::ensure(
+                s.search_fits(c, f, &self.graphs[f.graph]),
+                "a field build's search does not fit its stage",
+            )?;
+        }
+        Ok(())
     }
 
     /// Whether a job is in flight (save tests and [`crate::save::SaveContents`]).
