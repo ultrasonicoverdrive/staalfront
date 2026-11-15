@@ -1574,6 +1574,65 @@ Per seed (wins : losses from SW | from NE): `ctl` 458,758 24:24 | 24:24, 777 21:
 
 **Gaps.** One run per row and seed (deterministic). The trace is of 64 mirror games of one seed per row; the wave radius 15 and the 600-tick window are my choices (stated above). Not traced: why the `av` rows from SW are attacked before tick 12,000 and lose (127 of 144 games without a launch), why `stage_distance` 26 gives no staging cell from SW (identical to 0), and why seat 1 wins 60 % of the games against the control's own copy. Seed 999 was not used. A combination row was chosen after the single rows (one only, `av2400_st26`).
 
+## Wave cohesion (WP9.3e-1, 15-11-2026)
+
+**What it is.** Two profile numbers, both **off by default and off in every shipped profile**, and the rows that measured them. **Result: no row passes the ship rule, so `assets/ai/normal.ron`, `easy.ron` and `hard.ron` are unchanged and nothing the player sees moved.** The code ships because it is off by default (digests and pins of every profile without the numbers are unchanged) and because the next WP can build on it.
+
+* `march_break_radius` (0 to 32, default 0 = off), the **formation march** (`crates/sf_ai/src/army.rs`, `operations` and `decide`). With it above 0 the staging leg of a strike is sent as one `Move` per chunk of at most `gather_group` ids instead of an `AttackMove`. The simulation then forms a slowest-pace formation for 3 to 19 units of one ground family (`assets/config/sim.ron`, `docs/rules/formations.md`), so tanks and infantry walk as one block. A unit on a `Move` never fires back, so the group **breaks**: it leaves `Staging` for `Advancing` (the same step as the staging exit: `ready`, the patience, or now the break) when an entity of another player in `obs.visible` stands within `march_break_radius` cells (Chebyshev, the radius itself counts) of any member. Members still on the `Move` are then ordered on with the `AttackMove` on the goal exactly once: `orderable(.., since)` is called with the group's `since` (the tick of the break) when the number is above 0, so a `Move` sent before the break is orderable and one sent at or after it is not. Only `obs.visible` is read, so what is not seen breaks nothing (fog twin test). Needs `stage_distance` above 0 (checked: the staging leg is the one that is sent as a `Move`); without a staging cell (no open ground, or the target is no further than the distance) the strike marches as before.
+* `stage_search` (default false), the **staging search**. When the point on the line from the gather cell to the target (`stage_distance` short of the target) is not open ground and the three rings round it hold none (`beside`), the staging cell is the nearest open cell on that line (integer line of `staging_cell`, toward the target first, then toward the gather cell at each distance; never the target). Needs `stage_distance` above 0 (checked). From the south-west site with `stage_distance` 26 the point is (45, 44) in the central lake and so are the rings; the search gives (39, 50), line index 15 of 47, six cells back (the next open cell toward the target is nine away). Where the old rule finds a cell the search changes nothing (test).
+* Digest: `Profile::digest` writes tag `0x97` and the two numbers only when either is set (`cohesion_on()`); `AiState` has **no new field** (the group's `stage` and `since` carry the break), so nothing is added for the WP13.1d save guard. The state digests with the numbers on are pinned as literals (`0xb22a_eeae_5dc5_7d63` march only, `0x0630_119f_be17_e381` search only, `0x7e98_4d3e_15db_8712` both, on the base state of `state.rs`); with both off the base pin `0x4d0a_8207_c799_2fad` stands.
+
+**Setup.** As WP9.3b-0 (release build, `tools/sf_headless/tests/ai_rows.rs`, `m1_duel`, cap 60,000, 8-cycle of start sites, seeds 458,758 / 777 / 888; 96 games per seed per row, 48 with the row on each seat, against the frozen `normal_9_3c.ron`; mirror 3 x 100). Every row is the shipped `normal.ron` with only the named numbers changed. Machine load average 4 to 10 (shared container; the games are deterministic). Rows fixed before any game: `ctl`; `fm6`, `fm8`, `fm12` = `march_break_radius` 6 / 8 / 12 with `stage_search` on; `ss` = `stage_search` alone; `st26ss` = `stage_distance` 26 with the search; one combination chosen after the singles and before it ran: `fm8st26` (radius 8, `stage_distance` 26, search; the march lifted SW and the 26 lifted NE in WP9.3b-0 and in `st26ss`). Ship rule against `ctl`: mean(w_SW, w_NE) at least 54.0 %, each site at least ctl minus 5 (SW 39.4 %, NE 48.5 %), wins above losses at each site, mirror at least 275 of 300 decided. Kill criteria: mirror below 275 or more recalled strikes than `ctl`.
+
+| Row | SW won:lost:undecided (w_SW) | NE won:lost:undecided (w_NE) | **mean** | mirror decided of 300 (SW : NE; seat 0 : seat 1) | per seed, won:lost from SW \| NE |
+|---|---|---|---|---|---|
+| `ctl` | 64:77:3 (44.4 %) | 77:64:3 (53.5 %) | **49.0 %** | **290** (140 : 150; 127 : 163) | 24:24 \| 24:24, 21:25 \| 25:21, 19:28 \| 28:19 |
+| `fm6` | 98:25:21 (68.1 %) | 66:62:16 (45.8 %) | 56.9 % | 213 (167 : 46; 109 : 104) | 33:8 \| 21:21, 31:10 \| 19:23, 34:7 \| 26:18 |
+| `fm8` | 98:25:21 (68.1 %) | 66:62:16 (45.8 %) | 56.9 % | 213 (167 : 46; 109 : 104) | same as `fm6` |
+| `fm12` | 98:25:21 (68.1 %) | 66:62:16 (45.8 %) | 56.9 % | 214 (168 : 46; 110 : 104) | same as `fm6` |
+| `ss` | 64:77:3 (44.4 %) | 77:64:3 (53.5 %) | 49.0 % | 290 (140 : 150; 127 : 163) | same as `ctl` |
+| `st26ss` | 10:113:21 (6.9 %) | 93:28:23 (64.6 %) | 35.8 % | 280 (38 : 242; 141 : 139) | 5:32 \| 31:11, 4:38 \| 33:7, 1:43 \| 29:10 |
+| `fm8st26` | 9:90:45 (6.2 %) | 81:53:10 (56.2 %) | 31.2 % | 251 (195 : 56; 135 : 116) | 7:26 \| 27:19, 1:32 \| 27:16, 1:32 \| 27:18 |
+
+Per seat (row on seat 0 / seat 1), won:lost:undecided: `fm8` SW 45:14:13 / 53:11:8, NE 33:33:6 / 33:29:10; `st26ss` SW 5:57:10 / 5:56:11, NE 47:15:10 / 46:13:13; `fm8st26` SW 3:43:26 / 6:47:19, NE 39:29:4 / 42:24:6. Checks of the harness: `ss` is byte-identical to `ctl` in all nine files (the search changes nothing at distance 14, where both sites have a cell); `ctl` reproduces the WP9.3b-0 numbers (64:77:3, 77:64:3, 290) exactly; `fm6` and `fm8` are byte-identical in 8 of 9 files (every enemy the AI sees at all is within 6 cells of a member when first seen, so radius 6 and 8 break on the same turn; radius 12 differs in 5 files by a few games).
+
+**Verdict (ship rule).**
+
+| Row | (1) mean >= 54.0 | (2) SW >= 39.4, NE >= 48.5 | (3) wins > losses | (4) mirror >= 275 |
+|---|---|---|---|---|
+| `fm6`, `fm8`, `fm12` | yes (56.9) | **no** (NE 45.8) | yes | **no** (213, 214) |
+| `ss` | no (49.0) | yes | no (SW 64 : 77) | yes (290) |
+| `st26ss` | no (35.8) | **no** (SW 6.9) | **no** (SW 10 : 113) | yes (280) |
+| `fm8st26` | no (31.2) | **no** (SW 6.2) | **no** (SW 9 : 90) | no (251) |
+
+**No row passes, so nothing ships and seed 999 (held out for the one chosen row) was not played; the 9.4a ladder was not re-run (normal did not change).** `easy.ron` has staging off (`stage_distance` 0, the numbers would be refused) and `hard.ron` is a copy of normal's numbers: none of the three profiles names the new numbers.
+
+**Trace** (`ROWS_TRACE`, the first 64 games of the mirror of seed 458,758; the same definitions as WP9.3b-0; the `duel0` column is the first 48 games with the row on seat 0 only).
+
+| | `ctl` mirror | `fm8` mirror | `fm8` on seat 0 only |
+|---|---|---|---|
+| games with a clash | 64 | 63 | 47 of 48 |
+| median tick of the first clash | 10,413 | 10,971 | 10,536 |
+| winner of the clash: first launcher / second launcher / tie | **3 / 58 / 3** | 26 / 36 / 1 | 18 / 29 / 0 |
+| first launcher's wave at contact, median units / value / spread | 2 / 1,400 / 1 | **6 / 2,000 / 4** | 2 / 1,400 / 2 |
+| games in which the first launcher's wave at contact is worth 1,800 or more | **0 of 64** | **41 of 63** | 18 of 47 |
+| second launcher's wave at contact, median spread | 5 | 4 | 3 |
+| whole strike group of the first launcher, spread at contact | 14 | 11 | 14 |
+| members of the side shot at first that were still on a `Move` at that tick | 0 of 366 | **288 of 360** (48 of 63 clashes have at least one) | 232 of 264 |
+| strikes recalled by a threat before they were `Engaged` | 0 | 0 | 0 |
+
+What it shows. The march does what it was built for: the first launcher's wave reaches the contact whole (41 of 63 at 1,800 or more against 0 of 64) and the first launcher wins 26 of 63 clashes instead of 3. It also makes the fights even: undecided games rise from 10 of 300 to 87 of 300 in the mirror (48 capped, 39 stalemate; `ctl` 10 capped) and from 6 to 37 of 288 in the duels; the mirror is the kill criterion (213 against 275). And it moves the site balance (SW 44.4 to 68.1 %, NE 53.5 to 45.8 %), which fails the NE site. In 288 of 360 cases the group that was shot at first was still on its `Move`: the break comes after the first shot, in the army turn after the enemy is seen (a turn is about 40 ticks, inferred from the WP9.3b-0 memo, not measured here), so the first fire is taken without answering. Why a tighter wave lifts SW and lowers NE was not traced (hypothesis only: the SW wave now keeps its tanks with the infantry through the lake detour while the NE strike no longer arrives first with its tanks). The recalls count is 0 in all three traces, so the second kill criterion is not hit; the first one is.
+
+**Cost.** `ai_perf` `what_the_formation_march_costs_with_50_and_200_units_at_the_launch_and_on_the_staging_leg` (release, 20,000 turns per cell, load average about 10, alternating cells in one run): the launch turn 8.0 us off / 9.7 us on (50 units), 29.7 / 30.2 us (200); the staging-leg turn, 60 enemies visible and none in range (the whole scan), 5.7 us off / 11.2 to 13.2 us on (50 units), 28.0 / 50.8 us (200). Worst turns are preemption spikes of 0.2 to 8 ms on the shared machine, asserted below 10 ms; a turn is far below the 1 ms think budget in the mean.
+
+**What this means for a human player.** Nothing: no shipped number moved.
+
+**Pins.** None moved: `normal.ron`, `easy.ron`, `hard.ron`, the digests of the shipped profiles, `golden.rs`, every `*.expected` are untouched. New pins: the state digests with the numbers on (literals above), the two profile checks, the real-game staging legs per site (`ai_march.rs`: with the march on the strikes of games 0 and 4 break at ticks 10,998 to 11,038, all six members on a `Move`, with the other wave 2 to 4 cells away; with it off no member is ever on a `Move`).
+
+**Mutations** (each applied in place, named test failed, reverted): break ignored (`broke = false`): `the_group_breaks_to_the_attack_move_at_exactly_the_radius_and_not_one_cell_further`, `an_enemy_that_is_not_in_the_observation_breaks_nothing`, `a_unit_still_on_the_move_is_ordered_on_once_after_the_break_and_not_again`; radius off by one (`<` for `<=`): the first of those; `since` not passed to `orderable` (`None`): `the_group_breaks_to_the_attack_move_at_exactly_the_radius_and_not_one_cell_further`, `a_unit_still_on_the_move_is_ordered_on_once_after_the_break_and_not_again`, `the_group_that_leaves_the_staging_cell_on_its_own_is_ordered_on_from_its_move`; search loop removed: `the_staging_search_finds_open_ground_on_the_line_where_the_lake_is`; staging leg left an `AttackMove`: `the_staging_leg_is_one_move_with_the_march_on_and_an_attack_move_with_it_off`; the numbers not hashed (the whole block, the radius alone, the search alone): `the_numbers_of_wp9_3e_1_are_hashed_only_when_one_is_set_and_each_moves_the_digest`.
+
+**Gaps.** One run per row and seed (deterministic). The combination row was one guess; no other combination was run (for example the march with a larger `attack_value`, or a break that also fires on being hit, which would answer the 288 of 360 first shots taken on a `Move`). Radius 6, 8 and 12 are one row in effect. The fm8 trace is the mirror and one seat only; the SW and NE rows were not traced separately. Why the undecided games rise was not traced beyond their endings (capped / stalemate). Not played by a person.
+
 ## Difficulty levels (WP9.4a, 15-11-2026)
 
 **What it is.** Two new profile files, `assets/ai/easy.ron` and `assets/ai/hard.ron`, and the flag `sf_headless tournament --profiles A,B`. Data and the tournament only: no change in `crates/sf_sim`, no new rule in `crates/sf_ai`, `normal.ron` untouched (every pin of it stands). Every number the files do not list is normal's (`easy_and_hard_load_and_change_only_the_numbers_the_level_names` in `crates/sf_data` builds normal with the listed changes and demands equality). The AI still acts only through human commands on a fog-filtered observation; neither level cheats. The design is `wp9.4-ontwerp` (orchestrator memo of 14-11-2026), adjusted to what shipped since: the goal list of normal ends at the second refinery (WP9.3c), the escalation of WP9.3a-1 is off in normal, retreat (9.3a-2) is parked.

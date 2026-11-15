@@ -3607,6 +3607,15 @@ What it does not settle:
 * **Gaps.** Not traced: why later launches lose from SW, why staging 26 is no staging from SW, the seat 1 lean. One run per row and seed; the combination row was chosen after the single rows.
 * **Pins.** None moved: `normal.ron`, the digests, `golden.rs`, every `*.expected` are untouched (full test run, release `--expect` on the CI scenarios, below).
 
+### WP9.3e-1 notes: wave cohesion (15-11-2026)
+
+* **What changed.** Two profile numbers, off by default and in every shipped profile: `march_break_radius` (the staging leg is one formation `Move`, broken to the `AttackMove` on seeing an enemy within the radius; members still on the `Move` are ordered on once through `orderable(.., since)`) and `stage_search` (nearest open cell on the gather-target line when the rings find none: from SW with `stage_distance` 26 the lake point (45, 44) gives (39, 50)). `crates/sf_ai/src/army.rs`, `profile.rs` (digest tag `0x97`), `crates/sf_data/src/ai_profile.rs` (range 0 to 32, needs `stage_distance`). Harness: `ai_rows.rs` trace gets members on a `Move` when first shot at and strikes recalled before `Engaged`. No `AiState` field, nothing for the WP13.1d guard, no change in `sf_sim`.
+* **Measured** (`m1_duel`, 3 x 96 against `normal_9_3c.ron`, mirror 3 x 100): `ctl` 49.0 % (SW 44.4, NE 53.5, mirror 290); `fm6`/`fm8`/`fm12` 56.9 % (SW 68.1, NE 45.8, mirror 213/213/214); `ss` identical to `ctl`; `st26ss` 35.8 %; `fm8st26` 31.2 % (mirror 251). **No row passes** (NE below 48.5 and mirror below 275 for the march rows; SW 6 to 7 % for the 26 rows). Seed 999 and the 9.4a ladder not run (nothing ships).
+* **Trace** (64 mirror games, `ctl` v `fm8`): first launcher's wave at contact worth 1,800 or more 0 of 64 v 41 of 63; clash won by the first launcher 3 v 26; 288 of 360 members of the side shot at first were still on a `Move`; strikes recalled early 0 in both.
+* **Gaps.** One combination only; no break on being hit (would answer the first shots taken on a `Move`); why SW gains and NE loses, and why undecided games rise (10 to 87 of 300), not traced; nobody played it.
+* **Pins.** None moved (`normal.ron`, `easy.ron`, `hard.ron`, digests, `golden.rs`, `*.expected`). New: state digest literals with the numbers on, profile and range tests, real-game staging legs per site in `ai_march.rs`.
+* **Time split.** See the PR.
+
 ### WP9.4a notes: difficulty levels easy and hard (15-11-2026)
 
 * **What changed.** Data and the tournament only: `assets/ai/easy.ron`, `assets/ai/hard.ron` (numbers in `docs/rules/ai.md` "Difficulty levels (WP9.4a)"), `sf_headless tournament --profiles A,B` (`load_setup_with`, `Setup::profile_names`), the scenarios `ai_vs_passive_easy` / `ai_vs_passive_hard` (frozen defs copies, in the CI list), tests (`sf_data` profile pins, `sf_ai` digest/goal-list pins, `tests/ai_levels.rs`, `--profiles` tests in `src/tournament/tests.rs` and `tests/tournament.rs`), PLAN note. Nothing in `crates/sf_sim`, no new `sf_ai` rule, `normal.ron` untouched.
