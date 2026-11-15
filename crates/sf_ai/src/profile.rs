@@ -370,4 +370,46 @@ mod tests {
         h.army.harvester_threat = true;
         assert_ne!(h.digest(), d);
     }
+
+    /// WP9.4a: the shipped level files resolve against the shipped definitions, with their goal lists and digests pinned
+    /// (the digest is part of every AI digest, so a changed number of a level moves the pins of its scenario).
+    #[test]
+    fn the_level_profiles_resolve_and_their_goal_lists_and_digests_are_pinned() {
+        let pairs = |list: &[(Kind, u16)]| -> Vec<(u16, u16)> {
+            list.iter().map(|&(k, n)| (k.0, n)).collect()
+        };
+        let defs = UnitDefs::embedded();
+        let level = |text: &str, faction| {
+            Profile::resolve(&AiProfile::from_ron(text).unwrap(), faction, &defs).unwrap()
+        };
+        for faction in [Faction::Meridian, Faction::Veyran] {
+            let easy = level(include_str!("../../../assets/ai/easy.ron"), faction);
+            let hard = level(include_str!("../../../assets/ai/hard.ron"), faction);
+            assert_eq!((easy.name.as_str(), easy.think_interval), ("easy", 40));
+            assert_eq!((hard.name.as_str(), hard.think_interval), ("hard", 10));
+            // Kinds: 1 power plant, 2 refinery, 3 barracks, 4 vehicle factory.
+            assert_eq!(
+                pairs(&easy.build_order),
+                [(1, 1), (2, 1), (4, 1), (3, 1), (1, 2)]
+            );
+            assert_eq!(
+                pairs(&hard.build_order),
+                [(1, 1), (2, 1), (4, 1), (3, 1), (1, 2), (2, 2)]
+            );
+            println!(
+                "{faction:?} easy {:#x} hard {:#x}",
+                easy.digest(),
+                hard.digest()
+            );
+        }
+        let m = Faction::Meridian;
+        assert_eq!(
+            level(include_str!("../../../assets/ai/easy.ron"), m).digest(),
+            0x4b32_4f6b_7e34_7a26
+        );
+        assert_eq!(
+            level(include_str!("../../../assets/ai/hard.ron"), m).digest(),
+            0xfce3_b027_f725_bb13
+        );
+    }
 }

@@ -698,3 +698,122 @@ fn the_cap_may_not_sit_below_the_first_wave() {
     refused(&with(1), "attack_value_max");
     AiProfile::from_ron(&with(0)).unwrap();
 }
+
+// ---- WP9.4a: the difficulty levels ---------------------------------------------------------------------------------
+
+const EASY: &str = include_str!("../../../../assets/ai/easy.ron");
+const HARD: &str = include_str!("../../../../assets/ai/hard.ron");
+
+fn goals(p: &AiProfile, i: usize) -> Vec<(&str, u32)> {
+    p.factions[i]
+        .build_order
+        .iter()
+        .map(|(r, n)| (r.as_str(), u32::from(*n)))
+        .collect()
+}
+
+#[test]
+fn easy_and_hard_load_and_change_only_the_numbers_the_level_names() {
+    // A profile file must read and pass every range check, and `deny_unknown_fields` makes a misspelt number an error.
+    let normal = AiProfile::embedded();
+    let easy = AiProfile::from_ron(EASY).unwrap();
+    let hard = AiProfile::from_ron(HARD).unwrap();
+    assert_eq!((easy.name.as_str(), hard.name.as_str()), ("easy", "hard"));
+
+    // easy: the literals of the file (start values of WP9.4a) ...
+    assert_eq!((easy.think_interval, easy.stagger), (40, 3));
+    let (e, a) = (&easy.economy, &easy.army);
+    assert_eq!(
+        (
+            e.max_parallel_builds,
+            e.max_queue,
+            e.harvesters_per_refinery,
+            e.repair_below_percent
+        ),
+        (1, 1, 1, 40)
+    );
+    assert_eq!(
+        (
+            a.first_attack_tick,
+            a.max_wait,
+            a.attack_value,
+            a.scouts_max
+        ),
+        (6000, 18_000, 2000, 1)
+    );
+    assert_eq!(
+        (a.stage_distance, a.reinforce_value, a.defend_ratio_permille),
+        (0, 0, 1000)
+    );
+    assert_eq!((a.escalate_permille, a.attack_value_max), (0, 0));
+    // ... the list of normal without the second refinery, for both factions ...
+    for i in 0..2 {
+        assert_eq!(
+            goals(&easy, i),
+            [
+                ("power_plant", 1),
+                ("refinery", 1),
+                ("vehicle_factory", 1),
+                ("barracks", 1),
+                ("power_plant", 2)
+            ]
+        );
+    }
+    // ... and nothing else differs from normal.
+    let mut expected = normal.clone();
+    expected.name = "easy".to_string();
+    expected.think_interval = 40;
+    expected.economy.max_queue = 1;
+    expected.economy.harvesters_per_refinery = 1;
+    expected.economy.repair_below_percent = 40;
+    expected.army.max_wait = 18_000;
+    expected.army.first_attack_tick = 6000;
+    expected.army.stage_distance = 0;
+    expected.army.reinforce_value = 0;
+    expected.army.defend_ratio_permille = 1000;
+    expected.army.scouts_max = 1;
+    for f in &mut expected.factions {
+        f.build_order.pop();
+    }
+    assert_eq!(easy, expected);
+
+    // hard.
+    assert_eq!((hard.think_interval, hard.stagger), (10, 3));
+    let (e, a) = (&hard.economy, &hard.army);
+    assert_eq!(
+        (
+            e.max_parallel_builds,
+            e.max_queue,
+            e.harvesters_per_refinery,
+            e.repair_below_percent
+        ),
+        (2, 3, 3, 85)
+    );
+    assert_eq!(
+        (a.first_attack_tick, a.max_wait, a.attack_value),
+        (2400, 9000, 2000)
+    );
+    assert_eq!((a.escalate_permille, a.attack_value_max), (250, 8000));
+    assert!(!a.harvester_threat);
+    assert_eq!(goals(&hard, 0), goals(&normal, 0));
+    let mut expected = normal;
+    expected.name = "hard".to_string();
+    expected.economy.max_parallel_builds = 2;
+    expected.economy.max_queue = 3;
+    expected.economy.harvesters_per_refinery = 3;
+    expected.economy.repair_below_percent = 85;
+    expected.army.max_wait = 9000;
+    expected.army.escalate_permille = 250;
+    expected.army.attack_value_max = 8000;
+    assert_eq!(hard, expected);
+}
+
+#[test]
+fn the_think_interval_of_easy_is_inside_the_limits_and_keeps_the_players_apart() {
+    assert!(40 <= MAX_THINK_INTERVAL);
+    // 40 / gcd(40, 3) = 40 >= 8 players; an interval of 5 would not do.
+    let with = |from: &str, to: &str| AiProfile::from_ron(&EASY.replacen(from, to, 1));
+    assert!(with("think_interval: 40", "think_interval: 5").is_err());
+    assert!(with("think_interval: 40", "think_interval: 601").is_err());
+    assert!(with("stagger: 3,", "stagger: 3, bogus: 1,").is_err());
+}
