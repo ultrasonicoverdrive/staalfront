@@ -3289,6 +3289,15 @@ fixed, delete the entry in the same PR.
 Audio only: nothing in `sf_sim`, no pin moved. Nobody could listen in the build container; the sounds are checked by
 measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please listen**, the table says what each should sound like.
 
+**Listened (12-11-2026).** Tijmen played `sf_game --sandbox --fight` without `--ra-audio` (release build of main `51a43a0`, the
+reference laptop), so every fight sound came from the CC0 bank, and judged them good ("Klinkt goed"). The game's exit summary of
+that run: `fight sounds SoundTotals { requested: 277, silent: 0, inaudible: 35, merged: 1, limited: 0, spaced: 62, played: 179 }`.
+What it does not settle:
+* **`weapon.fire.demolition` and B11.** The summary does not count per event, so it is not known whether that sound played in this
+  fight. Its check for a likeness to a Red Alert sound stays open.
+* **The summed-gain limiter** (`positional.max_summed_gain`). The summary's `limited` counts cues the planner dropped
+  (`max_per_batch`, the frame budget), not frames the limiter turned down, so this run does not show whether the limiter acted.
+
 * **The generator** `tools/sf_sound_gen` writes 18 mono 16-bit 22.05 kHz WAV files to `assets/audio/sfx/` (571,926 bytes together, budget
   2 MB). Integer maths only, so the bytes are the same on every platform; each file is pinned by length and FNV-1a hash in
   `tools/sf_sound_gen/tests/generator.rs`, and `the_committed_files_are_what_a_fresh_run_writes` compares the files with a fresh run
@@ -3305,7 +3314,7 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   these) the peak was 0.932 and the test failed; that is how they were set. The mix ignores pan, pitch and voice limits (an upper bound).
   Assumption: a music track is normalised near full scale; the player's Red Alert tracks were not measured.
 * **Sweep of PR #122 (fixed):** a mapped Red Alert sound would have taken the bank entry's volume, pitch and cap (3 to 5 times quieter) because the fight events now have entries; new bank field `original_as_is: true` on the 18 entries keeps the original at volume 1, no pitch, default cap (test: resolved definition and traced gain of all 18 with a fixture mapping). The volume tests now cover every event alone (peaks 0.099 to 0.278), a simultaneous 20-tank volley (0.238, the planner merges it) and four kinds together (0.485); every bank volume, pitch and cap is pinned as literals. Measured gap: eight kinds on one tick at one spot sum to 1.13 and all 18 to 1.37 (would clip). Fog: sounds of hidden events are audible (`fog_look.md`, Tijmen may change it). `*.wav binary` in `.gitattributes`. `weapon.fire.demolition` (two ticks and a rising beep) is the one sound for Tijmen to check for a likeness to a Red Alert sound (B11).
-* **Not done**: a sound for a structure being hit (the sim has no such event); several variant files per event; any listening test.
+* **Not done**: a sound for a structure being hit (the sim has no such event); several variant files per event; any listening test in the build (Tijmen listened on 12-11-2026, above).
 
 | Event | File | Length | What to listen for |
 |---|---|---|---|
