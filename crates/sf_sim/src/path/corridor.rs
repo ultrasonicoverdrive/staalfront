@@ -389,3 +389,11 @@ mod tests {
         assert!(c.reached(graph.sectors.of_cell(40, 30)).is_some());
     }
 }
+
+#[cfg(test)]
+impl Corridor {
+    /// A sector reached by a node of another sector (save tests).
+    pub(crate) fn corrupt_for_test(&mut self) {
+        self.reached[0] = SLOTS as u32;
+    }
+}

@@ -82,6 +82,44 @@ pub use replan::{
 };
 pub use route::{ABS_CAP, RING_CAP};
 
+/// A build of entry 0 at its start (save tests).
+#[cfg(test)]
+pub(crate) fn field_cur_for_test() -> field::Cur {
+    field::Cur::new(0, 0)
+}
+
+/// The file tags of the route states, the field states and the build stages, and of the job modes
+/// and stages (save tests).
+#[cfg(test)]
+pub(crate) fn state_tags_for_test() -> ([u8; 4], [u8; 3], [u8; 7], [u8; 3], [u8; 9]) {
+    use field::{FieldState, Stage};
+    let (modes, phases) = job::tags_for_test();
+    (
+        [
+            RouteState::Idle.tag(),
+            RouteState::Wanted.tag(),
+            RouteState::Active.tag(),
+            RouteState::Stranded.tag(),
+        ],
+        [
+            FieldState::Queued.tag(),
+            FieldState::Building.tag(),
+            FieldState::Ready.tag(),
+        ],
+        [
+            Stage::Gather.tag(),
+            Stage::GoalLinks.tag(),
+            Stage::Corridor.tag(),
+            Stage::Collect.tag(),
+            Stage::Region.tag(),
+            Stage::Slots.tag(),
+            Stage::Integrate.tag(),
+        ],
+        modes,
+        phases,
+    )
+}
+
 /// Path search work a world may do in one tick, as a number of nodes: cells
 /// expanded in the searches, plus cells looked at in lines of sight.
 pub const DEFAULT_NODE_BUDGET: u32 = 4096;
@@ -415,6 +453,41 @@ impl Pathing {
             let all: Vec<u32> = (0..g.sectors.count() as u32).collect();
             g.rebuild(&all, &mut local);
         }
+    }
+
+    /// Breaks one piece of the service's state (save tests): 0..=3 the job (`Job`), 4..=8 the
+    /// planner's memory (`Work`), 9 the start slot, 10 a sector epoch too many, 11..=14 the
+    /// flowfields (`Fields`).
+    #[cfg(test)]
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0..=3 => {
+                let job = self.job.as_mut().expect("a job in flight");
+                job.corrupt_for_test(what, &mut self.work);
+            }
+            4..=8 => self.work.corrupt_for_test(what - 4),
+            9 => self.next_slot = u32::MAX,
+            10 => self.sector_epoch.push(0),
+            _ => self.fields.corrupt_for_test(what - 11),
+        }
+    }
+
+    /// The flowfield pool (save tests).
+    #[cfg(test)]
+    pub(crate) fn fields(&self) -> &Fields {
+        &self.fields
+    }
+
+    /// The flowfield pool (save tests).
+    #[cfg(test)]
+    pub(crate) fn fields_mut(&mut self) -> &mut Fields {
+        &mut self.fields
+    }
+
+    /// Whether the class graphs of two pathings are the same (save tests).
+    #[cfg(test)]
+    pub(crate) fn same_graphs(&self, other: &Pathing) -> bool {
+        self.graphs == other.graphs
     }
 
     /// Whether a job is in flight (save tests and [`crate::save::SaveContents`]).

@@ -557,3 +557,17 @@ mod tests {
         assert_eq!(local.dist[usize::from(wanted[0])], COST_ONE);
     }
 }
+
+#[cfg(test)]
+impl Local {
+    /// 0: two cells each other's parent; 1: the heap holds an element twice (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => {
+                self.parent[3] = 4;
+                self.parent[4] = 3;
+            }
+            _ => self.heap.corrupt_for_test(),
+        }
+    }
+}

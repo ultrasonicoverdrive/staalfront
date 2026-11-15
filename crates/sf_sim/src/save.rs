@@ -1575,3 +1575,6 @@ fn rebuild_occupancy(world: &mut World) -> SaveResult<()> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod path_tests;

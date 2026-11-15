@@ -1563,3 +1563,41 @@ mod tests {
         assert_eq!(p.0.abs().max(p.1.abs()), 4);
     }
 }
+
+#[cfg(test)]
+impl Formations {
+    /// 0: the serial counter at zero; 1: patience over the setting; 2: loose too long; 3: a
+    /// leader that is not a member; 4: the first formation twice; 5: a turn wait of the longest
+    /// period; 6: a member that is not a slot (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        let patience = self.config.patience_ticks;
+        let f = &mut self.list[0];
+        match what {
+            0 => self.next_serial = 0,
+            1 => f.patience = patience + 1,
+            2 => f.loose = LOOSE_TICKS + 1,
+            3 => f.leader = u32::MAX,
+            4 => {
+                let twin = f.clone();
+                self.list.push(twin);
+            }
+            5 => f.turn_wait = MAX_TURN_PERIOD as u8,
+            _ => f.members.push(u32::MAX),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Formations {
+    /// Every formation's counters at the most the update leaves them (save tests).
+    pub(crate) fn set_counters_to_maximum_for_test(&mut self) {
+        let patience = self.config.patience_ticks;
+        for f in &mut self.list {
+            f.patience = patience;
+            f.loose = LOOSE_TICKS;
+            f.turn_wait = (MAX_TURN_PERIOD - 1) as u8;
+            f.calm = u16::MAX;
+            f.age = u32::MAX;
+        }
+    }
+}

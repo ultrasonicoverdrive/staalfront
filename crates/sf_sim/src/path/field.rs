@@ -1293,3 +1293,18 @@ impl Fields {
         Ok(())
     }
 }
+
+#[cfg(test)]
+impl Fields {
+    /// 0: the serial counter at zero; 1: more claims left than a tick gives; 2: the builder's
+    /// memory with a walk mark from a later walk; 3: its corridor reaching a sector from another
+    /// one (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.next_serial = 0,
+            1 => self.claims_left = claim::CLAIMS_PER_TICK + 1,
+            2 => self.scratch.as_mut().unwrap().corrupt_for_test(0),
+            _ => self.scratch.as_mut().unwrap().corrupt_for_test(1),
+        }
+    }
+}

@@ -776,3 +776,14 @@ impl Scratch {
         self.heap.elements().iter().all(|&e| (e as usize) < cells)
     }
 }
+
+#[cfg(test)]
+impl Scratch {
+    /// 0: a walk mark from a later walk; 1: a sector reached from another one (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.walked[0] = self.walk_generation + 1,
+            _ => self.corridor.corrupt_for_test(),
+        }
+    }
+}

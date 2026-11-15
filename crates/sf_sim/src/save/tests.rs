@@ -328,7 +328,6 @@ fn busy(mut w: World, ticks: u64) -> World {
 /// last tick, the stats, the interpolation columns and the checksum history.
 fn settled(mut w: World) -> World {
     let e = &mut w.entities;
-    e.prev_pos.clone_from(&e.pos);
     e.prev_facing.clone_from(&e.facing);
     e.prev_turret.clone_from(&e.turret);
     w.stalled.clear();
@@ -604,7 +603,7 @@ fn every_truncation_is_an_error_and_no_flip_panics() {
 }
 
 /// The body of every section: `(tag, start, length)`.
-fn sections(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
+pub(super) fn sections(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
     let mut out = Vec::new();
     let mut at = 28;
     while at < bytes.len() {

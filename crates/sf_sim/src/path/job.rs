@@ -1409,3 +1409,57 @@ impl Job {
 mod tests {
     // The planner is tested through `Pathing` (see `path/tests.rs`).
 }
+
+#[cfg(test)]
+impl Job {
+    /// 0: more legs than a job refines; 1: a slot past the entities; 2: a ready leg without cells
+    /// (with `work`); 3: the smoothing past the raw route (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8, work: &mut Work) {
+        match what {
+            0 => self.legs = REFINE_LEGS + 1,
+            1 => self.slot = u32::MAX,
+            2 => {
+                self.leg_ready = true;
+                work.cells.clear();
+            }
+            _ => {
+                self.phase = Phase::Smooth;
+                self.sm_from = work.raw.len();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Work {
+    /// 0: a cell off the map; 1: a node out of range; 2, 3: the local search (`Local`); 4: the
+    /// abstract search (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.cells.push(u32::MAX),
+            1 => self.nodes.push(u32::MAX),
+            2 => self.local.corrupt_for_test(0),
+            3 => self.local.corrupt_for_test(1),
+            _ => self.search.corrupt_for_test(),
+        }
+    }
+}
+
+/// The file tags of the modes and the stages of a job (save tests).
+#[cfg(test)]
+pub(crate) fn tags_for_test() -> ([u8; 3], [u8; 9]) {
+    (
+        [Mode::Fresh.tag(), Mode::Refill.tag(), Mode::Continue.tag()],
+        [
+            Phase::Begin.tag(),
+            Phase::Direct.tag(),
+            Phase::ConnectStart.tag(),
+            Phase::ConnectGoal.tag(),
+            Phase::Abstract.tag(),
+            Phase::Nearest.tag(),
+            Phase::Refine.tag(),
+            Phase::Smooth.tag(),
+            Phase::Finish.tag(),
+        ],
+    )
+}

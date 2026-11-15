@@ -250,3 +250,12 @@ mod tests {
         assert_eq!(popped, expected);
     }
 }
+
+#[cfg(test)]
+impl IndexedHeap {
+    /// Puts the first element in a second time (save tests).
+    pub(crate) fn corrupt_for_test(&mut self) {
+        let first = self.heap.first().copied().unwrap_or(0);
+        self.heap.push(first);
+    }
+}

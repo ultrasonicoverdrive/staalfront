@@ -52,7 +52,7 @@ pub enum RouteState {
 }
 
 impl RouteState {
-    const fn tag(self) -> u8 {
+    pub(crate) const fn tag(self) -> u8 {
         match self {
             RouteState::Idle => 0,
             RouteState::Wanted => 1,

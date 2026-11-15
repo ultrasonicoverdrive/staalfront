@@ -623,3 +623,14 @@ mod tests {
         assert!(!a.ban(999));
     }
 }
+
+#[cfg(test)]
+impl AbstractSearch {
+    /// A node of the search going on whose parent is not of it (save tests).
+    pub(crate) fn corrupt_for_test(&mut self) {
+        self.generation = self.generation.max(1);
+        self.seen[0] = self.generation;
+        self.parent[0] = 1;
+        self.seen[1] = 0;
+    }
+}
