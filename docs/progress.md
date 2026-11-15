@@ -3526,3 +3526,16 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Measured (the ship rule of 14-11-2026, `m1_duel`, 96 games per seed against the frozen profile after #135, mirror 3 x 100).** Control: SW 47 of 144, NE 19 of 144, mean 22.9 %, mirror 139 decided. R2 250: 22.9 %, mirror 137; R2 500: 22.9 %, mirror 141; harvester threat: 23.6 %, mirror **111**; both: 23.3 %, mirror 115; both 500: 22.9 %, mirror 117. **No row passes** (the mean must reach 27.9 %, NE wins must exceed losses, the mirror must keep 124), so every number stays off. The waves do grow with R2 (median launch 2,000 to 3,000 at waves 4 and 5; 8.6 attacks per undecided mirror game against 11.65) but not more games end; the harvester threat is called before any structure is hit in the scenario, but the NE harvester is still lost before the first structure hit in 90 of 144 duel games (control 86).
 * **Gaps.** Not traced: why larger waves do not decide more games, why the threat costs decided games, who kills the NE harvesters before any structure is hit. Not measured: escalation above 500 permille or a cap above 8,000. A running defence blocks a harvester threat anywhere (the brief said "of that area"). `ai_harvest_raid` is on the SW site. The retreat is WP9.3a-2.
 * **Pins.** None moved (base-state digest `0x4d0a_8207_c799_2fad`, `golden.rs`, every earlier `*.expected`, `m1_ai` goal list 20,297): shown by the full test run and by `the_digest_of_the_base_state_is_pinned`.
+
+### WP13.1a notes: saving the core world state (15-11-2026)
+
+* `World::save` / `World::restore(fresh, bytes)` save the dynamic state of the world scalars, every
+  entity column of the core and the crowd memory, and the command queue (with a binary encoding of
+  every `Command` variant); the rules stay out of the file and are checked by a digest. Format,
+  derived fields and gates: `docs/rules/save.md`.
+* Not saved yet, and refused with `SaveError::Unsupported(section)` as soon as they hold anything that
+  is not their tick-0 state: pathing, flowfields, formations, turning, weapons, projectiles,
+  targeting, destruction, buildings, economy, production, power, repair, vision, outcome (WP13.1b and
+  WP13.1c). Production, power, vision and outcome are refused whenever the world has their rules.
+* No CI scenario saves yet (each holds state of a gated section); the round trip, the byte-equal
+  resave and the checksum continuation are shown on a world built in the tests. No pin moved.

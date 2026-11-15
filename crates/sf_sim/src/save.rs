@@ -821,7 +821,16 @@ fn check_unsaved_sections(w: &World) -> SaveResult<()> {
     if !w.arsenal.projectiles_at_start() {
         return Err(SaveError::Unsupported("projectiles"));
     }
-    if !w.destruction.wrecks.is_empty() || !w.destruction.tally.is_empty() {
+    // The reports of the last shots: the return fire of the next tick reads the attacks, so a world
+    // with any of them waits for WP13.1c.
+    if !w.arsenal.shots.is_empty() || !w.arsenal.impacts.is_empty() || !w.arsenal.attacks.is_empty()
+    {
+        return Err(SaveError::Unsupported("weapons"));
+    }
+    if !w.destruction.wrecks.is_empty()
+        || !w.destruction.tally.is_empty()
+        || !w.destruction.deaths.is_empty()
+    {
         return Err(SaveError::Unsupported("destruction"));
     }
     if w.ore.as_ref().is_some_and(|o| o.version() != 0)

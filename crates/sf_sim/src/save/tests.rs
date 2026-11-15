@@ -605,6 +605,9 @@ fn gates() -> Vec<Gate> {
             }
         }),
         ("weapons", |w| w.entities.weapon[5][0].wait = 1),
+        ("weapons", |w| {
+            w.arsenal.attacks.push((5, EntityId::new(6, 0)));
+        }),
         ("targeting", |w| w.entities.eng[5].cool = 1),
         ("buildings", |w| w.entities.build_left[10] = 1),
         ("repair", |w| w.entities.repairing[10] = true),
