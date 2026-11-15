@@ -515,6 +515,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn routes_restore_at_most_one_per_slot() {
+        let routes = Routes(vec![Route::IDLE; 3]);
+        let mut w = ByteWriter::new();
+        routes.save(&mut w).unwrap();
+        let bytes = w.finish();
+        let back = Routes::restore(&mut ByteReader::new(&bytes), 3, 16, 16).unwrap();
+        assert_eq!(back, routes, "as many routes as slots restore");
+        assert_eq!(
+            Routes::restore(&mut ByteReader::new(&bytes), 2, 16, 16),
+            Err(SaveError::Corrupt("more routes than slots")),
+            "one route more than slots"
+        );
+    }
+
+    #[test]
     fn the_ring_is_first_in_first_out_bounded_and_wraps() {
         let mut r = Route::IDLE;
         for c in 0..RING_CAP as u32 {

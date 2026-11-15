@@ -254,7 +254,12 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   goal's sector. The cells in the local heap and the parent of every cell of that rectangle must lie
   in it. Otherwise a cell number past the rectangle gives a row below it, and on a rectangle at the
   bottom edge of the map the step costs are read past the grid (a panic); refused as "a job's search
-  does not fit its stage" / "a field build's search does not fit its stage".
+  does not fit its stage" / "a field build's search does not fit its stage". `searching` must
+  belong to a stage that goes on with a search: a job searching in a stage that runs none (Begin,
+  Direct, Abstract, Smooth, Finish, or a Refine leg that pops, steps, arrives or has used up its
+  plan) or in a Refine leg whose cells are ready (which skips the search) is refused the same way;
+  the planner clears `searching` whenever a search ends, so no valid save has it. A job begun in an
+  older epoch than the service's is not judged: it replans without reading its memory.
 * **Formations**: the serial counter at 0, a formation numbered 0 or twice, `turn_wait` at or above
   the longest turn period (40), `patience` above the setting, `loose` above 20 (`LOOSE_TICKS`),
   members not strictly ascending or not slots, a leader that is not a member, a slot whose `form`

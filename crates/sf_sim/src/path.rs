@@ -459,7 +459,8 @@ impl Pathing {
     /// Breaks one piece of the service's state (save tests): 0..=3 and 15 the job (`Job`, 15 as
     /// its case 4), 4..=8 the planner's memory (`Work`), 9 the start slot, 10 a sector epoch too
     /// many, 11..=14 and 16..=18 the flowfields (`Fields`, as its cases 0..=3 and 4..=6), 19 the
-    /// local search's expansion count at its most (`Work` case 5).
+    /// local search's expansion count at its most (`Work` case 5), 20 and 21 a job searching in a
+    /// stage that runs no search (`Job` cases 5 and 6), 22 the service's epoch one past the job's.
     #[cfg(test)]
     pub(crate) fn corrupt_for_test(&mut self, what: u8) {
         match what {
@@ -469,6 +470,11 @@ impl Pathing {
             }
             16..=18 => self.fields.corrupt_for_test(what - 12),
             19 => self.work.corrupt_for_test(5),
+            22 => self.epoch = self.epoch.wrapping_add(1),
+            20 | 21 => {
+                let job = self.job.as_mut().expect("a job in flight");
+                job.corrupt_for_test(what - 15, &mut self.work);
+            }
             0..=3 => {
                 let job = self.job.as_mut().expect("a job in flight");
                 job.corrupt_for_test(what, &mut self.work);
@@ -514,7 +520,10 @@ impl Pathing {
     /// the local search a job or a field build has in flight fits the rectangle its stage
     /// searches ([`Job::search_fits`]).
     pub(crate) fn check_in_flight(&self, e: &Entities) -> crate::save::SaveResult<()> {
-        if let Some(job) = &self.job {
+        // A job begun in an older pathing epoch replans without reading its memory (`Job::work`
+        // checks the epoch first), so its memory may already have been overwritten by
+        // `refresh_sectors` and is not judged.
+        if let Some(job) = self.job.as_ref().filter(|j| j.epoch() == self.epoch) {
             crate::save::ensure(
                 job.search_fits(
                     &self.graphs[job.graph],

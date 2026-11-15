@@ -437,6 +437,12 @@ fn corruptions() -> Vec<Corruption> {
         ("a job's search does not fit its stage", |w| {
             w.pathing.corrupt_for_test(15)
         }),
+        ("a job's search does not fit its stage", |w| {
+            w.pathing.corrupt_for_test(20)
+        }),
+        ("a job's search does not fit its stage", |w| {
+            w.pathing.corrupt_for_test(21)
+        }),
         ("a field build out of range", |w| {
             w.pathing.corrupt_for_test(17)
         }),
@@ -524,6 +530,19 @@ fn every_impossible_path_or_formation_state_is_corrupt() {
             Err(SaveError::Corrupt(what)),
             "case {k}"
         );
+    }
+}
+
+/// A job begun in an older epoch replans without reading its memory, so memory that no longer
+/// fits its stage is not refused (after a map change `refresh_sectors` rebuilds with that memory).
+#[test]
+fn a_job_of_an_older_epoch_restores_whatever_its_search_memory() {
+    let mut w = mid_flight();
+    w.pathing.corrupt_for_test(15);
+    w.pathing.corrupt_for_test(22);
+    let mut back = World::restore(fresh(), &w.save().unwrap()).expect("an old job is not judged");
+    for _ in 0..60 {
+        back.step();
     }
 }
 

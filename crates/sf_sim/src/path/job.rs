@@ -1408,7 +1408,9 @@ impl Job {
 #[cfg(test)]
 impl Job {
     /// 0: more legs than a job refines; 1: a slot past the entities; 2: a ready leg without cells
-    /// (with `work`); 3: the smoothing past the raw route (save tests).
+    /// (with `work`); 3: the smoothing past the raw route; 4: a search past its sector; 5: a
+    /// search in flight in the abstract stage; 6: a search in flight with the leg's cells ready
+    /// (save tests).
     pub(crate) fn corrupt_for_test(&mut self, what: u8, work: &mut Work) {
         match what {
             0 => self.legs = REFINE_LEGS + 1,
@@ -1423,6 +1425,20 @@ impl Job {
                     work.raw.push((self.pos, self.start_cell));
                 }
                 self.sm_from = work.raw.len();
+            }
+            5 => {
+                // The abstract stage runs no local search.
+                self.phase = Phase::Abstract;
+                self.searching = true;
+            }
+            6 => {
+                // A Refine leg whose cells are ready skips its search, so `searching` never stays.
+                self.phase = Phase::Refine;
+                self.searching = true;
+                self.leg_ready = true;
+                if work.cells.is_empty() {
+                    work.cells.push(self.start_cell);
+                }
             }
             _ => {
                 // A search of the start sector in flight, with a cell past the sector in its heap.
@@ -1495,9 +1511,16 @@ impl Job {
     /// checks, after the graphs are rebuilt): the cells in its heap and their parents lie in the
     /// rectangle the job's stage searches. A search of another rectangle would read cells outside
     /// it, past the edge of the map.
+    ///
+    /// `searching` must belong to a stage that goes on with a search: a job searching in a stage
+    /// that runs none (or in a Refine leg whose cells are ready, which skips the search) would
+    /// carry the heap into the next search, which does not begin again, in a rectangle this check
+    /// never compared it against. The planner clears `searching` whenever a search ends.
     pub(crate) fn search_fits(&self, g: &ClassGraph, route: &Route, work: &Work) -> bool {
-        self.search_rect(g, route, work)
-            .is_none_or(|rect| work.local.fits(rect))
+        match self.search_rect(g, route, work) {
+            Some(rect) => !(self.phase == Phase::Refine && self.leg_ready) && work.local.fits(rect),
+            None => !self.searching,
+        }
     }
 }
 
