@@ -41,8 +41,8 @@
 // Veyran heavy gun team; a role of both factions has a model per faction (its `model` stays the
 // fallback for any other owner), a role of one faction or a neutral one names its file in `model`.
 // The infantry is Tijmen's set v3 (assets/set_v3), which is better than the set v4 figures:
-// demolition_team was always on it, WP11.6b put the rest back. The set v4 files
-// (assets/set_v4) are still the structures that WP11.6c has not replaced yet. Decor (trees,
+// demolition_team was always on it, WP11.6b put the rest back. Every structure role and mission
+// object is set v5 too since WP11.6c (with its build and damage states). Decor (trees,
 // rocks, ore stages, wrecks) is not a unit role and is not listed here.
 //
 // Build pictures (WP11.1, docs/rules/sidebar.md): `build_picture: (color: (r, g, b), label: "PWR", order: 10)`

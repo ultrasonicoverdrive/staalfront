@@ -1657,6 +1657,26 @@ mod tests {
         assert!((scaffolding[1] - 2.75).abs() < 0.01, "{scaffolding:?}");
     }
 
+    /// WP11.6c removed the set v4 fallback of WP11.6a: a set v5 state file that does not exist is no state
+    /// file, even when set v4 has one of the same name (restoring the fallback fails this).
+    #[test]
+    fn a_missing_set_v5_state_file_is_none_even_with_a_set_v4_one() {
+        let dir = std::env::temp_dir().join(format!("sf_roster_state_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("set_v4")).unwrap();
+        std::fs::create_dir_all(dir.join("set_v5")).unwrap();
+        std::fs::write(dir.join("set_v5/meridian_barracks.glb"), b"x").unwrap();
+        std::fs::write(dir.join("set_v4/meridian_barracks_damaged.glb"), b"x").unwrap();
+        assert_eq!(
+            super::state_file(&dir, "set_v5/meridian_barracks_damaged.glb"),
+            None
+        );
+        assert_eq!(
+            super::state_file(&dir, "set_v5/meridian_barracks.glb").as_deref(),
+            Some("set_v5/meridian_barracks.glb")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// The damaged and heavily damaged models of the art set are the roster's damaged looks: every role and
     /// look whose finished file has a `_damaged` / `_heavily_damaged` sibling on disk has that look, nothing
     /// else has one, and the list is pinned (WP6.8).

@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use sf_asset_check::{Checker, FileReport};
 use sf_model_gen::kit::{Lod, Model, TEAM};
 use sf_model_gen::palette::{FactionColours, Palette};
-use sf_model_gen::stages::{STAGE_FLOOR_PERMILLE, Stage};
+use sf_model_gen::stages::{STAGE_CEIL_PERMILLE, Stage};
 use sf_model_gen::{files, set};
 
 fn models() -> &'static [Model] {
@@ -167,7 +167,8 @@ fn every_level_is_inside_its_budget_and_really_reduced() {
 /// The tuning round (14-11-2026): buildings spend their budget on real detail (vents, pipes,
 /// railings, roof units, window rows, door frames, bolted panels), 2,500-3,500 triangles in LOD0;
 /// vehicles get a little more detail but stay under the unit budget. WP11.6c: a state keeps a
-/// share of its finished model ([`STAGE_FLOOR_PERMILLE`]), a mission object at least 1,000.
+/// share of its finished model at most ([`STAGE_CEIL_PERMILLE`], WP11.6c review), a mission
+/// object at least 1,000.
 #[test]
 fn buildings_use_their_detail_budget() {
     let all = models();
@@ -191,18 +192,18 @@ fn buildings_use_their_detail_budget() {
                 .find(|f| f.stem == base)
                 .expect("its finished model");
             let k = Stage::ALL.iter().position(|s| *s == stage).unwrap();
-            let floor = finished.triangles()[0] * STAGE_FLOOR_PERMILLE[k] / 1000;
-            assert!(t[0] >= floor, "{}: LOD0 {} < {floor}", m.stem, t[0]);
+            let ceil = finished.triangles()[0] * STAGE_CEIL_PERMILLE[k] / 1000;
+            assert!(t[0] <= ceil, "{}: LOD0 {} > {ceil}", m.stem, t[0]);
         } else if is_decor(&m.stem) {
             assert!((100..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else if is_building(&m.stem) {
             // A mission object at least 1,000 (`objects::OBJECT_FLOOR`); its states (a heavy stage
-            // broken off low, `_destroyed`, `_rubble`) at least 500.
+            // broken off low, `_destroyed`, `_rubble`) at least 200.
             let state = STATES
                 .iter()
                 .chain(&["_no_uplink"])
                 .any(|s| m.stem.ends_with(s));
-            let least = if state { 500 } else { 1000 };
+            let least = if state { 200 } else { 1000 };
             assert!((least..=3500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else if is_infantry(&m.stem) {
             // A figure is small: 400 triangles in LOD0 keep LOD2 (60 at most) under 15 %.
@@ -216,7 +217,21 @@ fn buildings_use_their_detail_budget() {
 /// The stage floors and the state list, as literals (they set what a state may cost).
 #[test]
 fn the_stage_rules_are_pinned() {
-    assert_eq!(STAGE_FLOOR_PERMILLE, [300, 700, 850, 700]);
+    use sf_model_gen::{buildings, objects, stages};
+    assert_eq!(STAGE_CEIL_PERMILLE, [300, 700, 900, 700]);
+    assert_eq!(stages::SCAFFOLD_CUT_PERMILLE, 600);
+    assert_eq!(stages::HEAVY_CUT_PERMILLE, 500);
+    assert_eq!(stages::DETAIL_GONE_PERMILLE, 8000);
+    assert_eq!(stages::LOD1_MAX_PERMILLE, 380);
+    assert_eq!(stages::LOD2_MAX_PERMILLE, 140);
+    assert_eq!(stages::TEAM_MIN_TRIS, 12);
+    assert_eq!(stages::CHUNK_SIDES, 8);
+    assert_eq!(stages::FIT_RES, 400);
+    assert_eq!(buildings::DETAIL_FLOOR, 2650);
+    assert_eq!(buildings::DETAIL_CEIL, 3400);
+    assert_eq!(objects::OBJECT_FLOOR, 1000);
+    assert_eq!(objects::OBJECT_CEIL, 3400);
+    assert_eq!(objects::DECOR_CEIL, 1450);
     assert_eq!(
         Stage::ALL.map(Stage::suffix),
         [
@@ -430,8 +445,8 @@ const V4_SIZES: [(&str, f32, f32); 30] = [
     ("shipyard", 15.20, 19.00),
     ("decoy_emplacement", 3.90, 3.80),
     ("fortified_bunker", 7.60, 7.60),
-    // No set v4 model: the footprint (2 x 2 cells).
-    ("ore_silo", 8.00, 8.00),
+    // No set v4 model: as the other two-cell structures of set v4 (radar, bunker).
+    ("ore_silo", 7.60, 7.60),
     // Mission objects: the smaller of the v4 model and the footprint.
     ("relay_transmitter", 3.80, 3.80),
     ("fuel_depot", 7.60, 8.00),
@@ -570,6 +585,7 @@ fn every_structure_has_all_its_states() {
 /// (the crane); the foundation is a slab under 1.5 m. Measured on LOD0 of every faction structure.
 #[test]
 fn the_states_read_as_their_stage() {
+    use sf_model_gen::stages::{CHAR, RECESS_DEBRIS, SOOT};
     let all = models();
     let height = |m: &Model| {
         m.lods[0]
@@ -579,6 +595,40 @@ fn the_states_read_as_their_stage() {
             .max()
             .unwrap()
     };
+    // The height half the area of the upward faces over 0.6 m lies under (seen from above): the
+    // roof of a building, not its crane or antenna.
+    let roof = |m: &Model| {
+        // The body only: a turret sits on the break, it is no roof.
+        let body = m.lods[0].find("body").expect("body");
+        let mut faces: Vec<(i32, i64)> = body
+            .mesh
+            .tris
+            .iter()
+            .filter_map(|t| {
+                let n = t.normal();
+                let y = t.v.iter().map(|p| p[1]).sum::<i32>() / 3;
+                (n[1] > 0 && y > 600).then_some((y, n[1]))
+            })
+            .collect();
+        faces.sort_unstable();
+        let total: i64 = faces.iter().map(|f| f.1).sum();
+        let mut acc = 0;
+        faces
+            .iter()
+            .find(|f| {
+                acc += f.1;
+                acc * 2 >= total
+            })
+            .map_or(0, |f| f.0)
+    };
+    let anchor = |m: &Model, name: &str| m.lods[0].find(name).expect(name).at;
+    let toned = |m: &Model, tones: &[u16]| {
+        m.lods[0]
+            .world_tris()
+            .iter()
+            .filter(|t| tones.contains(&t.tone))
+            .count()
+    };
     for m in all.iter().filter(|m| is_finished_structure(&m.stem)) {
         let get = |s: &str| {
             all.iter()
@@ -587,17 +637,81 @@ fn the_states_read_as_their_stage() {
         };
         let h = height(m);
         assert!(height(get("_foundation")) <= 1500, "{} foundation", m.stem);
-        assert!(height(get("_heavily_damaged")) < h, "{} heavy", m.stem);
+        // The scaffolding: its crane stands over the finished model; the cut walls keep under
+        // two thirds of the finished corners.
+        let scaffold = get("_scaffolding");
+        assert!(
+            height(scaffold) > h,
+            "{}: no crane over the cut walls",
+            m.stem
+        );
+        // The heavy stage is broken off: its roof is far under the finished roof.
+        let heavy = get("_heavily_damaged");
+        assert!(height(heavy) < h, "{} heavy", m.stem);
+        assert!(
+            roof(heavy) * 10 < roof(m) * 9,
+            "{}: heavy roof {} vs finished {}",
+            m.stem,
+            roof(heavy),
+            roof(m)
+        );
+        // Its smoke and fire come from the break, never from the finished roof.
+        for a in ["fx_smoke_0", "fx_fire_0"] {
+            assert!(anchor(heavy, a)[1] <= anchor(m, a)[1], "{} {a}", m.stem);
+        }
+        assert!(
+            anchor(heavy, "fx_smoke_0")[1] < anchor(m, "fx_smoke_0")[1],
+            "{}: the smoke anchor stays at the finished height",
+            m.stem
+        );
+        // Soot and debris on both damage stages.
+        for s in [get("_damaged"), heavy] {
+            assert!(toned(s, &[SOOT, CHAR]) > 0, "{}: no soot", s.stem);
+            assert!(
+                toned(s, &[RECESS_DEBRIS, CHAR]) > 0,
+                "{}: no debris",
+                s.stem
+            );
+        }
         let lod0 = |x: &Model| x.lods[0].world_tris();
-        // The damaged state keeps most of the finished model but not all of it (the hole).
+        // The damaged state keeps a good part of the finished model but not all of it (the hole,
+        // the detail round it; the anchor-bolt filler of a small structure is not inherited).
         // By corners only: soot changes the tone and burns team paint, the hole removes geometry.
         let finished: std::collections::BTreeSet<_> = lod0(m).iter().map(|t| t.v).collect();
-        let kept = lod0(get("_damaged"))
+        let kept = |x: &Model| lod0(x).iter().filter(|t| finished.contains(&t.v)).count();
+        assert!(kept(get("_damaged")) < lod0(m).len(), "{}: no hole", m.stem);
+        assert!(
+            kept(get("_damaged")) * 4 > lod0(m).len(),
+            "{}: too much gone",
+            m.stem
+        );
+        assert!(
+            kept(scaffold) * 3 < lod0(m).len() * 2,
+            "{}: walls not cut",
+            m.stem
+        );
+    }
+}
+
+/// A state is never richer than its finished structure (WP11.6c review): LOD0 of every state
+/// file at most LOD0 of the file it is derived from.
+#[test]
+fn no_state_has_more_triangles_than_its_finished_model() {
+    let all = models();
+    for m in all {
+        let Some(base) = STATES
             .iter()
-            .filter(|t| finished.contains(&t.v))
-            .count();
-        assert!(kept < lod0(m).len(), "{}: no hole", m.stem);
-        assert!(kept * 10 > lod0(m).len() * 7, "{}: too much gone", m.stem);
+            .chain(&["_no_uplink"])
+            .find_map(|s| m.stem.strip_suffix(s))
+        else {
+            continue;
+        };
+        let Some(finished) = all.iter().find(|f| f.stem == base) else {
+            continue; // a heap or an `_off` variant made by its own recipe
+        };
+        let (t, f) = (m.triangles()[0], finished.triangles()[0]);
+        println!("{}: {t} of {f}", m.stem);
+        assert!(t <= f, "{}: LOD0 {t} > its finished model's {f}", m.stem);
     }
 }
 

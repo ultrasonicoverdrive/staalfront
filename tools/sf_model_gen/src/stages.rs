@@ -399,11 +399,14 @@ pub fn debris(
 ) -> Mesh {
     let mut m = Mesh::new();
     for i in 0..n {
-        let h = hash(seed * 1013 + i);
+        let h = hash(seed.wrapping_mul(1013).wrapping_add(i));
         let side = i % 4;
         let along = |half: i32| (h as i32 * 2 - 1000) * half / 1000;
         let gap = |inner: i32, outer: i32| {
-            inner + (hash(seed * 7 + i * 13) as i32) * (outer - r - inner).max(1) / 1000
+            inner
+                + (hash(seed.wrapping_mul(7).wrapping_add(i.wrapping_mul(13))) as i32)
+                    * (outer - r - inner).max(1)
+                    / 1000
         };
         let (x, z) = match side {
             0 => (gap(hx, ox), along(oz - r)),
@@ -411,9 +414,11 @@ pub fn debris(
             2 => (along(ox - r), gap(hz, oz)),
             _ => (along(ox - r), -gap(hz, oz)),
         };
-        let rr = r * (500 + hash(seed + i * 3) as i32 / 2) / 1000;
+        let rr = r * (500 + hash(seed.wrapping_add(i.wrapping_mul(3))) as i32 / 2) / 1000;
         let mat = mats[(i as usize) % mats.len()];
-        m.add(chunk([x, 0, z], rr, rr * 3 / 4, seed + i, mat, lod).toned(RECESS_DEBRIS));
+        m.add(
+            chunk([x, 0, z], rr, rr * 3 / 4, seed.wrapping_add(i), mat, lod).toned(RECESS_DEBRIS),
+        );
     }
     m
 }
@@ -460,6 +465,7 @@ pub fn faces_up(t: &Tri) -> bool {
 
 /// A level taken apart: the body's triangles in model space (every node except the turret
 /// subtree and the anchors), the turret subtree with its model-space origin, and the anchors.
+#[derive(Clone)]
 pub struct Parts {
     pub body: Mesh,
     pub turret: Option<(Node, P)>,
@@ -549,7 +555,7 @@ pub fn footprint(m: &Model) -> Footprint {
 /// Build the stage of a finished model. `slab` is the height of its platform (the scaffolding and
 /// the debris stand on it). `alt` is the paint team candidates fall back to.
 pub fn derive(built: &Model, stage: Stage, slab: i32) -> Model {
-    derive_as(built, stage, slab, stage.suffix(), 500)
+    derive_as(built, stage, slab, stage.suffix(), HEAVY_CUT_PERMILLE)
 }
 
 /// [`derive`] with its own file suffix and, for [`Stage::Heavy`], the height of the break in
@@ -575,7 +581,20 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
             let children = match stage {
                 Stage::Foundation => foundation(&f, slab, &parts, lod, seed, &stem, teamed),
                 Stage::Scaffolding => scaffolding(&f, slab, parts, lod, seed, &stem, teamed),
-                Stage::Damaged => damaged(&f, slab, parts, lod, seed, &stem, teamed),
+                Stage::Damaged => {
+                    // The hole grows (1, 1.5, 2, 3 times) until the stage is inside its ceiling
+                    // (a tall thin structure, a mast, loses little to a hole of the first size).
+                    let ceil = built.triangles()[0] * STAGE_CEIL_PERMILLE[2] / 1000;
+                    let mut out = Vec::new();
+                    for grow in HOLE_GROWTH {
+                        out = damaged(&f, slab, parts.clone(), lod, seed, &stem, teamed, grow);
+                        let n: usize = out.iter().map(Node::triangles).sum();
+                        if !lod.has(0) || n <= ceil {
+                            break;
+                        }
+                    }
+                    out
+                }
                 Stage::Heavy => heavy(&f, slab, parts, lod, seed, &stem, teamed, cut),
             };
             Node {
@@ -607,6 +626,12 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
 /// scaffolding, damaged, heavily damaged (WP11.6c review: a stage is never richer than the
 /// finished structure).
 pub const STAGE_CEIL_PERMILLE: [usize; 4] = [300, 700, 900, 700];
+/// The sizes a damage hole tries, in halves of its first radius ([`derive`]).
+pub const HOLE_GROWTH: [i32; 4] = [2, 3, 4, 6];
+/// The scaffolding cuts the finished body at this share of its roof level (thousandths).
+pub const SCAFFOLD_CUT_PERMILLE: i32 = 600;
+/// The heavily damaged stage breaks off at this share of the roof level (thousandths).
+pub const HEAVY_CUT_PERMILLE: i32 = 500;
 
 /// How far round a damage hole the small detail is gone, in thousandths of the hole's radius.
 pub const DETAIL_GONE_PERMILLE: i32 = 8000;
@@ -658,9 +683,9 @@ fn foundation(
     let (hx, hz) = (f.hx - 100, f.hz - 100);
     let y = slab.clamp(200, 450);
     let mut m = bevel_box([-hx, 0, -hz], [hx, y, hz], lod.bevel(60), PAINT2, PAINT2);
-    // Formwork boards round the slab, standing a little proud.
+    // Formwork boards round the slab, standing a little proud (not in the far view).
     let b = 90;
-    for s in [-1, 1] {
+    for s in [-1, 1].into_iter().filter(|_| lod.has(1)) {
         m.add(
             cuboid(
                 [-hx - b, 0, s * hz - b],
@@ -683,34 +708,34 @@ fn foundation(
     let nx = ((2 * hx) / step).max(1);
     let nz = ((2 * hz) / step).max(1);
     let mut cands = Vec::new();
+    // The foundation's markings stay narrow at LOD2 too (no far-view widening: a slab seen
+    // from above is all markings).
+    let narrow = if lod.has(1) { lod } else { Lod(1) };
     let beam_h = 18;
     for i in 1..nx.max(2) {
         let x = -hx + 2 * hx * i / nx.max(2);
-        cands.push(strip(
-            [x - 150, y, -hz + 300],
-            [x + 150, y + beam_h, hz - 300],
-            lod,
-        ));
+        // In two halves, so a small slab does not overshoot the share with one beam.
+        for (a, b) in [(-hz + 300, -100), (100, hz - 300)] {
+            cands.push(strip([x - 150, y, a], [x + 150, y + beam_h, b], narrow));
+        }
     }
     for k in 1..nz.max(2) {
         let z = -hz + 2 * hz * k / nz.max(2);
-        cands.push(strip(
-            [-hx + 300, y, z - 150],
-            [hx - 300, y + beam_h, z + 150],
-            lod,
-        ));
+        for (a, b) in [(-hx + 300, -100), (100, hx - 300)] {
+            cands.push(strip([a, y, z - 150], [b, y + beam_h, z + 150], narrow));
+        }
     }
     // Survey stripes along the slab edge (inside the boards).
     for s in [-1, 1] {
         cands.push(strip(
             [-hx + 200, y, s * (hz - 330) - 130],
             [hx - 200, y + 18, s * (hz - 330) + 130],
-            lod,
+            narrow,
         ));
         cands.push(strip(
             [s * (hx - 330) - 130, y, -hz + 520],
             [s * (hx - 330) + 130, y + 18, hz - 520],
-            lod,
+            narrow,
         ));
     }
     // Interleave: beams and edge stripes alternate so the markings spread evenly.
@@ -844,7 +869,7 @@ fn scaffolding(
     stem: &str,
     teamed: bool,
 ) -> Vec<Node> {
-    let cut = slab + (roof_level(&parts, slab) - slab) * 60 / 100;
+    let cut = slab + (roof_level(&parts, slab) - slab) * SCAFFOLD_CUT_PERMILLE / 1000;
     let _ = f.top;
     let mut m = clip(&parts.body, Plane::level(cut));
     // Bare walls: the facade detail (panel lines, bolts, louvres, glass) comes last.
@@ -1062,9 +1087,9 @@ fn strip(lo: P, hi: P, lod: Lod) -> Mesh {
     if !lod.has(1) {
         let k = if hi[0] - lo[0] < hi[2] - lo[2] { 0 } else { 2 };
         let mid = (lo[k] + hi[k]) / 2;
-        // Never wider than a tenth of its length (a short stripe on a small slab stays narrow).
+        // Never wider than a fifteenth of its length (a short stripe on a small slab stays narrow).
         let len = (hi[2 - k] - lo[2 - k]).abs();
-        let w = FAR_STRIPE_MM.min(len / 10).max(hi[k] - lo[k]);
+        let w = FAR_STRIPE_MM.min(len / 15).max(hi[k] - lo[k]);
         lo[k] = mid - w / 2;
         hi[k] = mid + w / 2;
     }
@@ -1106,8 +1131,13 @@ fn debris_cands(
     // Fallen band pieces on the platform edge: short narrow strips along the edges.
     let pieces = if lod.has(1) { 20 } else { 10 };
     for i in 0..pieces {
-        let h = hash(seed * 3 + i);
-        let len = 900 + h as i32;
+        let h = hash(seed.wrapping_mul(3).wrapping_add(i));
+        // At the far level a short piece: one long one overshoots the share of a small heap.
+        let len = if lod.has(1) {
+            900 + h as i32
+        } else {
+            (900 + h as i32).min(f.hx.min(f.hz) / 3)
+        };
         let along_x = i % 2 == 0;
         let s = if i % 4 < 2 { 1 } else { -1 };
         let (x, z) = if along_x {
@@ -1143,8 +1173,9 @@ fn damaged(
     seed: u32,
     stem: &str,
     teamed: bool,
+    grow: i32,
 ) -> Vec<Node> {
-    let r = (f.hx.min(f.hz) * 22 / 100).clamp(500, 1800);
+    let r = (f.hx.min(f.hz) * 22 / 100).clamp(500, 1800) * grow / 2;
     // Of four places on the roof, the one that takes the least team colour with it (a hole in a
     // band would leave too little of it on a small structure).
     let team_near = |c: P| {
@@ -1163,13 +1194,19 @@ fn damaged(
     let c = (1..=4)
         .map(|k| hole_at(&parts, slab, seed, k))
         .min_by_key(|c| {
-            // A place where the hole takes nothing is no hole at all: last choice.
+            // A place where the hole takes nothing is no hole at all: last choice; of the rest the
+            // one that takes the least team colour, then the most geometry.
             let r2 = i64::from(r) * i64::from(r);
-            let takes = parts.body.tris.iter().any(|t| {
-                let d = sub(centroid(t), *c);
-                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= r2
-            });
-            (!takes, team_near(*c))
+            let takes = parts
+                .body
+                .tris
+                .iter()
+                .filter(|t| {
+                    let d = sub(centroid(t), *c);
+                    d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= r2
+                })
+                .count();
+            (takes == 0, team_near(*c), std::cmp::Reverse(takes))
         })
         .expect("four places");
     let mut m = parts.body.clone();
@@ -1195,10 +1232,14 @@ fn damaged(
         let [x, z] = crate::kit::on_circle(if slab == 0 { r / 4 } else { r }, i as i32, 8);
         m.add(
             chunk(
-                [c[0] + x, c[1] - 120, c[2] + z],
+                [
+                    (c[0] + x).clamp(f.cx - f.hx + 330, f.cx + f.hx - 330),
+                    c[1] - 120,
+                    (c[2] + z).clamp(f.cz - f.hz + 330, f.cz + f.hz - 330),
+                ],
                 320,
                 260,
-                seed + i,
+                seed.wrapping_add(i),
                 PAINT2,
                 lod,
             )
@@ -1290,7 +1331,7 @@ fn heavy(
             let x = mid[0] - ix + (2 * ix) * (2 * i + 1) / (2 * grid) + jx;
             let z = mid[2] - iz + (2 * iz) * (2 * k + 1) / (2 * grid) + jz;
             let hh = ((plane.height_at(x, z) - floor)
-                * (25 + hash(seed + (i * 7 + k) as u32) as i32 / 30)
+                * (25 + hash(seed.wrapping_add((i * 7 + k) as u32)) as i32 / 30)
                 / 100)
                 .max(300);
             let rr = (ix.min(iz) * 3 / (2 * grid)).clamp(400, 2400);
@@ -1300,7 +1341,7 @@ fn heavy(
                     [x, floor, z],
                     rr,
                     hh,
-                    seed + 50 + (i * grid + k) as u32,
+                    seed.wrapping_add(50 + (i * grid + k) as u32),
                     mat,
                     lod,
                 )

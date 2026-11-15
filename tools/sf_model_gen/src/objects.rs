@@ -706,7 +706,7 @@ pub fn rubble(w: i32, h: i32) -> Model {
         let (nx, nz) = ((2 * hx / step).clamp(1, cap), (2 * hz / step).clamp(1, cap));
         for i in 0..nx {
             for k in 0..nz {
-                let s = seed * 97 + (i * nz + k) as u32;
+                let s = seed.wrapping_mul(97).wrapping_add((i * nz + k) as u32);
                 let x =
                     -hx + (2 * hx) * (2 * i + 1) / (2 * nx) + (hash(s) as i32 - 500) * step / 3000;
                 let z = -hz
@@ -723,7 +723,7 @@ pub fn rubble(w: i32, h: i32) -> Model {
         }
         if lod.has(1) {
             for k in 0..(w * h).min(6) {
-                let s = seed + k as u32;
+                let s = seed.wrapping_add(k as u32);
                 let x = (hash(s * 7) as i32 - 500) * hx / 800;
                 let z = (hash(s * 11) as i32 - 500) * hz / 800;
                 let x = x.clamp(-hx + 1000, hx - 1000);
@@ -733,7 +733,7 @@ pub fn rubble(w: i32, h: i32) -> Model {
         }
         if lod.has(0) {
             for k in 0..(w * h * 3).min(18) {
-                let s = seed * 5 + k as u32;
+                let s = seed.wrapping_mul(5).wrapping_add(k as u32);
                 let x = ((hash(s) as i32 - 500) * hx / 700).clamp(-hx + 200, hx - 200);
                 let z = ((hash(s ^ 1) as i32 - 500) * hz / 700).clamp(-hz + 200, hz - 200);
                 m.add(
