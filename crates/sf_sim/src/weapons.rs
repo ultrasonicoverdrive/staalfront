@@ -649,6 +649,12 @@ impl PartialEq for SplashIndex {
 impl Eq for SplashIndex {}
 
 impl Arsenal {
+    /// Whether no projectile was ever launched: the store is as a fresh world has it (WP13.1a
+    /// saves a world only then).
+    pub(crate) fn projectiles_at_start(&self) -> bool {
+        self.projectiles == Projectiles::default()
+    }
+
     /// Checks `table` against the unit table and builds the lookup from unit-table position
     /// to weapon slots.
     pub fn new(table: WeaponTable, units: &UnitTable) -> Result<Arsenal, WeaponsError> {

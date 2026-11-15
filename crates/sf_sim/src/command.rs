@@ -348,6 +348,26 @@ impl CommandQueue {
         CommandQueue::default()
     }
 
+    /// The two maps, for the save file (WP13.1a). Destructured without `..`: a new field fails to
+    /// compile until the save writes it.
+    pub(crate) fn parts(
+        &self,
+    ) -> (
+        &BTreeMap<(Tick, PlayerId, u64), Command>,
+        &BTreeMap<PlayerId, u64>,
+    ) {
+        let CommandQueue { pending, next_seq } = self;
+        (pending, next_seq)
+    }
+
+    /// A queue from the two maps of [`CommandQueue::parts`], as a save file read them back.
+    pub(crate) fn from_parts(
+        pending: BTreeMap<(Tick, PlayerId, u64), Command>,
+        next_seq: BTreeMap<PlayerId, u64>,
+    ) -> CommandQueue {
+        CommandQueue { pending, next_seq }
+    }
+
     /// The number of pending commands.
     pub fn len(&self) -> usize {
         self.pending.len()

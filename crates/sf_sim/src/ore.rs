@@ -163,6 +163,12 @@ impl Ore {
         self.version
     }
 
+    /// Counts a change without making one (save tests).
+    #[cfg(test)]
+    pub(crate) fn version_bump_for_test(&mut self) {
+        self.version += 1;
+    }
+
     /// Takes up to `want` from `cell`; returns what it gave (zero outside a field and on
     /// an empty cell). The only way an amount goes down; the harvester (WP7.2) calls it
     /// inside the tick, and so does `Command::TakeOre`.

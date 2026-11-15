@@ -162,7 +162,7 @@ impl TargetingConfig {
             && (1..=MAX_PURSUIT_RESET_TICKS).contains(&self.pursuit_reset)
     }
 
-    fn write_hash(&self, h: &mut Fnv1a64) {
+    pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
         h.write_bytes(SETTINGS_TAG);
         h.write_bytes(&self.scan_cooldown.to_le_bytes());
         h.write_fx(self.pursuit);

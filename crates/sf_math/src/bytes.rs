@@ -126,16 +126,21 @@ impl ByteWriter {
         Ok(())
     }
 
+    /// Bytes as they are, without a length (a magic number).
+    pub fn raw(&mut self, v: &[u8]) {
+        self.out.extend_from_slice(v);
+    }
+
     /// A section: the tag, a `u32` length, then the bytes `body` writes.
-    pub fn section(
+    pub fn section<E: From<ByteError>>(
         &mut self,
         tag: u8,
-        body: impl FnOnce(&mut ByteWriter) -> Result<(), ByteError>,
-    ) -> Result<(), ByteError> {
+        body: impl FnOnce(&mut ByteWriter) -> Result<(), E>,
+    ) -> Result<(), E> {
         let mut inner = ByteWriter::new();
         body(&mut inner)?;
         self.u8(tag);
-        self.bytes(&inner.out)
+        Ok(self.bytes(&inner.out)?)
     }
 }
 
@@ -182,7 +187,7 @@ impl<'a> ByteReader<'a> {
         Ok(self.array::<1>()?[0])
     }
 
-    /// A bool; [`ByteError::BadBool`] for any other byte than 0 and 1.
+    /// A bool; [`ByteError::BadBool`] for any other byte than 0 and 1 (false, true).
     pub fn bool(&mut self) -> Result<bool, ByteError> {
         match self.u8()? {
             0 => Ok(false),
@@ -275,7 +280,7 @@ mod tests {
         w.bytes(b"staal").unwrap();
         w.section(7, |s| {
             s.u32(9);
-            Ok(())
+            Ok::<(), ByteError>(())
         })
         .unwrap();
         w.finish()
@@ -327,7 +332,10 @@ mod tests {
         read_all(&data).unwrap();
         // Little-endian, fixed width: the u16 is EF BE, the u32 follows it.
         assert_eq!(&data[3..9], &[0xEF, 0xBE, 0xEF, 0xBE, 0xAD, 0xDE]);
-        assert_eq!(data.len(), 1 + 2 + 2 + 4 + 8 + 4 + 8 + 4 + 4 + 5 + 1 + 4 + 4);
+        assert_eq!(
+            data.len(),
+            1 + 2 + 2 + 4 + 8 + 4 + 8 + 4 + 4 + 5 + 1 + 4 + 4
+        );
     }
 
     #[test]
@@ -379,7 +387,7 @@ mod tests {
     fn bad_bools_and_sections_are_errors() {
         assert_eq!(ByteReader::new(&[2]).bool(), Err(ByteError::BadBool));
         let mut w = ByteWriter::new();
-        w.section(1, |_| Ok(())).unwrap();
+        w.section(1, |_| Ok::<(), ByteError>(())).unwrap();
         let data = w.finish();
         assert_eq!(
             ByteReader::new(&data).section(2).err(),

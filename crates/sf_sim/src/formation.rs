@@ -478,6 +478,18 @@ impl Formations {
     }
 
     /// Whether the world has a formation (the checksum has a section then).
+    /// Whether the formations are as a fresh world has them: none made yet (WP13.1a saves a world
+    /// only then). The settings and the stats do not count. Destructured without `..`.
+    pub(crate) fn at_start(&self) -> bool {
+        let Formations {
+            config: _,
+            list,
+            next_serial,
+            stats: _,
+        } = self;
+        list.is_empty() && *next_serial == Formations::new().next_serial
+    }
+
     pub(crate) fn any(&self) -> bool {
         !self.list.is_empty()
     }

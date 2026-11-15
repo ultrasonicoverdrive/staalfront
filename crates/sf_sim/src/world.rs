@@ -346,7 +346,7 @@ pub struct World {
     /// Free slot indices, used as a stack: the last freed is reused first.
     pub(crate) free: Vec<u32>,
     /// Number of live entities (derived from `entities.alive`).
-    live: u32,
+    pub(crate) live: u32,
     /// Spawns so far; gives every entity its own random stream.
     pub(crate) spawn_serial: u64,
     /// The terrain type of every cell. Fixed at creation.
@@ -413,8 +413,12 @@ pub struct World {
     /// that was given no settings.
     pub(crate) destruction: Destruction,
     pub(crate) queue: CommandQueue,
-    /// `history[k]` is the checksum after tick `k` ran.
+    /// `history[k]` is the checksum after tick `history_base + k` ran.
     pub(crate) history: Vec<u64>,
+    /// The first tick of `history`: zero for a world that ran from the start, the tick it was
+    /// restored at for a world loaded from a save (WP13.1a), whose history is not in the file.
+    /// Not hashed (the history is not).
+    pub(crate) history_base: Tick,
 }
 
 impl fmt::Debug for World {
@@ -850,6 +854,7 @@ impl World {
             destruction: Destruction::default(),
             queue: CommandQueue::new(),
             history: Vec::new(),
+            history_base: Tick::ZERO,
         }
     }
 
@@ -1420,16 +1425,24 @@ impl World {
         &self.queue
     }
 
-    /// The checksums of all executed ticks: entry `k` is the checksum of the
-    /// world right after tick `k` ran (when [`World::tick`] became `k + 1`).
-    /// Two worlds that stay in sync have equal histories.
+    /// The checksums of all executed ticks since [`World::checksum_history_start`]: entry `k` is
+    /// the checksum of the world right after tick `start + k` ran (when [`World::tick`] became
+    /// `start + k + 1`). The start is zero except for a world restored from a save
+    /// ([`World::restore`]), which begins a new history at the tick it was saved at. Two worlds
+    /// that stay in sync have equal histories.
     pub fn checksum_history(&self) -> &[u64] {
         &self.history
     }
 
-    /// The checksum right after tick `tick` ran, if it has.
+    /// The tick of the first entry of [`World::checksum_history`].
+    pub fn checksum_history_start(&self) -> Tick {
+        self.history_base
+    }
+
+    /// The checksum right after tick `tick` ran, if it has and it is in the history.
     pub fn checksum_after(&self, tick: Tick) -> Option<u64> {
-        usize::try_from(tick.0)
+        let k = tick.0.checked_sub(self.history_base.0)?;
+        usize::try_from(k)
             .ok()
             .and_then(|k| self.history.get(k).copied())
     }
@@ -2188,7 +2201,7 @@ impl Birth {
 }
 
 /// The cells of a footprint counted from its anchor, row by row.
-fn footprint_cells(anchor: Cell, footprint: Footprint) -> impl Iterator<Item = Cell> {
+pub(crate) fn footprint_cells(anchor: Cell, footprint: Footprint) -> impl Iterator<Item = Cell> {
     let (w, h) = (u32::from(footprint.width), u32::from(footprint.height));
     (anchor.y..anchor.y.saturating_add(h))
         .flat_map(move |y| (anchor.x..anchor.x.saturating_add(w)).map(move |x| Cell::new(x, y)))
