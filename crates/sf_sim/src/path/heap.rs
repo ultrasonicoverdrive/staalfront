@@ -155,9 +155,11 @@ impl IndexedHeap {
         ensure(r.usize()? == capacity, "a search heap has another size")?;
         let heap = crate::save::get_u32s(r)?;
         ensure(heap.len() <= capacity, "a search heap holds too much")?;
-        let n = r.count(16)?;
-        ensure(n == capacity, "a search heap has another size")?;
-        let key: Vec<Key> = (0..n)
+        ensure(
+            r.remaining() >= capacity.saturating_mul(16),
+            "a search heap has another size",
+        )?;
+        let key: Vec<Key> = (0..capacity)
             .map(|_| Ok((r.u64()?, r.u64()?)))
             .collect::<SaveResult<_>>()?;
         let mut pos = vec![NOT_IN; capacity];

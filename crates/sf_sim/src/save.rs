@@ -867,9 +867,9 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         kind,
         owner,
         pos,
-        // Derived: the position before the last step, for render interpolation only; the next step
-        // sets it before anything reads it. Restored equal to `pos`.
-        prev_pos: _,
+        // Saved (WP13.1b): the position before the last step. Not hashed, but the formation pass
+        // reads it (how far the leader moved) before the movement stage sets it again.
+        prev_pos,
         facing,
         // Derived like `prev_pos`.
         prev_facing: _,
@@ -918,6 +918,7 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         w.u16(kind[i].0);
         w.u8(owner[i].0);
         put_vec2(w, pos[i]);
+        put_vec2(w, prev_pos[i]);
         w.u8(facing[i].raw());
         w.u8(behavior[i].tag());
         put_opt_vec2(w, target[i]);
@@ -974,7 +975,10 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         if !inside(e.pos[i]) {
             return Err(SaveError::Corrupt("an entity stands outside the map"));
         }
-        e.prev_pos[i] = e.pos[i];
+        e.prev_pos[i] = get_vec2(r)?;
+        if !inside(e.prev_pos[i]) {
+            return Err(SaveError::Corrupt("an entity stood outside the map"));
+        }
         e.facing[i] = Facing::new(r.u8()?);
         e.prev_facing[i] = e.facing[i];
         e.behavior[i] = get_behavior(r)?;
