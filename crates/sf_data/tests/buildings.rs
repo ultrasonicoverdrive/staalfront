@@ -418,7 +418,7 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 /// ai_economy, ai_rebuild and ai_deadlock scenarios (WP9.1b-2) are copies of those, and the ai_scout scenario
 /// (WP9.1c-1) is a copy of the shipped file, and so are the ai_vs_passive and ai_raid scenarios (WP9.1c-2) and ai_raid_guard (WP9.2a), and ai_bounce and ai_harvest_raid (WP9.3a-1).
 /// Every other copy predates the block.
-const COPIES_WITH_BLOCKS: [&str; 17] = [
+const COPIES_WITH_BLOCKS: [&str; 19] = [
     "placement_defs",
     "harvest_defs",
     "match_defs",
@@ -432,6 +432,8 @@ const COPIES_WITH_BLOCKS: [&str; 17] = [
     "ai_deadlock_defs",
     "ai_scout_defs",
     "ai_vs_passive_defs",
+    "ai_vs_passive_easy_defs",
+    "ai_vs_passive_hard_defs",
     "ai_raid_defs",
     "ai_raid_guard_defs",
     "ai_bounce_defs",

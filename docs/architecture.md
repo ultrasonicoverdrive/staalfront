@@ -769,7 +769,7 @@ no separate music setting. Three parts, all presentation side (`sf_sim` is untou
   copy when the mood flips back during a fade or an outdated decode finishes after its mood changed. A scan classifies a long AUD (over 256 KiB) from its header
   only (`LARGE_AUD_BYTES`), so listing `SCORES.MIX` does not decode every track. True streaming from disk was not
   built (see the gaps in `docs/rules/audio.md`). A mood without a playable track uses `music.fallback` (a bank
-  sound, shipped `None`) or fades the running music out to silence; a track that fails to decode is skipped with one warning.
+  sound; shipped `music.calm` and `music.combat`, our own FLAC music, WP11.4b) or, if none is named, fades the running music out to silence. Unlike a Red Alert track, the bank fallback decodes **on the calling thread** at its first play (about 20 ms in a release build, one run measured; 300 ms in debug) and is then cached; a track that fails to decode is skipped with one warning.
 
 **Unit voices (WP11.2, 09-11-2026).** The replies of the player's own units (`unit.select`, `unit.move`, `unit.attack`)
 are raised on the UI side, not by the sim: `sf_game::unit_voice` decides which action speaks (`selection_frame`,

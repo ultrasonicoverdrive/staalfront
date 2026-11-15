@@ -555,3 +555,34 @@ fn the_sites_swap_in_the_second_half_of_an_8_cycle() {
     r.sites_swapped = true;
     assert_eq!(summarize(&[r]).site_wins, [0, 1]);
 }
+
+#[test]
+fn profiles_are_parsed_as_two_names_and_refused_otherwise() {
+    // WP9.4a: `--profiles A,B` is seat 0 then seat 1; without the flag the match file's own profiles play.
+    assert_eq!(args(&["x.ron"]).profiles, None);
+    assert_eq!(
+        args(&["x.ron", "--profiles", "easy,normal"]).profiles,
+        Some(["easy".to_string(), "normal".to_string()])
+    );
+    assert_eq!(
+        args(&["x.ron", "--profiles=hard_2, a1"]).profiles,
+        Some(["hard_2".to_string(), "a1".to_string()])
+    );
+    for (words, reason) in [
+        (vec!["a.ron", "--profiles", "easy"], "exactly two names"),
+        (vec!["a.ron", "--profiles", "a,b,c"], "exactly two names"),
+        (vec!["a.ron", "--profiles", "easy,"], "lower-case"),
+        (vec!["a.ron", "--profiles", ",normal"], "lower-case"),
+        (vec!["a.ron", "--profiles", "../x,normal"], "lower-case"),
+        (vec!["a.ron", "--profiles", "Easy,normal"], "lower-case"),
+        (vec!["a.ron", "--profiles"], "needs a value"),
+        (
+            vec!["a.ron", "--profiles", "a,b", "--profiles", "a,b"],
+            "given twice",
+        ),
+    ] {
+        let e = parse_args(strings(&words)).unwrap_err();
+        assert!(e.contains(reason), "{words:?}: {e}");
+    }
+    assert!(USAGE.contains("--profiles A,B"));
+}
