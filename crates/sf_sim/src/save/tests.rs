@@ -223,7 +223,7 @@ fn busy(mut w: World, ticks: u64) -> World {
             owner: PlayerId(1),
         },
     );
-    // Slots: wanderers 0..5, units 5..9, the legacy structure 9, the HQ 10.
+    // Slots: wanderers 0 to 4, units 5 to 8, the legacy structure 9, the HQ in slot 10 (last).
     let unit = |i: u32| EntityId::new(i, 0);
     s(
         &mut w,
