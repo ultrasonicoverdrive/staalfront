@@ -610,6 +610,9 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
         materials: built.materials.clone(),
         lods,
     };
+    m.lods[0]
+        .children
+        .push(Node::empty(SLAB_MARKER, [0, slab, 0]));
     // A stage keeps only what its derived geometry gives: no detail floor. Only where a reduced
     // level would exceed its share of LOD0 does LOD0 get anchor bolts, never past the stage's
     // ceiling (a share of the finished model's LOD0, docs/art-style.md §11).
@@ -1260,7 +1263,37 @@ fn damaged(
     m.add(d);
     let fixed = turret_tris(&parts.turret);
     fit(teamed, &mut m, &fixed, cands, stem);
-    join(m, parts.turret, &parts.anchors)
+    let mut out = join(m, parts.turret, &parts.anchors);
+    if lod.has(0) {
+        out.push(hole_marker(c, r));
+    }
+    out
+}
+
+/// The name of the generator-only marker of a damage hole (centre; its child `.._radius` sits
+/// the radius away along +X). Never written to a file ([`crate::glb`] skips [`GEN_PREFIX`]).
+pub const HOLE_MARKER: &str = "gen_hole";
+/// Nodes named with this prefix are generator metadata for the tests, not part of the model.
+pub const GEN_PREFIX: &str = "gen_";
+
+/// The generator-only marker of a stage's platform top (its height in `at[1]`), see [`GEN_PREFIX`].
+pub const SLAB_MARKER: &str = "gen_slab";
+
+/// The platform top a stage was derived with, from its marker.
+pub fn slab_of(m: &Model) -> Option<i32> {
+    m.lods[0].find(SLAB_MARKER).map(|n| n.at[1])
+}
+
+fn hole_marker(c: P, r: i32) -> Node {
+    Node::empty(HOLE_MARKER, c).child(Node::empty("gen_hole_radius", [r, 0, 0]))
+}
+
+/// The damage hole of a stage's LOD0 (centre in model space, radius), from its marker.
+pub fn hole_of(m: &Model) -> Option<(P, i32)> {
+    let n = m.lods[0].find(HOLE_MARKER)?;
+    let r = n.children.first()?.at[0];
+    let o = m.lods[0].at;
+    Some(([o[0] + n.at[0], o[1] + n.at[1], o[2] + n.at[2]], r))
 }
 
 /// Heavily damaged: broken off along a slanted plane, rubble inside, two holes, soot, debris.

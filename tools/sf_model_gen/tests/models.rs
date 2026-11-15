@@ -655,6 +655,31 @@ fn the_states_read_as_their_stage() {
             roof(heavy),
             roof(m)
         );
+        // Broken off at half the roof level (docs/art-style.md §11): the break of the heavy body
+        // lies at most 0.6 of the way from the platform to the finished roof level. The break is
+        // a plane through the model's centre line tilting at most 250 mm/m along X and 120 mm/m
+        // along Z: the mean of the highest wall top left and right of the centre cancels the X
+        // tilt, the Z tilt gets its 120 mm/m over half the depth as margin.
+        let slab = sf_model_gen::stages::slab_of(heavy).expect("slab marker");
+        let finished_roof =
+            sf_model_gen::stages::roof_level(&sf_model_gen::stages::split(&m.lods[0]), slab);
+        let hb = &heavy.lods[0].find("body").expect("body").mesh.tris;
+        let top = |left: bool| {
+            hb.iter()
+                .flat_map(|t| t.v)
+                .filter(|p| (p[0] < 0) == left && p[0] != 0 && p[2].abs() <= 600)
+                .map(|p| p[1])
+                .max()
+                .unwrap_or(slab)
+        };
+        let brk = (top(true) + top(false)) / 2;
+        let (lo, hi) = sf_model_gen::stages::bounds(&m.lods[0].world_tris());
+        let bound = slab + (finished_roof - slab) * 6 / 10 + 120 * 600 / 1000;
+        assert!(
+            brk <= bound,
+            "{}: heavy break at {brk} over {bound} (slab {slab}, finished roof {finished_roof})",
+            m.stem
+        );
         // Its smoke and fire come from the break, never from the finished roof.
         for a in ["fx_smoke_0", "fx_fire_0"] {
             assert!(anchor(heavy, a)[1] <= anchor(m, a)[1], "{} {a}", m.stem);
@@ -680,6 +705,40 @@ fn the_states_read_as_their_stage() {
         let finished: std::collections::BTreeSet<_> = lod0(m).iter().map(|t| t.v).collect();
         let kept = |x: &Model| lod0(x).iter().filter(|t| finished.contains(&t.v)).count();
         assert!(kept(get("_damaged")) < lod0(m).len(), "{}: no hole", m.stem);
+        // The hole itself (its generator marker): the finished body has roof there, and none of
+        // the finished body's triangles with its centroid inside it is left in the damaged body
+        // (by corners: soot only changes the tone; the burnt chunks in it are new geometry).
+        let damaged = get("_damaged");
+        let (c, r) = sf_model_gen::stages::hole_of(damaged).expect("hole marker");
+        let inside = |t: &&sf_model_gen::kit::Tri| {
+            let d = [0, 1, 2]
+                .map(|k| i64::from(t.v.iter().map(|p| p[k]).sum::<i32>() / 3) - i64::from(c[k]));
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= i64::from(r) * i64::from(r)
+        };
+        let body = |x: &Model| x.lods[0].find("body").expect("body").mesh.tris.clone();
+        let roof_there: std::collections::BTreeSet<_> = body(m)
+            .iter()
+            .filter(inside)
+            .filter(|t| sf_model_gen::stages::faces_up(t))
+            .map(|t| t.v)
+            .collect();
+        assert!(
+            !roof_there.is_empty(),
+            "{}: no roof where the hole is",
+            m.stem
+        );
+        let in_hole: std::collections::BTreeSet<_> =
+            body(m).iter().filter(inside).map(|t| t.v).collect();
+        let left = body(damaged)
+            .iter()
+            .filter(inside)
+            .filter(|t| in_hole.contains(&t.v))
+            .count();
+        assert_eq!(
+            left, 0,
+            "{}: {left} finished body triangles left in the hole",
+            m.stem
+        );
         assert!(
             kept(get("_damaged")) * 4 > lod0(m).len(),
             "{}: too much gone",
