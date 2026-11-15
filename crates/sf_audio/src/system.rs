@@ -1531,7 +1531,8 @@ mod tests {
     }
 
     #[test]
-    fn without_red_alert_files_the_music_is_silent_without_a_warning_or_error() {
+    fn without_red_alert_files_and_with_no_music_in_the_bank_the_music_is_silent_without_a_warning_or_error()
+     {
         let (d, _) = music_root("music_off", "(sounds: {})", 3, false);
         let mut s = mock_at(&d);
         s.set_music_config(&shipped_music());

@@ -179,8 +179,8 @@ tracks in the F1 *Sound browser*, then list the names (or `#id`s) you want for
 each mood, for example `music: (calm: ["#1A2B3C4D"], combat: ["#0A0B0C0D", "#0E0F1011"])`.
 A track is decoded when it is about to play (on a background thread, about
 30 MiB of memory for a three-minute track), never all at once. Without the
-files, or with the switch off, the default music plays: silence, as there is
-no music in the sound bank yet (`music.fallback` in `audio.ron` can name a bank sound).
+files, or with the switch off, the default music plays: our own generated music (`music.calm` and
+`music.combat` of the sound bank, named by `music.fallback` in `audio.ron`).
 
 The **unit voices** are part of this: with the switch on, your selected, moving and attacking units answer
 (`unit.select`, `unit.move`, `unit.attack` in `ra_mapping.ron`), one voice at a time and not on every click (the gaps

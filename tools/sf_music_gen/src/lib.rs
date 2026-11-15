@@ -13,7 +13,7 @@
 //! saws. Nothing is sampled, quoted or made to imitate any game's music.
 //!
 //! **Seamless loop.** Everything is mixed into a ring: a note, a pad's release or an echo that runs past the
-//! end wraps round to the start (`Bus::put`), and the echo and reverb run round the ring two or more times
+//! end wraps round to the start (`Song::put`), and the echo and reverb run round the ring two or more times
 //! ([`comb`]), so the last sample flows into the first one the way every sample flows into the next. A test
 //! checks that the join is no bigger a step than the music has inside.
 
@@ -432,7 +432,7 @@ fn triad(root: u32, minor: bool) -> [u32; 3] {
 
 /// Calm: 84 BPM, D minor, 24 bars (68.6 s). Chords change every two bars: Dm Bb Gm A, Dm Bb Eb A, Dm Gm Bb A
 /// (the Eb is the dark note, the A major turns back to D). Layers come in by the third: pad and sub bass and a
-/// soft pulse for bars 0 to 7, plucks in an echo from bar 8, hats and a low tom from bar 12, a slow lead in
+/// soft pulse for bars 0 to 7, plucks in an echo from bar 8, hats from bar 12, a low tom at the end of every fourth bar from bar 11, a slow lead in
 /// bars 16 to 23.
 fn calm() -> Vec<i16> {
     let spec = &TRACKS[0];
@@ -622,7 +622,7 @@ fn combat() -> Vec<i16> {
                 song.put(Bus::Dry, step0 + s, 0, &hat_open, 32);
             }
         }
-        // Stabs: the chord, three plus three plus two 16ths.
+        // Stabs: the chord on 16ths 0, 3, 6 and 10 of the bar.
         if matches!(sec, 2 | 3 | 5 | 6 | 7) && !(sec == 5 && last_of_sec) {
             let chord = [tri[0] + 24, tri[1] + 24, tri[2] + 24];
             for s in [0usize, 3, 6, 10] {

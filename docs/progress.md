@@ -3620,8 +3620,8 @@ What it does not settle:
 
 ### WP11.4b notes: own music for the calm and combat moods (15-11-2026)
 
-Audio only: nothing in `sf_sim`, no pin of an earlier phase moved. Nobody could listen in the build container; the tracks are checked by
-measurement (peak, loop join, size, decode), not by ear. Tijmen: please listen (`cargo run -p sf_game --release -- --sandbox --fight`
+Audio only: nothing in `sf_sim`, no pin of an earlier phase moved. The build container could not play sound; the tracks were checked by
+measurement (peak, loop join, size, decode). **Listened (15-11-2026):** Tijmen played both tracks (head a0f43ec) and said "muziek is goed". How to listen (`cargo run -p sf_game --release -- --sandbox --fight`
 without `--ra-audio`; calm plays at the start, combat once the fight is counted). Rules: `docs/rules/audio.md` section 3d.
 
 * **What was built.** `tools/sf_music_gen` (library, binary, no dependency but `sf_sound_gen` for noise, filters and envelopes): oscillators
@@ -3637,11 +3637,11 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   file; tempo, length and size budget; no clipping and no flat top; the loop join; the ends are not silent; equal loudness of the two files; the game's
   decoder (kira) reads both files back sample for sample. `sf_audio` `the_shipped_fallback_music_plays_per_mood_without_red_alert_files`: the shipped config and
   bank, no Red Alert files, calm then combat start `music.calm` and `music.combat` (trace), looped, Music category, no failed play. `sf_audio` `config::tests` pin the
-  shipped fallback names. `sf_game` `a_20_tank_fight_is_not_louder_than_the_music` now takes the music peak from the shipped bank entry (0.885 x 1.0 x 0.6 = 0.531
-  against the fight's 0.466) instead of assuming 0.6.
+  shipped fallback names. `sf_game` `a_20_tank_fight_is_not_louder_than_the_music` now pins the `music.combat` bank volume (0.885 x 1.0 x 0.6 = 0.531
+  against the fight's 0.466) and says in its comment that this is peak against peak, guarded only by the pins.
 * **Mutations** (scratch, reverted): `Song::put` without the wrap (`j = start + i; if j >= n { continue }`): `the_loop_joins_without_a_jump` fails (calm: the last and first
   sample are 10,684 apart, music steps of 1,437 are normal). The other mutations are in the PR body.
-* **Gaps.** Nobody has listened. The fallback music decodes on the calling thread at its first start, once per track per run (release build: 21 ms for calm, 19 ms for combat, about a frame; debug 298 and 245 ms); a background decode like the
+* **Gaps.** The fallback music decodes on the calling thread at its first start, once per track per run (release build: 21 ms for calm, 19 ms for combat, about a frame; debug 298 and 245 ms); a background decode like the
   Red Alert tracks would remove the hitch and was left out because it touches `drive_music`, which WP11.2b's branch also edits. One track per mood: the same loop
   repeats. The loop test proves no click at the join, not that the join sounds musical; the phrase of the last bars is built to flow into the first (a long fade of the last pad into the
   first chord), by design only.

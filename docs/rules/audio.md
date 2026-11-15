@@ -115,8 +115,8 @@ in `assets/LICENSES.md`); nothing is sampled, quoted or made to sound like any g
 
 | Track | BPM | Key | Length | Size | Character |
 |---|---|---|---|---|---|
-| `music.calm` (`calm.flac`) | 84 | D minor | 68.6 s (24 bars) | 1,509,638 bytes | sparse and tense: slow detuned pads, a deep sub bass, a soft heartbeat pulse, a sparse plucked pattern in an echo, far metal hits, a slow lead in the last third |
-| `music.combat` (`combat.flac`) | 128 | D minor | 67.5 s (36 bars) | 2,021,170 bytes | driving: four-on-the-floor kick, snare on two and four, 16th hats, a 16th bass ostinato, short chord stabs, a breakdown, a snare-roll build and a square lead in the last third |
+| `music.calm` (`calm.flac`) | 84 | D minor | 68.6 s (24 bars) | 1,509,638 bytes | sparse and tense: slow detuned pads, a deep sub bass, a soft heartbeat pulse, a sparse plucked pattern in an echo, far metal hits and a slow lead near the end |
+| `music.combat` (`combat.flac`) | 128 | D minor | 67.5 s (36 bars) | 2,021,170 bytes | driving: four-on-the-floor kick, snare on two and four, 16th hats, a 16th bass ostinato, short chord stabs, a breakdown and a snare-roll build, a square lead in the last third |
 
 (`cargo run -p sf_music_gen -- --table` prints the table from the code.) Both are in D minor so a crossfade between them is
 not a clash. Together 3,530,808 bytes against a budget of 4,000,000.
@@ -124,7 +124,7 @@ not a clash. Together 3,530,808 bytes against a budget of 4,000,000.
 * **Format**: mono, 16 bit, 22.05 kHz **FLAC**. A 44.1 kHz WAV would be 6 MB a track; mono 22.05 kHz WAV 3 MB a track. The FLAC encoder is
   ours (`tools/sf_music_gen/src/flac.rs`, fixed predictors and Rice codes, no dependency; the MD5 field is left zero, which the format allows)
   and only the decoder is new in the game: `sf_audio` turned on kira's `flac` feature (symphonia's pure-Rust FLAC decoder,
-  `symphonia-bundle-flac`; no C code). The test `the_game_decoder_reads_the_committed_files_back_exactly` decodes the committed files
+  `symphonia-bundle-flac`; no C code). The test `the_game_decoder_reads_the_fresh_bytes_and_the_committed_files_back_exactly` decodes the committed files
   with kira and compares every sample with a fresh render.
 * **Generator**: integer maths only (a phase counter, a parabola for the sine, `sf_sound_gen`'s noise, one-pole filters and envelopes),
   so the bytes are the same on every platform; `cargo run -p sf_music_gen` writes `assets/audio/music/*.flac`, `-- --check` compares,
@@ -139,7 +139,7 @@ not a clash. Together 3,530,808 bytes against a budget of 4,000,000.
 * **Loudness**: both files have the same peak (29,000 of 32,767, `FILE_PEAK`, no flat top: `nothing_clips_and_the_peak_is_the_file_peak`)
   and about the same RMS (calm 8,612, combat 9,120). The mood is set by the bank volume: combat 1.0, calm 0.7. At the default settings
   (`music_volume` 0.6) combat peaks at 0.53 of full scale, calm at 0.37; the 20-tank fight peaks at 0.466
-  (`a_20_tank_fight_is_not_louder_than_the_music` now takes the music peak from the shipped bank entry instead of assuming 0.6).
+  (`a_20_tank_fight_is_not_louder_than_the_music` now pins the combat bank volume 1.0 and says in its comment that the music side (0.531) is guarded only by pins: peak against peak, the fight's `<= 0.5` is the real assertion).
 * **Loading**: a bank sound is decoded when it is first needed and then kept (`Live::data`), never up front with the effects: the music
   is not in the list of sounds started at launch. This path decodes **on the calling thread** (unlike a Red Alert track, which decodes on a
   background thread): `the_shipped_fallback_music_plays_per_mood_without_red_alert_files` prints the first start, 298 ms for calm and 245 ms for combat in a
@@ -207,8 +207,7 @@ and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_audio` `the_orig
 * The volumes are set in the file (`mix`) and, since WP11.5b, on the settings screen's Sound page (see "Volumes").
 * `audio.ron` is read once at start; no hot reload.
 * A moving unit's sound stops at the place it had when the event happened (no Doppler, no following).
-* Music is no longer silent without the player's Red Alert files (WP11.4b, section 3d). What stays open there: nobody has listened to the
-  tracks yet (Tijmen will); the two own tracks are decoded on the calling thread at the first mood change to each (a hitch of the size
+* Music is no longer silent without the player's Red Alert files (WP11.4b, section 3d). Tijmen listened to both tracks on 15-11-2026 (head a0f43ec) and said "muziek is goed". What stays open there: the two own tracks are decoded on the calling thread at the first mood change to each (a hitch of the size
   printed in section 3d, once per track per run); each mood has one track, so the same loop repeats every 68 s of a long fight or build-up; the
   unit voices are WP11.2b, not part of this.
 * Red Alert music is decoded whole on a background thread, not streamed from disk: 30 MiB per running track (normally two
