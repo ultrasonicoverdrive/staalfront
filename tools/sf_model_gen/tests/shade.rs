@@ -100,7 +100,10 @@ fn the_top_edge_bevels_are_brighter_than_the_flat_top() {
 #[test]
 fn the_realistic_bake_constants_are_pinned() {
     assert_eq!(shade::HIGHLIGHT, 0.05);
-    const { assert!(shade::HIGHLIGHT <= 0.08, "a few per cent at most") };
+    #[allow(clippy::assertions_on_constants)]
+    {
+        assert!(shade::HIGHLIGHT <= 0.08, "a few per cent at most");
+    }
     assert_eq!(shade::WEAR, 0.20);
     assert_eq!(shade::WEAR_GREY_GAIN, 1.12);
     assert_eq!(shade::WEAR_GREY_LIFT, 0.01);
@@ -155,6 +158,16 @@ fn dust_darkens_and_pulls_the_foot_towards_the_dust_colour_and_a_team_triangle_h
     assert!(
         df < dm && dm < dh,
         "closer to the dust colour at the ground"
+    );
+    // The grime alone only darkens (the hue stays); the dust moves the colour towards the earth
+    // colour, so the blue share of the (very orange) test colour grows towards the ground.
+    let blue = |c: [f32; 3]| c[2] / c[0];
+    assert!(
+        blue(foot) > blue(high) * 1.15 && blue(mid) < blue(foot) && blue(mid) > blue(high),
+        "dust: blue share foot {} mid {} high {}",
+        blue(foot),
+        blue(mid),
+        blue(high)
     );
     // Team: the same plate in the team slot is the same colour at the ground and high up.
     assert_eq!(
