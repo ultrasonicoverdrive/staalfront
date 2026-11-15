@@ -674,6 +674,48 @@ fn the_frozen_duel_opponent_is_the_shipped_profile_with_the_counter_mix_off() {
     new.name = "normal_9_2a2".to_string();
     new.army.counter_permille = 0;
     new.army.intel_ticks = old.army.intel_ticks;
+    // WP9.3c: the shipped goal lists now end at the second refinery; the frozen copy keeps the lists of before (pinned here
+    // in full: Meridian ten entries, Veyran eleven with the bunker after the first tower).
+    let list = |i: usize| -> Vec<(&str, u16)> {
+        old.factions[i]
+            .build_order
+            .iter()
+            .map(|(k, n)| (k.as_str(), *n))
+            .collect()
+    };
+    assert_eq!(
+        list(0),
+        [
+            ("power_plant", 1),
+            ("refinery", 1),
+            ("vehicle_factory", 1),
+            ("barracks", 1),
+            ("power_plant", 2),
+            ("refinery", 2),
+            ("defence_tower", 1),
+            ("radar", 1),
+            ("defence_tower", 2),
+            ("advanced_defences", 1),
+        ]
+    );
+    assert_eq!(
+        list(1),
+        [
+            ("power_plant", 1),
+            ("refinery", 1),
+            ("vehicle_factory", 1),
+            ("barracks", 1),
+            ("power_plant", 2),
+            ("refinery", 2),
+            ("defence_tower", 1),
+            ("fortified_bunker", 1),
+            ("radar", 1),
+            ("defence_tower", 2),
+            ("advanced_defences", 1),
+        ]
+    );
+    new.factions[0].build_order = old.factions[0].build_order.clone();
+    new.factions[1].build_order = old.factions[1].build_order.clone();
     // The shipped mix is still the one of WP9.2a-2 (the measured static mixes were not shipped, fix round 1).
     assert_eq!(old, new);
     assert!(!old.army.counter_on());

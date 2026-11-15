@@ -199,26 +199,15 @@ mod tests {
             list.iter().map(|&(k, n)| (k.0, n)).collect()
         };
         let m = resolved(Faction::Meridian);
+        // WP9.3c: both lists end at the second refinery, no armed structure, no radar, no bunker (they were tower, radar,
+        // tower, advanced defences, and for Veyran the bunker after the first tower).
         assert_eq!(
             pairs(&m.build_order),
-            [
-                (1, 1),
-                (2, 1),
-                (4, 1),
-                (3, 1),
-                (1, 2),
-                (2, 2),
-                (6, 1),
-                (5, 1),
-                (6, 2),
-                (7, 1)
-            ]
+            [(1, 1), (2, 1), (4, 1), (3, 1), (1, 2), (2, 2)]
         );
         assert_eq!(pairs(&m.unit_mix), [(12, 4), (13, 2), (19, 3)]);
-        // Veyran adds the fortified bunker after the first tower (the second refinery comes before both).
         let v = resolved(Faction::Veyran);
-        assert_eq!(pairs(&v.build_order)[5..8], [(2, 2), (6, 1), (10, 1)]);
-        assert_eq!(v.build_order.len(), 11);
+        assert_eq!(pairs(&v.build_order), pairs(&m.build_order));
     }
 
     #[test]
@@ -268,7 +257,9 @@ mod tests {
         let base = resolved(Faction::Meridian);
         let digest = base.digest();
         assert_eq!(digest, resolved(Faction::Meridian).digest());
-        assert_ne!(digest, resolved(Faction::Veyran).digest());
+        // The two factions share their goal list since WP9.3c, so the two digests are equal (the list is the only thing
+        // that differed); a changed list moves it below.
+        assert_eq!(digest, resolved(Faction::Veyran).digest());
         let mut p = base.clone();
         p.economy.reserve += 1;
         assert_ne!(digest, p.digest());

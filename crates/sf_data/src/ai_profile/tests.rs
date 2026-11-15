@@ -128,10 +128,6 @@ fn the_shipped_profile_is_pinned() {
             ("barracks", 1),
             ("power_plant", 2),
             ("refinery", 2),
-            ("defence_tower", 1),
-            ("radar", 1),
-            ("defence_tower", 2),
-            ("advanced_defences", 1),
         ])
     );
     assert_eq!(meridian.unit_mix, mix);
@@ -147,11 +143,6 @@ fn the_shipped_profile_is_pinned() {
             ("barracks", 1),
             ("power_plant", 2),
             ("refinery", 2),
-            ("defence_tower", 1),
-            ("fortified_bunker", 1),
-            ("radar", 1),
-            ("defence_tower", 2),
-            ("advanced_defences", 1),
         ])
     );
     assert_eq!(veyran.unit_mix, mix);
