@@ -17,6 +17,9 @@
 //! one, in a fixed order, until the share and the triangle count are reached. Integer geometry
 //! throughout; the share uses basic float operations only, like the checker's raster.
 
+// The geometry helpers take their sizes as plain arguments, as the kit does.
+#![allow(clippy::too_many_arguments)]
+
 use crate::kit::{
     Lod, Mat, Mesh, Model, Node, P, Tri, bevel_box, closed_box, cuboid, dot, extrude_z1, loft, sub,
 };
@@ -1204,7 +1207,7 @@ fn heavy(
 ) -> Vec<Node> {
     let (lo, hi) = hull_bounds(&parts, slab);
     let h = roof_level(&parts, slab) - slab;
-    let tilt = if hash(seed) % 2 == 0 { 1 } else { -1 };
+    let tilt = if hash(seed).is_multiple_of(2) { 1 } else { -1 };
     let rise = (i64::from(h) * 300 / i64::from((hi[0] - lo[0]).max(1000))).min(250) * tilt;
     let plane = Plane::slant(
         slab + h * cut / 1000,
@@ -1235,8 +1238,6 @@ fn heavy(
     );
     let grid = if lod.has(0) && ix.min(iz) >= 1500 {
         4
-    } else if lod.has(1) {
-        2
     } else {
         2
     };

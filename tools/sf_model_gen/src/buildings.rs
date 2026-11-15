@@ -8,6 +8,9 @@
 //! The finished models of WP11.6a (the Meridian construction center, the Veyran power plant and
 //! the Veyran defence tower) stay as they are; their states come from [`crate::stages`] like all.
 
+// The parts take their sizes as plain arguments, as the kit does.
+#![allow(clippy::too_many_arguments)]
+
 use crate::kit::{
     Lod, Mat, Mesh, Model, Node, P, RECESS, SEAM, bevel_box, bolt, chamfer_rect, closed_box,
     cuboid, extrude_z1, frame, hatch, lathe, lathe_x, lathe_z, loft, ngon, railing,
