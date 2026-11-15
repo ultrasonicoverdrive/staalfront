@@ -65,7 +65,8 @@ of WP13.1e use it. All tags are pinned by `command_tags_are_pinned` and `the_hea
 `World::rules_digest()` hashes (FNV-1a 64) the configuration (seed, size, speed, turn rate), the
 terrain (whether it has a layer and its digest), the unit-table digests (stats, reach, turret), the
 movement table, the weapon table, the building table and its placement digest, who is which
-faction, the collision and formation settings, the path budget, the flowfield threshold and the
+faction, every collision and formation setting (each struct destructured without `..`, so a new
+setting is a compile error until it is hashed), the path budget, the flowfield threshold and the
 replan settings, the targeting and destruction settings (or that there are none), and the numbers of
 every optional rule set a world that saves may have: the ore (its rules and the start amount of every
 field cell, through the ore fingerprint, which at `version == 0` is the start), the money rules
@@ -141,8 +142,8 @@ The exact test per section (checked in this order, the first one that fails name
 | `pathing` | `Pathing` has a job, a non-zero epoch, a non-zero sector epoch, a non-zero ticket or start slot, or the scan flag; or a live or free slot has a route that is not idle |
 | `flowfields` | the field pool is not equal to a new pool with the same threshold and the clock at the tick |
 | `formations` | a formation exists, the serial counter moved, or a slot has a formation membership |
-| `projectiles` | the projectile store is not empty and never used (`Projectiles::default()`) |
-| `weapons` | a slot is reloading or in a burst, or the last tick left shots, impacts or attacks |
+| `projectiles` | the projectile store is not equal to a never-used store (`Projectiles::default()`) |
+| `weapons` | a slot is reloading or in a burst, or the last tick left shots, impacts, attacks or damage records (`hurt`) |
 | `destruction` | a wreck, a tally or a death report exists, or a unit has kills |
 | `economy` | the ore changed since the start (`version != 0`), the world has harvest rules, or money was spent |
 | `production`, `power`, `vision`, `outcome` | the world has those rules at all (even at tick 0: their state starts moving in the first step; WP13.1c lifts this) |
@@ -168,14 +169,28 @@ single-bit change of a save and steps each world that restores four ticks; none 
 `CrowdState` (the `Crowd` struct holds settings, shapes derived from the tables, scratch and stats),
 and even a world with the crowd pass switched off changes it in the first tick of a unit, so without
 it no world with a unit would save at all. `the_crowd_memory_round_trips_with_the_crowd_pass_on`
-pins it.
+pins it, and `a_restored_jam_continues_like_the_original` saves in the middle of a jam (three units
+ordered one by one into a block of idle units; `crowd::any_state` holds at every save tick) and
+compares the checksums of the rest of the run.
+
+`restore` refuses as `Corrupt` crowd memory the simulation cannot reach, because the next step
+could overflow it: `quiet < stuck_ticks`, `attempts <= stuck_attempts`, `calm < SHOVE_CALM`,
+`replans <= ReplanConfig::max`, `cool <= ReplanConfig::cooldown`, `retarget <=
+ReplanConfig::retarget_cooldown`, `home_wait <= HOME_WAIT`, sidestep ticks in `1..=SIDESTEP_TICKS`,
+`0 <= shoved <= SHOVE_LIMIT`, `best >= 0`, `disc >= 0`, `gave_up_at` not after the tick, and
+`mark`, `home` and the sidestep spot on the map. The flags, `pressed` (saturating) and the claim
+(looked up, never indexed) take any value. `crowd_counters_at_their_maximum_restore_and_step` saves
+every counter at its maximum, restores and steps 80 ticks with the crowd pass on, and refuses each one
+set one past it.
 
 ## Guards against a forgotten field
 
 * `World::save` destructures `World` without `..`; every field is bound by name or as `_` with a
   comment that says why it is rules, derived, a report or gated. `save_entities` does the same for
-  the entity columns, `CommandQueue::parts`, `Pathing::unsaved_section`, `Formations::at_start` and
-  `put_crowd` for theirs. A field added to any of them is a compile error until it is handled here
+  the entity columns, `CommandQueue::parts`, `Pathing::unsaved_section`, `Formations::at_start`,
+  `Arsenal::unsaved_section`, `Ore::at_start`, `Crowd::has_state`, `Targeting::has_state`,
+  `check_unsaved_sections` (destruction, money, repair, placement), `check_crowd`, `put_crowd` and
+  `rules_digest` (the collision and formation settings) for theirs. A field added to any of them is a compile error until it is handled here
   (shown in the PR of WP13.1a: a field `pub(crate) probe: u8` on `World` gives `error[E0027]:
   pattern does not mention field `probe``).
 * `restore(fresh, save(w)) == w` by `PartialEq`, and a resave byte-equal to the save.
