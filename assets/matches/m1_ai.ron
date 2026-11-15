@@ -3,8 +3,8 @@
 // credits), but player 1 is not a static base any more. It is Veyran under `controller: Ai(profile: "normal")`
 // (the profile `assets/ai/normal.ron`): it starts with a construction centre on the very cell the static
 // base's centre stands on (72, 14, 4 by 4 cells) and the same 4000 credits as the human, and builds the rest
-// itself from the goal list of its profile (power plant, refinery, barracks, power plant, vehicle factory,
-// defence tower, fortified bunker, refinery, radar, defence tower, advanced defences). 4000 is the human's
+// itself from the goal list of its profile (since WP9.3c: power plant, refinery, vehicle factory, barracks,
+// power plant, refinery; no tower, radar, bunker or advanced defences, docs/rules/ai.md). 4000 is the human's
 // start: the AI does not get more money than the player it is watched against; the refinery it builds
 // brings a free harvester that mines the ore field beside the base, and that income pays for the rest.
 // What it does besides building is what the AI of that day does (docs/rules/ai.md): its economy manager queues
