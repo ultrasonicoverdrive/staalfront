@@ -248,8 +248,8 @@ fn smooth_normals_agree_on_a_lathe_and_stay_hard_past_the_crease_angle() {
     let boxed = cuboid([-500, 3000, -500], [500, 3200, 500], Mat(0)).lathed();
     let nb = shade::corner_normals(&boxed.tris);
     for (i, t) in boxed.tris.iter().enumerate() {
-        for k in 0..3 {
-            assert!(close(nb[i][k], unit_normal(t)), "box edge smoothed");
+        for n in nb[i] {
+            assert!(close(n, unit_normal(t)), "box edge smoothed");
         }
     }
     // A flat (not turned) solid is never smoothed, even where its faces meet at a shallow angle.
