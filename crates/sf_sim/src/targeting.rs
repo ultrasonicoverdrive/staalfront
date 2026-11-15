@@ -162,7 +162,7 @@ impl TargetingConfig {
             && (1..=MAX_PURSUIT_RESET_TICKS).contains(&self.pursuit_reset)
     }
 
-    fn write_hash(&self, h: &mut Fnv1a64) {
+    pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
         h.write_bytes(SETTINGS_TAG);
         h.write_bytes(&self.scan_cooldown.to_le_bytes());
         h.write_fx(self.pursuit);
@@ -262,6 +262,20 @@ impl Eq for Scratch {}
 pub(crate) struct Targeting {
     pub config: Option<TargetingConfig>,
     scratch: Scratch,
+}
+
+impl Targeting {
+    /// Whether the part outside the entity columns holds state: never, it is rules and scratch.
+    /// Destructured without `..`: a new field fails to compile until it is placed here.
+    pub(crate) fn has_state(&self) -> bool {
+        let Targeting {
+            // Rules: in the rules digest.
+            config: _,
+            // Scratch within a tick.
+            scratch: _,
+        } = self;
+        false
+    }
 }
 
 /// What [`Targeting`] reads besides the entities.

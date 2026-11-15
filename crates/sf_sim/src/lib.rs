@@ -363,6 +363,7 @@ pub mod power;
 pub mod production;
 pub mod projectiles;
 pub mod repair;
+pub mod save;
 pub mod snapshot;
 pub mod targeting;
 pub mod terrain;

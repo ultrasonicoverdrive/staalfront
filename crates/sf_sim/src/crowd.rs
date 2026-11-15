@@ -288,7 +288,7 @@ pub const CROWD_ARRIVE_ALONE: Fx = Fx::from_int(4);
 pub const WAYPOINT_CROWD: Fx = Fx::ONE;
 
 /// Ticks a sidestep may last at most (it ends when the spot is reached).
-const SIDESTEP_TICKS: u8 = 40;
+pub(crate) const SIDESTEP_TICKS: u8 = 40;
 
 /// The weight of a unit that is moved easily (an idle friend of the mover).
 const W_EASY: i64 = 1000;
@@ -856,6 +856,26 @@ pub(crate) struct Crowd {
     side: i64,
     scratch: Scratch,
     pub stats: CrowdStats,
+}
+
+impl Crowd {
+    /// Whether the part outside the entity columns holds state: never, the state is the column
+    /// `Entities::crowd`. Destructured without `..`: a new field fails to compile until it is
+    /// placed here.
+    pub(crate) fn has_state(&self) -> bool {
+        let Crowd {
+            // Rules: in the rules digest.
+            config: _,
+            // Derived from the unit table.
+            shapes: _,
+            side: _,
+            // Scratch within a tick.
+            scratch: _,
+            // A report: not hashed.
+            stats: _,
+        } = self;
+        false
+    }
 }
 
 impl PartialEq for Crowd {
