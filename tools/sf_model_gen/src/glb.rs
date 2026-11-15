@@ -1,13 +1,14 @@
 //! The GLB writer: one scene whose roots are the levels `<stem>_LOD0..2` (layout 1 of
 //! docs/conventions.md §12), a node per part or anchor with a translation in metres, one mesh per
-//! part with one primitive per material, flat triangles (three corners each) with `POSITION`,
-//! `NORMAL` and `COLOR_0` (the baked shade, [`crate::shade`]), `u16` or `u32` indices, and
+//! part with one primitive per material, unindexed triangles (three corners each) with `POSITION`,
+//! `NORMAL` (flat, or smooth on turned surfaces: [`crate::shade::corner_normals`]) and `COLOR_0`
+//! (the baked shade, [`crate::shade`]), `u16` or `u32` indices, and
 //! base-colour-only materials. No textures, no images, no samplers (the loader refuses them).
 
 use std::fmt::Write as _;
 
 use crate::kit::{Mat, Model, Node, Tri};
-use crate::shade::{bake, factor, unit_normal};
+use crate::shade::{bake, corner_normals, factor};
 
 /// sRGB 0..=255 to the linear factor glTF stores (a cubic fit of the sRGB curve, basic operations
 /// only, so the same bytes everywhere; within 0.4 % of the exact curve).
@@ -59,25 +60,32 @@ fn flatten(node: &Node, nodes: &mut Vec<Flat>, meshes: &mut Vec<Vec<Tri>>) -> us
     at
 }
 
-/// The baked shade of every node's triangles of one level, keyed like the flattened meshes.
-fn shades(level: &Node, lin: &[[f32; 3]]) -> Vec<Vec<[f32; 3]>> {
-    // Bake on the whole level in model space (parts occlude each other), then hand each node
-    // its slice, in the same preorder as `flatten`.
+/// Per corner: the baked shade and the normal.
+type Corners = Vec<([f32; 3], [f32; 3])>;
+
+/// The baked shade and the corner normal of every node's triangles of one level, keyed like the
+/// flattened meshes.
+fn shades(level: &Node, lin: &[[f32; 3]]) -> Vec<Corners> {
+    // Bake and smooth on the whole level in model space (parts occlude each other, and a lathed
+    // part's corners are welded across nodes only where they coincide), then hand each node its
+    // slice, in the same preorder as `flatten`.
     let world = level.world_tris();
     let baked = bake(&world, lin);
+    let normals: Vec<[f32; 3]> = corner_normals(&world).into_iter().flatten().collect();
+    let both: Corners = baked.into_iter().zip(normals).collect();
     let mut out = Vec::new();
     let mut at = 0;
-    fn walk(n: &Node, baked: &[[f32; 3]], at: &mut usize, out: &mut Vec<Vec<[f32; 3]>>) {
+    fn walk(n: &Node, both: &Corners, at: &mut usize, out: &mut Vec<Corners>) {
         if !n.mesh.is_empty() {
             let len = n.mesh.len() * 3;
-            out.push(baked[*at..*at + len].to_vec());
+            out.push(both[*at..*at + len].to_vec());
             *at += len;
         }
         for c in &n.children {
-            walk(c, baked, at, out);
+            walk(c, both, at, out);
         }
     }
-    walk(level, &baked, &mut at, &mut out);
+    walk(level, &both, &mut at, &mut out);
     out
 }
 
@@ -107,11 +115,11 @@ pub fn write(model: &Model) -> Vec<u8> {
                 colors: Vec::new(),
             };
             for (ti, t) in tris.iter().enumerate().filter(|(_, t)| t.mat == mat) {
-                let n = unit_normal(t);
                 for (c, corner) in t.v.iter().enumerate() {
+                    let (colour, normal) = shade[mi][ti * 3 + c];
                     p.positions.push(corner.map(metres));
-                    p.normals.push(n);
-                    p.colors.push(shade[mi][ti * 3 + c]);
+                    p.normals.push(normal);
+                    p.colors.push(colour);
                 }
             }
             prims.push(p);
