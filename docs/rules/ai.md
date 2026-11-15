@@ -1574,6 +1574,66 @@ Per seed (wins : losses from SW | from NE): `ctl` 458,758 24:24 | 24:24, 777 21:
 
 **Gaps.** One run per row and seed (deterministic). The trace is of 64 mirror games of one seed per row; the wave radius 15 and the 600-tick window are my choices (stated above). Not traced: why the `av` rows from SW are attacked before tick 12,000 and lose (127 of 144 games without a launch), why `stage_distance` 26 gives no staging cell from SW (identical to 0), and why seat 1 wins 60 % of the games against the control's own copy. Seed 999 was not used. A combination row was chosen after the single rows (one only, `av2400_st26`).
 
+## Difficulty levels (WP9.4a, 15-11-2026)
+
+**What it is.** Two new profile files, `assets/ai/easy.ron` and `assets/ai/hard.ron`, and the flag `sf_headless tournament --profiles A,B`. Data and the tournament only: no change in `crates/sf_sim`, no new rule in `crates/sf_ai`, `normal.ron` untouched (every pin of it stands). Every number the files do not list is normal's (`easy_and_hard_load_and_change_only_the_numbers_the_level_names` in `crates/sf_data` builds normal with the listed changes and demands equality). The AI still acts only through human commands on a fog-filtered observation; neither level cheats. The design is `wp9.4-ontwerp` (orchestrator memo of 14-11-2026), adjusted to what shipped since: the goal list of normal ends at the second refinery (WP9.3c), the escalation of WP9.3a-1 is off in normal, retreat (9.3a-2) is parked.
+
+**Checked first.** `MAX_THINK_INTERVAL` is 600, so 40 is allowed. The stagger rule holds: 40 / gcd(40, 3) = 40 >= 8 (an interval of 5 is refused, pinned). `AiProfile` has `deny_unknown_fields` (a misspelt number is an error, pinned).
+
+### The profiles (start values, all kept after the ladder)
+
+| Number | easy | normal | hard |
+|---|---|---|---|
+| `think_interval` (stagger 3) | **40** | 10 | 10 |
+| `max_parallel_builds` | 1 | 1 | **2** |
+| `max_queue` | **1** | 2 | **3** |
+| `harvesters_per_refinery` | **1** | 2 | **3** |
+| `repair_below_percent` | **40** | 70 | **85** |
+| `first_attack_tick` | **6000** | 2400 | 2400 |
+| `max_wait` | **18000** | 12000 | **9000** |
+| `attack_value` | 2000 | 2000 | 2000 |
+| `stage_distance`, `reinforce_value` (staging, second group) | **0, 0** (off) | 14, 1000 | 14, 1000 |
+| `defend_ratio_permille` | **1000** | 1500 | 1500 |
+| `escalate_permille` / `attack_value_max` | 0 / 0 | 0 / 0 | **250 / 8000** |
+| `harvester_threat`, retreat | off, none | off, none | off, none (9.3a-2 is parked) |
+| `scouts_max` | **1** | 2 | 2 |
+| goal list (both factions) | power plant, refinery, vehicle factory, barracks, power plant 2 (**no second refinery**) | the same plus refinery 2 | = normal |
+
+Pinned as literals: `easy_and_hard_load_and_change_only_the_numbers_the_level_names` (`sf_data`), `the_level_profiles_resolve_and_their_goal_lists_and_digests_are_pinned` (`sf_ai`: kinds of the lists and the profile digests, easy `0x4b32_4f6b_7e34_7a26`, hard `0xfce3_b027_f725_bb13`, both factions alike), `the_scenarios_play_the_shipped_profile_files` (the frozen copy in the scenario folders equals the shipped file: a change of a level file fails there until the scenarios are re-pinned on purpose).
+
+### Choosing a level
+
+`sf_headless tournament <match> --profiles A,B` puts profile A on seat 0 (the lower player id) and B on seat 1, replacing the ones the match file names. The profile stays with the seat when the start sites swap (the schedule of the tournament swaps the start objects, not the controllers). Names are checked like the match file's (lower-case letters, digits, `_`), a name without `assets/ai/<name>.ron` is an error naming the file, and the command prints `profiles: seat 0 = A, seat 1 = B` on stderr. Tests: `profiles_are_parsed_as_two_names_and_refused_otherwise`, `the_profiles_flag_puts_the_named_profiles_on_the_seats_and_keeps_them_when_the_sites_swap`, `the_profiles_flag_refuses_a_profile_that_is_not_shipped_and_is_shown_by_the_command`. `sf_game --ai` is WP9.4c.
+
+### The scenarios
+
+`ai_vs_passive_easy` (20,000 ticks) and `ai_vs_passive_hard` (16,000): `ai_vs_passive` (the AI against m1's static opponent) with a frozen copy of its definitions and the level's own profile file. **Easy wins at tick 13,256, hard at 9,093** (normal's `ai_vs_passive`, frozen with the older list, 13,839: the static opponent has no army to answer, so a win here says the level can finish a game, not that it is as strong). Easy builds its list `[1, 2, 4, 1, 3]` (kinds power plant, refinery, vehicle factory, power plant, barracks: all five entries, no second refinery); hard builds `[1, 1, 2, 3, 2, 4]` (all six, two at once, so not in list order). Checksums: easy `0x2924_7b8d_473a_1436`, hard `0x79df_508d_0b28_81dc`; AI digests easy `0xbb6d_2465_77c1_6583`, hard `0x9c65_1299_32d6_0bda`. Tests in `tools/sf_headless/tests/ai_levels.rs`. Both are in the CI list (release `--expect`, about 1 s each; the test file takes about 35 s in a debug build).
+
+### The ladder (manual, release; `m1_duel`, seeds 458,758 / 777 / 888, cap 60,000)
+
+Adjacent pairs. Per pair and seed 96 games: 48 with the upper profile on seat 0 and 48 on seat 1 (each 48 = six 8-cycles: both factions' seatings on both sites), so 144 games from each site over three seeds. w_site = the upper's wins / games it played from that site (an undecided game is not a win). Pass: mean(w_SW, w_NE) of the upper >= the lower's + 15 points, and the upper >= the lower on each site.
+
+| Pair | upper SW | upper NE | upper mean | lower SW | lower NE | lower mean | gap | verdict |
+|---|---|---|---|---|---|---|---|---|
+| normal v easy | 141 of 144 (97.9 %) | 128 of 144 (88.9 %) | **93.4 %** | 3 (2.1 %) | 16 (11.1 %) | 6.6 % | 86.8 | pass, both sites |
+| hard v normal | 144 of 144 (100 %) | 142 of 144 (98.6 %) | **99.3 %** | 0 | 0 | 0 % | 99.3 | pass, both sites |
+
+Per seat (upper's wins of 144 as seat 0 / as seat 1): normal v easy 135 / 134, hard v normal 143 / 143. Per cell (upper wins : lower wins : undecided of 72): normal v easy seat 0 SW 72:0:0, seat 0 NE 63:9:0, seat 1 SW 69:3:0, seat 1 NE 65:7:0; hard v normal 72:0:0, 71:0:1, 72:0:0, 71:0:1. Per seed (upper : lower wins of 96, SW / NE): normal v easy 48:0 / 43:5, 47:1 / 44:4, 46:2 / 41:7; hard v normal 48:0 / 47:0, 48:0 / 47:0, 48:0 / 48:0. Median win tick of the upper: normal 31,317 (against easy), hard 22,234 (against normal). **No tuning was needed**: both pairs passed with the start values at the first run, so the values stand as the memo proposed them. The gaps are large, so a tuning towards a smaller gap (easy closer to normal, hard closer) was not tried; that is a feel decision and nobody has played the levels.
+
+**Mirror** (each profile against itself, 3 x 100 games, games decided of 300 and SW : NE wins): easy **170** (59 : 111; per seed 56, 56, 58), normal **290** (140 : 150; per seed 97, 96, 97; the same numbers as WP9.3c), hard **298** (110 : 188; per seed 100, 99, 99). Hard keeps its floor (>= normal's 290 - 15 = 275). Easy is report-only: 130 of 300 games are not decided inside 60,000 ticks.
+
+### What the player notices
+
+* **easy**: a manager acts every 160 ticks (8 s) instead of every 40, so it answers a raid late and builds slowly; one harvester per refinery and one refinery (the list stops at the power plant), one scout, no second group and no staging (the strike walks straight at the target), the first attack not before tick 6,000 and at most every 18,000, leaves damage unrepaired below 40 %, defends with 1.0 times the visible enemy value. It still finishes a game against a passive opponent (13,256) and loses to normal in 93 % of the games.
+* **hard**: builds two structures at once, three harvesters per refinery (more income), repairs from 85 %, launches by the clock after 9,000 ticks instead of 12,000, and after a failed strike sends a wave a quarter larger (at most 8,000). It beats normal in 99 % of the games and finishes a passive opponent at 9,093. It has no towers either (the shared list) and no retreat.
+
+### Not done / gaps
+
+* The ladder pairs are separated by a very wide margin; whether easy is *fun* for a beginner (it takes normal a median 31,317 ticks, about 26 minutes at 20 ticks a second, to win) and hard *fair* is not measured; nobody has played them. `sf_game --ai` (9.4c) and the unfair level (9.4b) are not here.
+* Why hard wins without a loss is not traced (more income and two builds at once are the likely causes, not separated: the memo's rows were not measured one by one).
+* The escalation of hard (250 / 8000) was measured to do nothing for the mean in WP9.3a-1; it is in hard because the memo has it and was not tested alone here.
+* Time split: see the progress entry.
+
 ## Not done
 
 * **WP9.3b-0 gaps.** No launch-timing row ships ("Launch timing (WP9.3b-0)"); `assets/ai/normal.ron` is unchanged. Not traced: why every later launch loses from the SW site, why `stage_distance` 26 is `stage_distance` 0 from SW, why seat 1 wins 60 % of the games against the control's own copy. WP9.3b-1 (focus fire, target classes) is not built: the trace shows 0.1 % of the clash shots at unarmed targets (control mirror) and a first launcher whose wave arrives thinner and more strung out; the march leash (cohesion) is the candidate to re-measure.
