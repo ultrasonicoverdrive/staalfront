@@ -35,7 +35,8 @@ fn the_baked_shade_reaches_the_vertices_and_the_team_colour_stays_whole() {
             .flat_map(|p| p.mesh.vertices.iter().map(|v| v.color))
             .collect();
         let team: Vec<[f32; 4]> = verts.iter().copied().filter(|c| c[3] > 0.0).collect();
-        assert!(!team.is_empty(), "{file}");
+        // A neutral object has no player colour (its third slot is `paint3`, shaded like paint).
+        assert_eq!(team.is_empty(), is_neutral(file), "{file}");
         assert!(
             team.iter().all(|c| *c == sf_render::mesh::Vertex::TEAM),
             "{file}: a team vertex was shaded"
@@ -51,15 +52,54 @@ fn the_baked_shade_reaches_the_vertices_and_the_team_colour_stays_whole() {
     }
 }
 
-/// The six models, sorted by file name.
-const FILES: [&str; 6] = [
+/// The models, sorted by file name: the style proof of WP11.6a and the units of WP11.6b.
+const FILES: &[&str] = &[
+    "meridian_amphibious_transport.glb",
     "meridian_construction_center.glb",
     "meridian_harvester.glb",
+    "meridian_heavy_tank.glb",
     "meridian_light_tank.glb",
+    "meridian_light_transport.glb",
+    "meridian_repair_truck.glb",
+    "meridian_siege_artillery.glb",
+    "neutral_ferry.glb",
+    "neutral_supply_truck.glb",
     "veyran_defence_tower.glb",
+    "veyran_gunboat.glb",
+    "veyran_harvester.glb",
+    "veyran_heavy_gun_team.glb",
+    "veyran_heavy_tank.glb",
     "veyran_light_tank.glb",
     "veyran_power_plant.glb",
+    "veyran_repair_truck.glb",
+    "veyran_siege_artillery.glb",
+    "veyran_transport_truck.glb",
 ];
+
+/// A structure: smoke and fire anchors.
+fn is_building(file: &str) -> bool {
+    ["construction_center", "power_plant", "defence_tower"]
+        .iter()
+        .any(|b| file.contains(b))
+}
+
+/// Has a gun: a muzzle anchor and a turning turret and barrel.
+fn is_armed(file: &str) -> bool {
+    [
+        "light_tank",
+        "heavy_tank",
+        "siege_artillery",
+        "gunboat",
+        "defence_tower",
+    ]
+    .iter()
+    .any(|b| file.contains(b))
+}
+
+/// A neutral object has no player colour.
+fn is_neutral(file: &str) -> bool {
+    file.starts_with("neutral_")
+}
 
 fn load(file: &str) -> LoadedModel {
     glb::load_glb_file(&assets().join("set_v5").join(file), &AxisConvention::ENGINE)
@@ -67,7 +107,7 @@ fn load(file: &str) -> LoadedModel {
 }
 
 #[test]
-fn the_folder_holds_the_six_models_and_the_pack_lists_them() {
+fn the_folder_holds_the_models_and_the_pack_lists_them() {
     let mut on_disk: Vec<String> = std::fs::read_dir(assets().join("set_v5"))
         .expect("assets/set_v5 exists")
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -83,9 +123,9 @@ fn the_folder_holds_the_six_models_and_the_pack_lists_them() {
         .expect("models.ron has the pack set_v5");
     assert_eq!(spec.dir, "set_v5");
     let listed: BTreeSet<&str> = spec.models.iter().map(|m| m.file.as_str()).collect();
-    assert_eq!(listed, FILES.into_iter().collect());
+    assert_eq!(listed, FILES.iter().copied().collect());
     let pack = glb::load_pack(&config, "set_v5", &assets()).expect("pack loads");
-    assert_eq!(pack.set.models().len(), 6);
+    assert_eq!(pack.set.models().len(), FILES.len());
 }
 
 #[test]
@@ -101,15 +141,22 @@ fn every_model_loads_with_three_levels_parts_and_anchors() {
         assert!(tris[0] > tris[1] && tris[1] > tris[2], "{file}: {tris:?}");
         for (n, level) in m.levels.iter().enumerate() {
             let names: Vec<&str> = level.anchors.iter().map(|a| a.name.as_str()).collect();
-            let building = !file.contains("light_tank") && !file.contains("harvester");
+            let building = is_building(file);
             assert_eq!(
                 names.contains(&"fx_smoke_0") && names.contains(&"fx_fire_0"),
                 building,
                 "{file} LOD{n}: {names:?} (structures have smoke and fire anchors)"
             );
-            let armed = file.contains("light_tank") || file.contains("defence_tower");
-            if armed {
-                assert!(names.contains(&"muzzle"), "{file} LOD{n}: {names:?}");
+            if is_armed(file) {
+                // The heavy tank's twin cannon has a muzzle anchor per barrel.
+                let muzzles: &[&str] = if file.contains("heavy_tank") {
+                    &["muzzle_l", "muzzle_r"]
+                } else {
+                    &["muzzle"]
+                };
+                for m in muzzles {
+                    assert!(names.contains(m), "{file} LOD{n}: {names:?}");
+                }
                 let joints: Vec<Joint> = level.parts.iter().map(|p| p.joint).collect();
                 assert!(
                     joints.contains(&Joint::Yaw) && joints.contains(&Joint::Pitch),
@@ -220,6 +267,15 @@ fn every_model_is_drawn_in_its_player_colour_and_the_contact_sheet_is_written_on
             "{}: blue {blue_p0}/{blue_p1}, red {red_p0}/{red_p1}",
             FILES[shape]
         );
+        if is_neutral(FILES[shape]) {
+            // Neither player colour shows on a neutral object: the same pixels for both players.
+            assert!(
+                blue_p0.abs_diff(blue_p1) < 200 && red_p0.abs_diff(red_p1) < 200,
+                "{}: the player colour changed a neutral model",
+                FILES[shape]
+            );
+            continue;
+        }
         assert!(
             blue_p0 > blue_p1 + 400,
             "{}: blue {blue_p0} vs {blue_p1}",
@@ -232,20 +288,24 @@ fn every_model_is_drawn_in_its_player_colour_and_the_contact_sheet_is_written_on
         );
     }
     if let Some(dir) = std::env::var_os("SF_SAVE_SHOTS") {
+        // Pages of five models (one row each, four tiles: blue 45, blue 80, red 45, red 80).
         let cols = 4u32;
-        let rows = models.len() as u32;
-        let mut px = vec![0u8; (TW * cols * TH * rows * 4) as usize];
-        for (i, tile) in tiles.iter().enumerate() {
-            let (cx, cy) = (i as u32 % cols, i as u32 / cols);
-            for y in 0..TH {
-                for x in 0..TW {
-                    let o = (((cy * TH + y) * TW * cols + cx * TW + x) * 4) as usize;
-                    px[o..o + 4].copy_from_slice(&tile.pixel(x, y));
+        for (page, chunk) in tiles.chunks(5 * cols as usize).enumerate() {
+            let rows = (chunk.len() as u32).div_ceil(cols);
+            let mut px = vec![0u8; (TW * cols * TH * rows * 4) as usize];
+            for (i, tile) in chunk.iter().enumerate() {
+                let (cx, cy) = (i as u32 % cols, i as u32 / cols);
+                for y in 0..TH {
+                    for x in 0..TW {
+                        let o = (((cy * TH + y) * TW * cols + cx * TW + x) * 4) as usize;
+                        px[o..o + 4].copy_from_slice(&tile.pixel(x, y));
+                    }
                 }
             }
+            let sheet = Rgba8::new(TW * cols, TH * rows, px);
+            let path =
+                PathBuf::from(&dir).join(format!("set_v5_contact_sheet_raw_{}.png", page + 1));
+            image::write_png(&path, &sheet).expect("write the contact sheet");
         }
-        let sheet = Rgba8::new(TW * cols, TH * rows, px);
-        let path = PathBuf::from(dir).join("set_v5_contact_sheet_raw.png");
-        image::write_png(&path, &sheet).expect("write the contact sheet");
     }
 }

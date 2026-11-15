@@ -1057,7 +1057,7 @@ mod tests {
                 "testpack_v1/models/verdedigingstoren.glb",
             )
             .replace(
-                "set_v4/veyran_transport_truck.glb",
+                "set_v5/veyran_transport_truck.glb",
                 "testpack_v1/models/pantserwagen.glb",
             )
         });
@@ -1133,7 +1133,8 @@ mod tests {
         // A role that names a primitive keeps it (the infantry's own is a cone,
         // not the cylinder its sort of thing gets).
         assert_eq!(mesh("rifleman"), MeshKind::Cone);
-        assert_eq!(mesh("heavy_gun_team"), MeshKind::Cone);
+        // A role with a glb file and no primitive of its own: infantry get the cylinder.
+        assert_eq!(mesh("heavy_gun_team"), MeshKind::Cylinder);
         assert_eq!(mesh("barracks"), MeshKind::Cube);
     }
 
@@ -1229,15 +1230,9 @@ mod tests {
     fn a_primitive_unit_is_as_wide_as_its_size() {
         let (defs, roster) = built(true);
         let style = full_style(&roster);
-        // The generic looks of the infantry of both factions, and the one
-        // role set v4 has no usable model for.
-        for id in [
-            "rifleman",
-            "rocket_trooper",
-            "engineer",
-            "scout",
-            "heavy_gun_team",
-        ] {
+        // The generic looks of the infantry of both factions: primitives (the
+        // factions' own looks are set v3 models).
+        for id in ["rifleman", "rocket_trooper", "engineer", "scout"] {
             let def = defs.unit(id).unwrap();
             let sim = defs.sim_unit(def.kind).unwrap();
             let shape = style.shape(roster.shape_of(Kind(def.kind)).unwrap());
@@ -1453,10 +1448,10 @@ mod tests {
                 assert_eq!(shape_in(&roster, &defs, id, f), own, "{id}");
             }
         }
-        // The roles that stay as they were are a primitive (heavy_gun_team,
-        // which has no usable v4 model) or an older stand-in (supply_truck).
+        // The two roles that had no usable v4 model have set v5 models since WP11.6b: the
+        // heavy gun team (once a primitive) and the neutral supply truck (once a testpack model).
         let kind = |id: &str| Kind(defs.kind_of(id).unwrap());
-        assert!(!roster.look(kind("heavy_gun_team")).unwrap().model);
+        assert!(roster.look(kind("heavy_gun_team")).unwrap().model);
         assert!(roster.look(kind("supply_truck")).unwrap().model);
         // Every faction look is a role of the definitions, in the style, with
         // the icon of the role.
@@ -1490,10 +1485,10 @@ mod tests {
         }
 
         let dir = std::env::temp_dir().join(format!("sf_roster_faction_{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("set_v4")).unwrap();
+        std::fs::create_dir_all(dir.join("set_v3")).unwrap();
         std::fs::copy(
-            assets().join("set_v4/veyran_rifleman.glb"),
-            dir.join("set_v4/veyran_rifleman.glb"),
+            assets().join("set_v3/veyran_rifleman.glb"),
+            dir.join("set_v3/veyran_rifleman.glb"),
         )
         .unwrap();
         let roster = Roster::build(&defs, &base(), &icons(), &dir, &models_ron(), true);

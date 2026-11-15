@@ -54,6 +54,18 @@ impl Palette {
     /// paint, paint2, team, metal, rubber, accent.
     pub fn materials(&self, faction: &str) -> Vec<Material> {
         let f = &self.factions[faction];
+        // A neutral model has no player colour: its third slot is a second light paint.
+        let third = if faction == "neutral" {
+            Material {
+                name: "paint3".to_owned(),
+                srgb: f.paint_light,
+            }
+        } else {
+            Material {
+                name: TEAM.to_owned(),
+                srgb: self.team_base,
+            }
+        };
         let m = |name: &str, srgb: [u8; 3]| Material {
             name: name.to_owned(),
             srgb,
@@ -61,7 +73,7 @@ impl Palette {
         vec![
             m("paint", f.paint),
             m("paint2", f.paint2),
-            m(TEAM, self.team_base),
+            third,
             m("metal", f.metal),
             m("rubber", f.rubber),
             m("accent", f.accent),
@@ -75,6 +87,8 @@ pub mod slot {
     pub const PAINT: Mat = Mat(0);
     pub const PAINT2: Mat = Mat(1);
     pub const TEAM: Mat = Mat(2);
+    /// The third slot of a neutral model (no player colour): a second light paint.
+    pub const PAINT3: Mat = Mat(2);
     pub const METAL: Mat = Mat(3);
     pub const RUBBER: Mat = Mat(4);
     pub const ACCENT: Mat = Mat(5);

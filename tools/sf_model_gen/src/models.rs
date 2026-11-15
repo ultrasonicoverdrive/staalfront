@@ -17,39 +17,53 @@ use crate::kit::{
 use crate::palette::{Palette, slot::*};
 
 /// The tone of a track shoe (a little darker than the band it sits on).
-const SHOE: crate::kit::Tone = 820;
+pub(crate) const SHOE: crate::kit::Tone = 820;
 
 /// The recipes of set v5, sorted by file name.
 pub const MODELS: &[fn() -> Model] = &[
+    crate::units_transport::meridian_amphibious_transport,
     meridian_construction_center,
     meridian_harvester,
+    crate::units::meridian_heavy_tank,
     meridian_light_tank,
+    crate::units_transport::meridian_light_transport,
+    crate::units_wheeled::meridian_repair_truck,
+    crate::units_artillery::meridian_siege_artillery,
+    crate::units_vessels::neutral_ferry,
+    crate::units_wheeled::neutral_supply_truck,
     veyran_defence_tower,
+    crate::units_vessels::veyran_gunboat,
+    crate::units_transport::veyran_harvester,
+    crate::units_vessels::veyran_heavy_gun_team,
+    crate::units::veyran_heavy_tank,
     veyran_light_tank,
     veyran_power_plant,
+    crate::units_wheeled::veyran_repair_truck,
+    crate::units_artillery::veyran_siege_artillery,
+    crate::units_wheeled::veyran_transport_truck,
 ];
 
 // ---- Shared parts ------------------------------------------------------------------------
 
 /// Mirror a right-side (`+Z`) mesh to both sides.
-fn both_sides(right: Mesh) -> Mesh {
+pub(crate) fn both_sides(right: Mesh) -> Mesh {
     right.clone().with(right.mirrored_z())
 }
 
 /// One track run on the right side: a rubber band with sloped ends from `-hx` to `hx`, between
 /// `z0` and `z1`, `h` high; cleats on its top run and road wheels on its outer face at LOD0, the
 /// wheels with fewer segments at LOD1; a plain block at LOD2.
-struct Track {
-    hx: i32,
-    z0: i32,
-    z1: i32,
-    h: i32,
-    wheels: i32,
-    wheel_r: i32,
+pub(crate) struct Track {
+    pub(crate) hx: i32,
+    pub(crate) z0: i32,
+    pub(crate) z1: i32,
+    pub(crate) h: i32,
+    pub(crate) wheels: i32,
+    pub(crate) wheel_r: i32,
 }
 
 impl Track {
-    fn mesh(&self, lod: Lod) -> Mesh {
+    pub(crate) fn mesh(&self, lod: Lod) -> Mesh {
         let Track {
             hx,
             z0,
@@ -133,7 +147,7 @@ impl Track {
 
 /// A team stripe lying on a surface from `lo` to `hi`: a thin box, at LOD2 only its top face (two
 /// triangles; a zero-height box loses its walls in [`Mesh::face`]).
-fn team_strip(lo: P, hi: P, lod: Lod) -> Mesh {
+pub(crate) fn team_strip(lo: P, hi: P, lod: Lod) -> Mesh {
     if lod.has(1) {
         cuboid(lo, hi, TEAM)
     } else {
@@ -145,7 +159,7 @@ fn team_strip(lo: P, hi: P, lod: Lod) -> Mesh {
 /// LOD2 only the tops (zero-height walls drop out). The flush fill matters for the baked shade: a
 /// band standing proud of a large roof face would darken all of it, because the roof's corners
 /// (its only vertices) lie against the band.
-fn team_frame(
+pub(crate) fn team_frame(
     outer: &[[i32; 2]],
     inner: &[[i32; 2]],
     y0: i32,
@@ -163,7 +177,7 @@ fn team_frame(
 /// from the outside in; the space from ring `i` to `i + 1` is a team band for even `i` (a [`frame`]
 /// standing from `y0` to `y1`) and roof filled flush in `fill` for odd `i`, and the inside of the
 /// last ring is filled too. The flush fill keeps the baked shade clean (see [`team_frame`]).
-fn team_rings(rings: &[Vec<[i32; 2]>], y0: i32, y1: i32, lod: Lod, fill: Mat) -> Mesh {
+pub(crate) fn team_rings(rings: &[Vec<[i32; 2]>], y0: i32, y1: i32, lod: Lod, fill: Mat) -> Mesh {
     let mut m = Mesh::new();
     for (i, pair) in rings.windows(2).enumerate() {
         if i % 2 == 0 {
@@ -187,7 +201,7 @@ fn team_rings(rings: &[Vec<[i32; 2]>], y0: i32, y1: i32, lod: Lod, fill: Mat) ->
 /// Nested chamfered rectangles for [`team_rings`]: the outline `(hx, hz, c)` and then each step
 /// further in by `steps[i]`, everywhere the same distance (also across the 45° chamfer, whose
 /// size shrinks by `(2 - sqrt 2)` times the step, down to 1 mm).
-fn insets(hx: i32, hz: i32, c: i32, steps: &[i32]) -> Vec<Vec<[i32; 2]>> {
+pub(crate) fn insets(hx: i32, hz: i32, c: i32, steps: &[i32]) -> Vec<Vec<[i32; 2]>> {
     let mut out = vec![chamfer_rect(hx, hz, c)];
     let (mut hx, mut hz, mut c) = (hx, hz, c);
     for w in steps {
@@ -205,7 +219,7 @@ fn insets(hx: i32, hz: i32, c: i32, steps: &[i32]) -> Vec<Vec<[i32; 2]>> {
 }
 
 /// A bolt head on a face that looks along `-Z`, its base at `at`.
-fn bolt_z(at: P, r: i32, h: i32) -> Mesh {
+pub(crate) fn bolt_z(at: P, r: i32, h: i32) -> Mesh {
     lathe_z(&[(r, 0), (r, h)], 4, &[METAL], Some(METAL), None)
         .toned(RECESS)
         .mirrored_z()
@@ -213,12 +227,20 @@ fn bolt_z(at: P, r: i32, h: i32) -> Mesh {
 }
 
 /// A vertical panel line on a face that looks along `+X`, at `x`, from `y0` to `y1` at `z`.
-fn seam_side_x(x: i32, y0: i32, y1: i32, z: i32, width: i32, raise: i32, mat: Mat) -> Mesh {
+pub(crate) fn seam_side_x(
+    x: i32,
+    y0: i32,
+    y1: i32,
+    z: i32,
+    width: i32,
+    raise: i32,
+    mat: Mat,
+) -> Mesh {
     closed_box([x, y0, z - width / 2], [x + raise, y1, z + width / 2], mat).toned(crate::kit::SEAM)
 }
 
 /// A wedge outline (pointed nose): back at `-hx`, the sides run to `fx`, the nose to `fx + nose`.
-fn wedge(hx: i32, fx: i32, nose: i32, hz: i32) -> Vec<[i32; 2]> {
+pub(crate) fn wedge(hx: i32, fx: i32, nose: i32, hz: i32) -> Vec<[i32; 2]> {
     vec![
         [-hx, -hz],
         [fx, -hz],

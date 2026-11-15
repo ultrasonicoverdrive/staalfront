@@ -324,7 +324,7 @@ key that is not a faction, a faction listed twice, and a faction the role does n
 refused with the file and line. A `models.ron` that is not there (a tool with a partial assets
 directory) skips only the pack check.
 
-What is wired (art set v4, `assets/set_v4`, which replaced set v3 as the placeholder pack):
+What is wired (the structures from art set v4, `assets/set_v4`, which replaced set v3 as the placeholder pack; the units from set v5 and set v3, see below):
 
 * **A model for Meridian and one for Veyran** (`models`; the generic `model` stays as it was and
   is what an owner that is neither gets): the structures construction_center, power_plant,
@@ -337,16 +337,23 @@ What is wired (art set v4, `assets/set_v4`, which replaced set v3 as the placeho
   (Veyran), civilian, technician, relay_transmitter, fuel_depot, archive_building,
   evidence_crate, ferry, bridge_segment, rail_spur, automated_gun and unmanned_artillery (the
   files of these two are `network_*.glb`), generator and ore_field.
-* **Set v5 (WP11.6a, the style proof of `tools/sf_model_gen`, `docs/art-style.md`):** six faction
-  entries point at `assets/set_v5` instead of set v4: Meridian construction_center, harvester and
-  light_tank, Veyran defence_tower, light_tank and power_plant. Model paths only; no stat changed.
-  The generator has made only the finished look so far: a build stage (`_foundation`, `_scaffolding`) or a
-  damage stage (`_damaged`, `_heavily_damaged`) of a set v5 structure is taken from the set v4 file of the
-  same name (`sf_game::roster::state_file`) until WP11.6c generates them.
-* **Not on set v4:** `demolition_team` keeps the set v3 file (the v4 file fails `sf_asset_check`:
-  five parts in one level, no nodes for the second figure); `heavy_gun_team` is a primitive (same
-  reason, no v3 model either); `supply_truck` keeps its `testpack_v1` model (v4 has a
-  supply truck per faction, but the role is Neutral's alone).
+* **Set v5 (WP11.6a/b, our own generator `tools/sf_model_gen`, `docs/art-style.md`):** the
+  six models of the style proof (Meridian construction_center, harvester and light_tank, Veyran
+  defence_tower, light_tank and power_plant) and, since WP11.6b, **every vehicle and vessel role**:
+  heavy_tank, siege_artillery and repair_truck of both factions, the Veyran harvester,
+  transport_truck and gunboat, the Meridian light_transport and amphibious_transport, the neutral
+  supply_truck and ferry, and the Veyran heavy_gun_team (an infantry role). Model paths only; no
+  stat changed. The generator has made only the finished look of a structure so far: a build stage
+  (`_foundation`, `_scaffolding`) or a damage stage (`_damaged`, `_heavily_damaged`) of a set v5
+  structure is taken from the set v4 file of the same name (`sf_game::roster::state_file`) until
+  WP11.6c generates them.
+* **Infantry is set v3 (Tijmen's figures, `assets/set_v3`)**, back from set v4 since WP11.6b
+  because the v3 figures (about 1,100 triangles in LOD0) are far better than the v4 ones (about
+  130): rifleman, rocket_trooper, engineer and scout (a model per faction), sniper, medic,
+  combat_engineer, civilian, technician and demolition_team (one file in `model`). The v3 sniper
+  has 19.0 % team colour in LOD0 where the checker asks 20 %: a finding, not a load error
+  (`sf_asset_check` set v3 test), and the figure stays.
+* **Not on set v5 or v3:** nothing; every vehicle, vessel and infantry role has a real model.
 
 The file names of v4 are `<faction>_<role>.glb`, so a role of both factions has two. The
 damage and construction states of a structure (`_damaged`, `_heavily_damaged`, `_foundation`,
