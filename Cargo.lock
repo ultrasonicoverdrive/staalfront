@@ -2635,6 +2635,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sf_voice_gen"
+version = "0.1.0"
+dependencies = [
+ "sf_sound_gen",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

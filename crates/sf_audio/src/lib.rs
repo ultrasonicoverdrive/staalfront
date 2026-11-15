@@ -38,5 +38,6 @@ pub use positional::{Cue, PlanStats, Planner, Request};
 pub use spatial::{Listener, Mix, SpatialParams};
 pub use system::{
     AudioSystem, BANK_FILE, DEFAULT_CROSSFADE, MusicLoad, MusicTrace, PlayTrace, RaStatus, Stats,
+    pick_variant,
 };
 pub use voice_brake::{VoiceBrake, VoiceConfig};

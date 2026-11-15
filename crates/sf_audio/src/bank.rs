@@ -11,6 +11,7 @@
 //!             category: Sfx,                    // Sfx | Ui | Music, default Sfx
 //!             looped: false,                    // default false
 //!             original_as_is: false,            // default false: see the field
+//!             variants: [],                     // more files, one is picked per play; default none
 //!         ),
 //!     },
 //! )
@@ -94,6 +95,18 @@ pub struct SoundDef {
     /// voice cap), not with this entry's volume, pitch and cap, which are tuned for the CC0 file (WP11.3b).
     #[serde(default)]
     pub original_as_is: bool,
+    /// More files of the same sound, relative to the asset root (WP11.2b). Each play picks one of `file`
+    /// and these at random, never the one picked last time for this name (`AudioSystem::pick_variant`).
+    /// Volume, pitch, cap and category are shared. Default none: `file` only.
+    #[serde(default)]
+    pub variants: Vec<String>,
+}
+
+impl SoundDef {
+    /// `file` followed by the `variants`: every file this sound can play.
+    pub fn files(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.file.as_str()).chain(self.variants.iter().map(String::as_str))
+    }
 }
 
 /// All sounds, by name (sorted, so iteration and warnings are stable).
@@ -164,6 +177,20 @@ impl Bank {
                     def.file
                 ));
             }
+            def.variants.retain(|v| {
+                if !path_is_inside_root(v) {
+                    warnings.push(format!(
+                        "sound '{name}': variant '{v}' must be a relative path without '..'; variant removed"
+                    ));
+                    return false;
+                }
+                if !file_exists(v) {
+                    warnings.push(format!(
+                        "sound '{name}': variant '{v}' not found; it will be skipped when picked"
+                    ));
+                }
+                true
+            });
             if !def.volume.is_finite() || def.volume < 0.0 {
                 warnings.push(format!(
                     "sound '{name}': volume {} is invalid; using 1.0",
@@ -298,6 +325,7 @@ mod tests {
                     category: Category::Sfx,
                     looped: false,
                     original_as_is: false,
+                    variants: Vec::new(),
                 },
             )]),
         };
@@ -327,6 +355,7 @@ mod tests {
                         category: Category::Sfx,
                         looped: false,
                         original_as_is: false,
+                        variants: Vec::new(),
                     },
                 )]),
             };
@@ -334,6 +363,30 @@ mod tests {
             assert_eq!(w.len(), 1, "{bad}: {w:?}");
             assert!(bank.sounds.is_empty(), "{bad}");
         }
+    }
+
+    #[test]
+    fn variants_parse_and_a_bad_variant_is_removed_with_a_warning() {
+        let mut bank = Bank::parse(
+            r#"(sounds: {"v": (file: "a.wav", variants: ["b.wav", "../c.wav", "d.wav"], category: Voice)})"#,
+        )
+        .unwrap();
+        let w = bank.validate(|f| f != "d.wav");
+        assert_eq!(w.len(), 2, "{w:?}");
+        assert!(
+            w[0].contains("../c.wav") && w[0].contains("removed"),
+            "{w:?}"
+        );
+        assert!(
+            w[1].contains("d.wav") && w[1].contains("not found"),
+            "{w:?}"
+        );
+        let v = bank.get("v").unwrap();
+        assert_eq!(v.files().collect::<Vec<_>>(), ["a.wav", "b.wav", "d.wav"]);
+        // Left out: `file` only.
+        let one = Bank::parse(r#"(sounds: {"o": (file: "a.wav")})"#).unwrap();
+        assert!(one.get("o").unwrap().variants.is_empty());
+        assert_eq!(one.get("o").unwrap().files().collect::<Vec<_>>(), ["a.wav"]);
     }
 
     #[test]
