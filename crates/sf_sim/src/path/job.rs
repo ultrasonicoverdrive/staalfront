@@ -1419,6 +1419,9 @@ impl Job {
             }
             3 => {
                 self.phase = Phase::Smooth;
+                if work.raw.is_empty() {
+                    work.raw.push((self.pos, self.start_cell));
+                }
                 self.sm_from = work.raw.len();
             }
             _ => {

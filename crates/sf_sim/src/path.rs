@@ -492,6 +492,18 @@ impl Pathing {
         &mut self.fields
     }
 
+    /// The job's slot and the service's start slot set to the given values (save tests, cases at
+    /// the bound).
+    #[cfg(test)]
+    pub(crate) fn set_slots_for_test(&mut self, job_slot: Option<u32>, next_slot: Option<u32>) {
+        if let (Some(s), Some(job)) = (job_slot, self.job.as_mut()) {
+            job.slot = s;
+        }
+        if let Some(s) = next_slot {
+            self.next_slot = s;
+        }
+    }
+
     /// Whether the class graphs of two pathings are the same (save tests).
     #[cfg(test)]
     pub(crate) fn same_graphs(&self, other: &Pathing) -> bool {

@@ -258,7 +258,12 @@ impl Corridor {
 impl Corridor {
     /// A sector reached by a node of another sector (save tests).
     pub(crate) fn corrupt_for_test(&mut self) {
-        self.reached[0] = SLOTS as u32;
+        // Node 0 of sector 1, reached by the search going on: only its sector is wrong.
+        self.generation = self.generation.max(1);
+        let n = SLOTS;
+        self.seen[n] = self.generation;
+        self.parent[n] = FROM_GOAL;
+        self.reached[0] = n as u32;
     }
 }
 

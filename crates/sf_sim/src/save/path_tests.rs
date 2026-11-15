@@ -337,8 +337,14 @@ fn rebuilt_graphs_equal_the_ones_placements_made() {
     for t in 1..=160 {
         w.step();
         if t == 91 {
-            assert!(w.is_occupied(Cell::new(95, 63)), "the corner structure stands");
-            assert!(w.is_occupied(Cell::new(48, 19)), "the border structure stands");
+            assert!(
+                w.is_occupied(Cell::new(95, 63)),
+                "the corner structure stands"
+            );
+            assert!(
+                w.is_occupied(Cell::new(48, 19)),
+                "the border structure stands"
+            );
         }
         if after.contains(&t) {
             let back = World::restore(fresh(), &w.save().unwrap()).unwrap();
@@ -387,7 +393,8 @@ fn corruptions() -> Vec<Corruption> {
             w.pathing.corrupt_for_test(0)
         }),
         ("a job for a slot or graph that does not exist", |w| {
-            w.pathing.corrupt_for_test(1)
+            let n = w.entities.len() as u32;
+            w.pathing.set_slots_for_test(Some(n), None)
         }),
         ("a job's ready leg has no cells", |w| {
             w.pathing.corrupt_for_test(2)
@@ -408,7 +415,11 @@ fn corruptions() -> Vec<Corruption> {
         }),
         (
             "the path service starts at a slot it never looked at",
-            |w| w.pathing.corrupt_for_test(9),
+            |w| {
+                // The first slot it can never have left: the count of slots it looks at.
+                let n = w.entities.route.len().min(w.entities.len()) as u32;
+                w.pathing.set_slots_for_test(None, Some(n))
+            },
         ),
         ("sector epochs of another map", |w| {
             w.pathing.corrupt_for_test(10)
