@@ -313,6 +313,9 @@ impl fmt::Display for ScheduleError {
 
 impl std::error::Error for ScheduleError {}
 
+/// The pending commands by `(tick, player, player sequence)`.
+pub(crate) type Pending = BTreeMap<(Tick, PlayerId, u64), Command>;
+
 /// The pending commands, ordered by `(tick, player, player sequence)`.
 ///
 /// A `BTreeMap` keyed by that triple: its iteration order is sorted by key, so
@@ -350,21 +353,13 @@ impl CommandQueue {
 
     /// The two maps, for the save file (WP13.1a). Destructured without `..`: a new field fails to
     /// compile until the save writes it.
-    pub(crate) fn parts(
-        &self,
-    ) -> (
-        &BTreeMap<(Tick, PlayerId, u64), Command>,
-        &BTreeMap<PlayerId, u64>,
-    ) {
+    pub(crate) fn parts(&self) -> (&Pending, &BTreeMap<PlayerId, u64>) {
         let CommandQueue { pending, next_seq } = self;
         (pending, next_seq)
     }
 
     /// A queue from the two maps of [`CommandQueue::parts`], as a save file read them back.
-    pub(crate) fn from_parts(
-        pending: BTreeMap<(Tick, PlayerId, u64), Command>,
-        next_seq: BTreeMap<PlayerId, u64>,
-    ) -> CommandQueue {
+    pub(crate) fn from_parts(pending: Pending, next_seq: BTreeMap<PlayerId, u64>) -> CommandQueue {
         CommandQueue { pending, next_seq }
     }
 

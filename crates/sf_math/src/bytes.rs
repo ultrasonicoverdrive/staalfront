@@ -287,6 +287,7 @@ mod tests {
     }
 
     /// Reads `sample` back without judging the values (so a flipped bit cannot trip an assert).
+    #[allow(clippy::vec_init_then_push)] // One read per line, in file order.
     fn parse(data: &[u8]) -> Result<Vec<u64>, ByteError> {
         let mut r = ByteReader::new(data);
         let mut v = Vec::new();
