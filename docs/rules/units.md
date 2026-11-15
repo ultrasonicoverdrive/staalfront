@@ -337,6 +337,12 @@ What is wired (art set v4, `assets/set_v4`, which replaced set v3 as the placeho
   (Veyran), civilian, technician, relay_transmitter, fuel_depot, archive_building,
   evidence_crate, ferry, bridge_segment, rail_spur, automated_gun and unmanned_artillery (the
   files of these two are `network_*.glb`), generator and ore_field.
+* **Set v5 (WP11.6a, the style proof of `tools/sf_model_gen`, `docs/art-style.md`):** six faction
+  entries point at `assets/set_v5` instead of set v4: Meridian construction_center, harvester and
+  light_tank, Veyran defence_tower, light_tank and power_plant. Model paths only; no stat changed.
+  The generator has made only the finished look so far: a build stage (`_foundation`, `_scaffolding`) or a
+  damage stage (`_damaged`, `_heavily_damaged`) of a set v5 structure is taken from the set v4 file of the
+  same name (`sf_game::roster::state_file`) until WP11.6c generates them.
 * **Not on set v4:** `demolition_team` keeps the set v3 file (the v4 file fails `sf_asset_check`:
   five parts in one level, no nodes for the second figure); `heavy_gun_team` is a primitive (same
   reason, no v3 model either); `supply_truck` keeps its `testpack_v1` model (v4 has a

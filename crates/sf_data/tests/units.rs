@@ -780,14 +780,30 @@ fn art_set_v4_is_wired_into_the_roles_it_has_a_usable_model_for() {
         "repair_truck",
     ] {
         let def = get(id);
+        // WP11.6a: the six models of the set v5 style proof replace their v4 file.
+        let set = |faction: &str| {
+            let v5 = [
+                ("meridian", "construction_center"),
+                ("meridian", "harvester"),
+                ("meridian", "light_tank"),
+                ("veyran", "defence_tower"),
+                ("veyran", "light_tank"),
+                ("veyran", "power_plant"),
+            ];
+            if v5.contains(&(faction, id)) {
+                "set_v5"
+            } else {
+                "set_v4"
+            }
+        };
         assert_eq!(
             def.model_for(Some(Faction::Meridian)),
-            &glb(&format!("set_v4/meridian_{id}.glb")),
+            &glb(&format!("{}/meridian_{id}.glb", set("meridian"))),
             "{id}"
         );
         assert_eq!(
             def.model_for(Some(Faction::Veyran)),
-            &glb(&format!("set_v4/veyran_{id}.glb")),
+            &glb(&format!("{}/veyran_{id}.glb", set("veyran"))),
             "{id}"
         );
         assert_eq!(
@@ -843,22 +859,31 @@ fn art_set_v4_is_wired_into_the_roles_it_has_a_usable_model_for() {
         assert!(!root.join(format!("assets/set_v4/{name}.glb")).exists());
     }
 
-    // Every v4 file a role names is in the pack `set_v4` of models.ron.
+    // Every v4 or v5 file a role names is in the pack of that name in models.ron.
     let models_ron = lf(&std::fs::read_to_string(root.join("assets/config/models.ron")).unwrap());
-    let pack = &models_ron[models_ron.find("\"set_v4\": (").expect("pack set_v4")..];
-    for def in defs.units() {
-        for model in def.all_models() {
-            if let Model::Glb(path) = model
-                && let Some(file) = path.strip_prefix("set_v4/")
-            {
-                assert!(
-                    pack.contains(&format!("(file: \"{file}\", icon: ")),
-                    "{}: {path} is not in the pack set_v4",
-                    def.id
-                );
+    let mut v5_files = 0;
+    for set in ["set_v4", "set_v5"] {
+        let start = models_ron
+            .find(&format!("\"{set}\": ("))
+            .unwrap_or_else(|| panic!("pack {set}"));
+        let pack = &models_ron[start..];
+        let pack = &pack[..pack.find("\n        ),").expect("end of the pack")];
+        for def in defs.units() {
+            for model in def.all_models() {
+                if let Model::Glb(path) = model
+                    && let Some(file) = path.strip_prefix(&format!("{set}/"))
+                {
+                    v5_files += usize::from(set == "set_v5");
+                    assert!(
+                        pack.contains(&format!("(file: \"{file}\", icon: ")),
+                        "{}: {path} is not in the pack {set}",
+                        def.id
+                    );
+                }
             }
         }
     }
+    assert_eq!(v5_files, 6, "the six roles of the v5 style proof");
 }
 
 #[test]

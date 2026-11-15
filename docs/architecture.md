@@ -677,8 +677,9 @@ features off; `names` and `utils` only: no image decoding, no file or base64 URI
   `barrel`, `_LOD<n>` stripped); mesh leaves (`hull_steel_LOD0`, ...) merge into the
   nearest part with their relative transform, so a part split per material is **one
   vertex/index buffer**. The material is a per-vertex colour (`mesh::Vertex::color`:
-  rgb = base colour factor, a = team weight; `team` takes the player colour in
-  `scene.wgsl`). Parts without geometry below them are dropped (the test pack's
+  rgb = base colour factor x `COLOR_0` (both linear; without `COLOR_0` the factor
+  alone; `COLOR_0` alpha dropped), a = team weight; `team` ignores `COLOR_0` and
+  takes the player colour in `scene.wgsl`; `tests/glb_color0.rs`). Parts without geometry below them are dropped (the test pack's
   scout, trucks and buildings have empty turret/barrel nodes).
 - **Rig and instancing.** A level is a list of `RigPart`s (`model.rs`: mesh, parent,
   rest transform, `Joint::Fixed | Yaw | Pitch`). Per instance the instancer poses

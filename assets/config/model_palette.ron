@@ -1,0 +1,30 @@
+// The palette of art set v5 (WP11.6a, style G "semi-realistic, bright", decision Tijmen 14-11-2026;
+// docs/art-style.md). Read by tools/sf_model_gen (the models) and by its cutscene part generator.
+// sRGB 0..255. One entry per surface type, so a later texture step can keep the material slots:
+// `paint` (main hull paint), `paint2` (second paint), `metal` (gun steel, fittings), `rubber`
+// (tracks, tyres, running gear), `accent` (a small fixed faction mark; glass on Meridian).
+// `team` is not here: it is the engine's player colour; the file only stores its neutral base.
+(
+    factions: {
+        "meridian": (
+            paint: (220, 180, 80),
+            paint_light: (232, 200, 104),
+            paint2: (122, 122, 64),
+            paint2_shade: (80, 80, 60),
+            metal: (40, 40, 20),
+            rubber: (20, 20, 20),
+            accent: (70, 96, 110),
+        ),
+        "veyran": (
+            paint: (120, 148, 178),
+            paint_light: (150, 176, 204),
+            paint2: (74, 78, 104),
+            paint2_shade: (98, 102, 128),
+            metal: (40, 40, 40),
+            rubber: (20, 20, 20),
+            accent: (160, 32, 48),
+        ),
+    },
+    // The base colour stored in the team material (the engine replaces it with the player colour).
+    team_base: (235, 235, 235),
+)
