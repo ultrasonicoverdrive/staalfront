@@ -328,13 +328,19 @@ pub fn loft(
     m
 }
 
-/// A box from `lo` to `hi` with its vertical and top edges bevelled by `b` (0: a plain box).
-/// Open at the bottom.
+/// A box from `lo` to `hi` with its vertical and top edges bevelled by `b`, or by the kit rule
+/// ([`auto_bevel`]) when that is more (0 and a detail-sized box: a plain box). Open at the bottom:
+/// it stands on something.
 pub fn bevel_box(lo: P, hi: P, b: i32, side: Mat, top: Mat) -> Mesh {
     let hx = (hi[0] - lo[0]) / 2;
     let hz = (hi[2] - lo[2]) / 2;
     let (cx, cz) = (lo[0] + hx, lo[2] + hz);
-    let b = b.min(hx / 2).min(hz / 2).min((hi[1] - lo[1]) / 2).max(0);
+    let b = b
+        .max(auto_bevel(lo, hi))
+        .min(hx / 2)
+        .min(hz / 2)
+        .min((hi[1] - lo[1]) / 2)
+        .max(0);
     let rings = vec![
         (chamfer_rect(hx, hz, b), lo[1]),
         (chamfer_rect(hx, hz, b), hi[1] - b),
@@ -343,23 +349,71 @@ pub fn bevel_box(lo: P, hi: P, b: i32, side: Mat, top: Mat) -> Mesh {
     loft(&rings, &[side, side], Some(top), None).moved([cx, 0, cz])
 }
 
-/// A plain box, open at the bottom (10 triangles).
+/// A box, open at the bottom: plain (10 triangles) below [`BEVEL_MIN_SIDE_MM`], else bevelled
+/// by the kit rule ([`auto_bevel`]).
 pub fn cuboid(lo: P, hi: P, mat: Mat) -> Mesh {
     bevel_box(lo, hi, 0, mat, mat)
 }
 
-/// A closed plain box (12 triangles), for parts seen from below.
+/// A closed box, for parts seen from below: plain (12 triangles) below [`BEVEL_MIN_SIDE_MM`] or
+/// outside LOD0, else bevelled on all twelve edges by [`auto_bevel`] (the bottom edges too: they
+/// are seen at 45°).
 pub fn closed_box(lo: P, hi: P, mat: Mat) -> Mesh {
     let hx = (hi[0] - lo[0]) / 2;
     let hz = (hi[2] - lo[2]) / 2;
+    let b = auto_bevel(lo, hi);
     let r = chamfer_rect(hx, hz, 0);
-    loft(
-        &[(r.clone(), lo[1]), (r, hi[1])],
-        &[mat],
-        Some(mat),
-        Some(mat),
-    )
-    .moved([lo[0] + hx, 0, lo[2] + hz])
+    let rings = if b > 0 {
+        let inset = chamfer_rect(hx - b, hz - b, b / 2);
+        let side = chamfer_rect(hx, hz, b);
+        vec![
+            (inset.clone(), lo[1]),
+            (side.clone(), lo[1] + b),
+            (side, hi[1] - b),
+            (inset, hi[1]),
+        ]
+    } else {
+        vec![(r.clone(), lo[1]), (r, hi[1])]
+    };
+    let bands = vec![mat; rings.len() - 1];
+    loft(&rings, &bands, Some(mat), Some(mat)).moved([lo[0] + hx, 0, lo[2] + hz])
+}
+
+// ---- The bevel rule (WP11.6r) -------------------------------------------------------------------
+
+/// A box whose smallest side is under this is a detail (a seam, a rail, a post, a bolt row) and
+/// stays a plain box: its edges are too small to catch light at RTS distance.
+pub const BEVEL_MIN_SIDE_MM: i32 = 240;
+/// The automatic bevel, per mille of the box's smallest side ...
+pub const BEVEL_PERMILLE: i32 = 80;
+/// ... but at least this ...
+pub const BEVEL_MIN_MM: i32 = 20;
+/// ... and at most this.
+pub const BEVEL_MAX_MM: i32 = 120;
+/// The most [`Lod::bevel`] widens a recipe's bevel in LOD0.
+pub const BEVEL_WIDEN_MAX_MM: i32 = 60;
+
+std::thread_local! {
+    /// The level [`Model::new`] is building on this thread (0 outside it).
+    static BUILD_LOD: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+/// The level being built on this thread: set by [`Model::new`] around each level's recipe, LOD0
+/// outside it.
+pub fn building_lod() -> Lod {
+    Lod(BUILD_LOD.with(std::cell::Cell::get))
+}
+
+/// The kit's bevel for a box from `lo` to `hi`: [`BEVEL_PERMILLE`] of its smallest side, clamped
+/// to [`BEVEL_MIN_MM`]..=[`BEVEL_MAX_MM`]; 0 for a detail (smallest side under
+/// [`BEVEL_MIN_SIDE_MM`]) and outside LOD0 (the far levels keep their explicit bevels only, so
+/// their share of LOD0 stays as it was).
+pub fn auto_bevel(lo: P, hi: P) -> i32 {
+    let side = (0..3).map(|i| (hi[i] - lo[i]).abs()).min().unwrap_or(0);
+    if building_lod().0 != 0 || side < BEVEL_MIN_SIDE_MM {
+        return 0;
+    }
+    (side * BEVEL_PERMILLE / 1000).clamp(BEVEL_MIN_MM, BEVEL_MAX_MM)
 }
 
 /// Rings of a bevel box all get the point count of the largest (a chamfer of 0 next to one of
@@ -619,15 +673,25 @@ pub struct Lod(pub u8);
 impl Lod {
     pub const ALL: [Lod; 3] = [Lod(0), Lod(1), Lod(2)];
 
-    /// Segments of a round part: `full`, then halved per level, at least 4 (a power of two).
+    /// Segments of a round part: at least [`ROUND_MIN_SEGS`] in LOD0 (WP11.6r: an 8-sided wheel
+    /// or barrel showed its facets at 45°), then `full` halved per level, at least 4 (a power of
+    /// two).
     pub fn segs(self, full: u32) -> u32 {
         assert!(full.is_power_of_two() && full <= 64);
-        (full >> self.0).max(4)
+        if self.0 == 0 {
+            full.max(ROUND_MIN_SEGS)
+        } else {
+            (full >> self.0).max(4)
+        }
     }
 
-    /// A bevel width: `full`, half of it at LOD1, none at LOD2.
+    /// A bevel width: in LOD0 `full` plus half of it, at most [`BEVEL_WIDEN_MAX_MM`] more
+    /// (WP11.6r: the recipes' bevels were too narrow to catch light at RTS distance; a `full` under
+    /// 10 is a switch, `v * lod.bevel(1)`, and stays as it is), half of `full` at LOD1, none at
+    /// LOD2.
     pub fn bevel(self, full: i32) -> i32 {
         match self.0 {
+            0 if full >= 10 => full + (full / 2).min(BEVEL_WIDEN_MAX_MM),
             0 => full,
             1 => full / 2,
             _ => 0,
@@ -639,6 +703,9 @@ impl Lod {
         self.0 <= upto
     }
 }
+
+/// The fewest segments a round part has in LOD0 ([`Lod::segs`]).
+pub const ROUND_MIN_SEGS: u32 = 16;
 
 // ---- Nodes and models --------------------------------------------------------------------
 
@@ -728,11 +795,16 @@ impl Model {
     pub fn new(stem: &str, materials: Vec<Material>, parts: impl Fn(Lod) -> Vec<Node>) -> Self {
         let lods = Lod::ALL
             .iter()
-            .map(|&lod| Node {
-                name: format!("{stem}_LOD{}", lod.0),
-                at: [0, 0, 0],
-                mesh: Mesh::new(),
-                children: parts(lod),
+            .map(|&lod| {
+                BUILD_LOD.with(|l| l.set(lod.0));
+                let children = parts(lod);
+                BUILD_LOD.with(|l| l.set(0));
+                Node {
+                    name: format!("{stem}_LOD{}", lod.0),
+                    at: [0, 0, 0],
+                    mesh: Mesh::new(),
+                    children,
+                }
             })
             .collect();
         Self {

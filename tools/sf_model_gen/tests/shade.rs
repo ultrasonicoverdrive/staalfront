@@ -201,3 +201,89 @@ fn a_lathed_dome_gets_no_edge_wear() {
         "the control mesh shows no wear"
     );
 }
+
+/// A straight drum of 16 segments, high and alone, closed on top (the cap meets the wall at 90°).
+fn drum() -> Mesh {
+    lathe(&[(1000, 0), (1000, 1200)], 16, &[Mat(0)], None, None).moved([0, 5000, 0])
+}
+
+fn close(a: [f32; 3], b: [f32; 3]) -> bool {
+    (0..3).all(|i| (a[i] - b[i]).abs() < 1e-5)
+}
+
+/// The corner normals of `m` at the point `p`.
+fn normals_at(m: &Mesh, p: [i32; 3]) -> Vec<(Tri, [f32; 3])> {
+    let n = shade::corner_normals(&m.tris);
+    m.tris
+        .iter()
+        .enumerate()
+        .flat_map(|(i, t)| (0..3).map(move |k| (i, *t, k)))
+        .filter(|(_, t, k)| t.v[*k] == p)
+        .map(|(i, t, k)| (t, n[i][k]))
+        .collect()
+}
+
+/// WP11.6r: on a turned surface the normals of a shared corner agree (the wall is smooth, its
+/// segments 22.5° apart), while the cap, 90° away, keeps its own normal; and a box edge stays hard
+/// even when the box is marked as turned, because it is sharper than the crease angle.
+#[test]
+fn smooth_normals_agree_on_a_lathe_and_stay_hard_past_the_crease_angle() {
+    assert_eq!(shade::CREASE_DEG, 40);
+    assert_eq!(shade::CREASE_COS, 0.766_044);
+    let m = drum();
+    // A corner of the wall at the foot, shared by several wall triangles.
+    let wall = normals_at(&m, [1000, 5000, 0]);
+    assert!(wall.len() >= 2, "the corner is shared by the wall");
+    assert!(wall.iter().all(|w| close(w.1, wall[0].1)), "{wall:?}");
+    // The smooth normal points straight out at this corner (it lies on +X).
+    assert!(close(wall[0].1, [1.0, 0.0, 0.0]), "{:?}", wall[0].1);
+    // The top corner is shared by the cap: hard edge, two different normals.
+    let top: Vec<[f32; 3]> = normals_at(&m, [1000, 6200, 0])
+        .into_iter()
+        .map(|x| x.1)
+        .collect();
+    assert!(top.iter().any(|v| close(*v, [0.0, 1.0, 0.0])), "{top:?}");
+    assert!(top.iter().any(|v| close(*v, [1.0, 0.0, 0.0])), "{top:?}");
+    // A box marked as turned: every corner keeps its face's own normal (90° > 40°).
+    let boxed = cuboid([-500, 3000, -500], [500, 3200, 500], Mat(0)).lathed();
+    let nb = shade::corner_normals(&boxed.tris);
+    for (i, t) in boxed.tris.iter().enumerate() {
+        for k in 0..3 {
+            assert!(close(nb[i][k], unit_normal(t)), "box edge smoothed");
+        }
+    }
+    // A flat (not turned) solid is never smoothed, even where its faces meet at a shallow angle.
+    let mut flat = drum();
+    for t in &mut flat.tris {
+        t.lathed = false;
+    }
+    let nf = shade::corner_normals(&flat.tris);
+    for (i, t) in flat.tris.iter().enumerate() {
+        assert!((0..3).all(|k| close(nf[i][k], unit_normal(t))));
+    }
+}
+
+/// WP11.6r: no smooth (lathed) triangle carries facet variation: on a lone drum every wall corner
+/// at the foot has the same colour; the same drum unmarked does vary from facet to facet.
+#[test]
+fn no_smooth_part_carries_facet_variation() {
+    let spread = |m: &Mesh| {
+        let c = colours(m);
+        let side: Vec<f32> = c
+            .iter()
+            .zip(m.tris.iter().flat_map(|t| t.v))
+            .filter(|((t, _), p)| unit_normal(t)[1].abs() < 0.5 && p[1] == 5000)
+            .map(|((_, c), _)| lum(*c))
+            .collect();
+        let hi = side.iter().copied().fold(0.0, f32::max);
+        let lo = side.iter().copied().fold(1.0, f32::min);
+        hi / lo
+    };
+    let smooth = drum();
+    assert!(spread(&smooth) <= 1.005, "smooth drum {}", spread(&smooth));
+    let mut flat = drum();
+    for t in &mut flat.tris {
+        t.lathed = false;
+    }
+    assert!(spread(&flat) > 1.01, "flat drum {}", spread(&flat));
+}

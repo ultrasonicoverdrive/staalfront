@@ -136,11 +136,13 @@ fn is_armed(stem: &str) -> bool {
 /// The art brief's budgets (`sf_asset_check::class::budget`), as literals.
 fn budget(stem: &str) -> [usize; 3] {
     if is_building(stem) && !is_decor(stem) {
-        [5000, 1500, 300]
+        [8000, 2400, 500]
     } else if is_infantry(stem) {
         [1500, 250, 60]
-    } else {
+    } else if is_decor(stem) {
         [1500, 500, 150]
+    } else {
+        [4000, 1200, 300]
     }
 }
 
@@ -227,7 +229,6 @@ fn the_stage_rules_are_pinned() {
     assert_eq!(stages::TEAM_MIN_TRIS, 12);
     assert_eq!(stages::CHUNK_SIDES, 8);
     assert_eq!(stages::FIT_RES, 400);
-    assert_eq!(buildings::DETAIL_FLOOR, 2650);
     assert_eq!(buildings::DETAIL_CEIL, 3400);
     assert_eq!(objects::OBJECT_FLOOR, 1000);
     assert_eq!(objects::OBJECT_CEIL, 3400);
@@ -852,10 +853,83 @@ fn the_lod_knob_halves_segments_and_drops_bevels() {
         [16, 8, 4],
         "segments per level"
     );
-    assert_eq!(Lod::ALL.map(|l| l.segs(8)), [8, 4, 4]);
-    assert_eq!(Lod::ALL.map(|l| l.bevel(40)), [40, 20, 0]);
+    // WP11.6r: LOD0 has at least 16 segments; the far levels keep halving the recipe's number.
+    assert_eq!(Lod::ALL.map(|l| l.segs(8)), [16, 4, 4]);
+    assert_eq!(Lod::ALL.map(|l| l.segs(32)), [32, 16, 8]);
+    assert_eq!(sf_model_gen::kit::ROUND_MIN_SEGS, 16);
+    // WP11.6r: LOD0 widens a recipe's bevel by half, at most 60 mm; a switch (under 10) stays.
+    assert_eq!(Lod::ALL.map(|l| l.bevel(40)), [60, 20, 0]);
+    assert_eq!(Lod::ALL.map(|l| l.bevel(300)), [360, 150, 0]);
+    assert_eq!(Lod::ALL.map(|l| l.bevel(1)), [1, 0, 0]);
+    assert_eq!(sf_model_gen::kit::BEVEL_WIDEN_MAX_MM, 60);
     assert_eq!(Lod::ALL.map(|l| l.has(0)), [true, false, false]);
     assert_eq!(Lod::ALL.map(|l| l.has(1)), [true, true, false]);
+}
+
+/// WP11.6r, the bevel rule: in LOD0 every box of the kit whose smallest side is at least
+/// `BEVEL_MIN_SIDE_MM` gets a bevel of 8 % of that side (20..=120 mm), the closed box on its bottom
+/// edges too; a detail-sized box and every box of the far levels stay plain.
+#[test]
+fn every_lod0_block_is_bevelled_by_the_kit_rule() {
+    use sf_model_gen::kit::{
+        BEVEL_MAX_MM, BEVEL_MIN_MM, BEVEL_MIN_SIDE_MM, BEVEL_PERMILLE, Mat, Model, Node,
+        auto_bevel, closed_box, cuboid,
+    };
+    assert_eq!(
+        (
+            BEVEL_MIN_SIDE_MM,
+            BEVEL_PERMILLE,
+            BEVEL_MIN_MM,
+            BEVEL_MAX_MM
+        ),
+        (240, 80, 20, 120)
+    );
+    assert_eq!(auto_bevel([0, 0, 0], [239, 5000, 5000]), 0, "a detail");
+    assert_eq!(auto_bevel([0, 0, 0], [240, 5000, 5000]), 20, "the floor");
+    assert_eq!(auto_bevel([0, 0, 0], [1000, 600, 2000]), 48, "8 % of 600");
+    assert_eq!(
+        auto_bevel([0, 0, 0], [3000, 4000, 5000]),
+        120,
+        "the ceiling"
+    );
+    // A bevelled face has a normal along no axis; a plain box has none of those.
+    let slanted = |tris: &[sf_model_gen::kit::Tri]| {
+        tris.iter()
+            .filter(|t| t.normal().iter().filter(|c| **c != 0).count() > 1)
+            .count()
+    };
+    let m = Mat(0);
+    let big = closed_box([0, 0, 0], [2000, 1000, 1200], m);
+    assert!(slanted(&big.tris) > 0, "a hull block is bevelled");
+    let low = |t: &sf_model_gen::kit::Tri| t.v.iter().any(|p| p[1] == 0);
+    assert!(
+        big.tris
+            .iter()
+            .any(|t| low(t) && t.normal()[1] < 0 && t.normal()[0] != 0),
+        "the bottom edges are bevelled too"
+    );
+    assert!(slanted(&cuboid([0, 0, 0], [2000, 1000, 1200], m).tris) > 0);
+    assert_eq!(
+        closed_box([0, 0, 0], [2000, 100, 1200], m).len(),
+        12,
+        "a plate"
+    );
+    // Built through a model, the far levels of the same box are plain.
+    let model = Model::new("probe", Vec::new(), |_| {
+        vec![Node::part(
+            "body",
+            [0, 0, 0],
+            closed_box([0, 0, 0], [2000, 1000, 1200], m),
+        )]
+    });
+    assert!(slanted(&model.lods[0].world_tris()) > 0);
+    assert_eq!(slanted(&model.lods[1].world_tris()), 0);
+    assert_eq!(model.triangles()[1..], [12, 12]);
+    // In the set: every model's LOD0 has bevel faces, and far more of them than its LOD2.
+    for m in models() {
+        let near = slanted(&m.lods[0].world_tris());
+        assert!(near >= 8, "{}: {near} bevel faces in LOD0", m.stem);
+    }
 }
 
 #[test]

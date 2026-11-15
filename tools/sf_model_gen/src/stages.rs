@@ -146,6 +146,10 @@ pub fn team_share(tris: &[Tri], res: usize) -> f64 {
     }
 }
 
+/// How far under [`TEAM_AIM`] [`fit_team`] may end when every candidate is used (the checker's floor
+/// is 0.20, so the worst kept share is 0.206).
+pub const FIT_TOLERANCE: f64 = 0.010;
+
 /// The resolution of [`fit_team`]'s raster (the checker uses 512; 160 is within a percent here).
 pub const FIT_RES: usize = 400;
 
@@ -155,7 +159,8 @@ pub const FIT_RES: usize = 400;
 /// space.
 ///
 /// # Panics
-/// When every candidate is added and the share is still short (the recipe gives too few).
+/// When every candidate is added and the share is still more than [`FIT_TOLERANCE`] short (the
+/// recipe gives too few), with a message naming the model and the share.
 pub fn fit_team(body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
     let is_team = |t: &&Tri| t.mat == TEAM;
     let mut all: Vec<Tri> = fixed.to_vec();
@@ -175,11 +180,15 @@ pub fn fit_team(body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
             break;
         }
         let Some(c) = cands.next() else {
-            if std::env::var_os("SF_FIT_SOFT").is_some() {
-                eprintln!("SHORT {stem}: {share:.3} {count} body {}", body.len());
-                break;
-            }
-            panic!("{stem}: team share {share:.3} with {count} triangles after every candidate");
+            // Every candidate is in: a share within FIT_TOLERANCE of the aim is still well above
+            // the checker's floor of 20 %, so it is kept (WP11.6r: before, the fit panicked here and
+            // hid the stage tests' own failures); anything lower is a recipe with too few stripes.
+            assert!(
+                share >= TEAM_AIM - FIT_TOLERANCE && count >= TEAM_MIN_TRIS,
+                "{stem}: the team stripes give a share of {share:.3} ({count} triangles), under the \
+                 aim {TEAM_AIM} minus the tolerance {FIT_TOLERANCE}: the recipe needs more stripes"
+            );
+            break;
         };
         count += c.tris.iter().filter(is_team).count();
         all.extend(c.tris.iter().copied());

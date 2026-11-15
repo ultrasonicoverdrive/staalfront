@@ -126,8 +126,11 @@ pub const fn budget(class: Class, pair: bool) -> [u32; 3] {
     match class {
         Class::Infantry if pair => [3000, 500, 120],
         Class::Infantry => [1500, 250, 60],
-        Class::Vehicle | Class::Decor | Class::Wreck => [1500, 500, 150],
-        Class::Building => [5000, 1500, 300],
+        // WP11.6r (Tijmen 15-11-2026, shape refinement): units and buildings got room for bevels
+        // and round parts; decor and wrecks keep the old unit budget.
+        Class::Vehicle => [4000, 1200, 300],
+        Class::Decor | Class::Wreck => [1500, 500, 150],
+        Class::Building => [8000, 2400, 500],
     }
 }
 
@@ -339,9 +342,9 @@ mod tests {
     fn budgets_per_class() {
         assert_eq!(budget(Class::Infantry, false), [1500, 250, 60]);
         assert_eq!(budget(Class::Infantry, true), [3000, 500, 120]);
-        assert_eq!(budget(Class::Vehicle, false), [1500, 500, 150]);
-        assert_eq!(budget(Class::Decor, false), budget(Class::Vehicle, false));
+        assert_eq!(budget(Class::Vehicle, false), [4000, 1200, 300]);
+        assert_eq!(budget(Class::Decor, false), [1500, 500, 150]);
         assert_eq!(budget(Class::Wreck, false), budget(Class::Decor, false));
-        assert_eq!(budget(Class::Building, false), [5000, 1500, 300]);
+        assert_eq!(budget(Class::Building, false), [8000, 2400, 500]);
     }
 }
