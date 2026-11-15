@@ -147,6 +147,12 @@ impl Profile {
         if a.harvester_threat {
             h.write_u8(0x96);
         }
+        // The numbers of WP9.3e-1, only when one is set (off keeps the digest).
+        if a.cohesion_on() {
+            h.write_u8(0x97);
+            h.write_u8(a.march_break_radius);
+            h.write_u8(u8::from(a.stage_search));
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {

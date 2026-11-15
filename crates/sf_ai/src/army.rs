@@ -572,7 +572,41 @@ pub fn staging_cell(state: &AiState, lens: &Lens<'_>, gather: Cell, target: Cell
     } else {
         beside(lens, at, 1, 1, gather)
     };
-    lens.ground(cell).then_some(cell)
+    if lens.ground(cell) {
+        return Some(cell);
+    }
+    // WP9.3e-1, the staging search: the point and the three rings round it are not open ground (a lake); the nearest
+    // open cell on the line itself, toward the target first, then toward the gather cell. Never the target.
+    if !state.profile.army.stage_search {
+        return None;
+    }
+    let on_line = |i: i64| {
+        Cell::new(
+            (i64::from(gather.x) + dx * i / len) as u32,
+            (i64::from(gather.y) + dy * i / len) as u32,
+        )
+    };
+    let here = len - short;
+    (1..len).find_map(|k| {
+        [here + k, here - k]
+            .into_iter()
+            .filter(|&i| (0..len).contains(&i))
+            .map(on_line)
+            .find(|&c| lens.ground(c))
+    })
+}
+
+/// WP9.3e-1: whether an enemy the AI sees (`obs.visible`, another player's entity of any kind) stands within `radius`
+/// cells (Chebyshev, the radius itself counts) of one of the own units `members` (ascending).
+fn enemy_near(state: &AiState, obs: &Observation, members: &[EntityId], radius: u32) -> bool {
+    obs.own
+        .iter()
+        .filter(|o| members.binary_search(&o.id).is_ok())
+        .any(|o| {
+            obs.visible
+                .iter()
+                .any(|s| s.owner != state.player && cheb(s.cell, o.cell) <= radius)
+        })
 }
 
 /// The middle cell of the own units `members` that are seen; `None` when none is.
@@ -693,7 +727,10 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
                 }
                 None => true,
             };
-            if ready || now.0 >= g.since.0 + u64::from(a.stage_patience) {
+            // WP9.3e-1: on the formation march the group breaks off the `Move` when it sees an enemy near a member.
+            let broke = a.march_break_radius != 0
+                && enemy_near(state, obs, &g.members, u32::from(a.march_break_radius));
+            if ready || broke || now.0 >= g.since.0 + u64::from(a.stage_patience) {
                 let g = &mut state.groups[si];
                 g.stage = GroupStage::Advancing;
                 g.since = now;
@@ -1100,10 +1137,19 @@ pub fn operations(
                 .filter(|o| orderable(state, o, now, None) && cheb(o.cell, cell) > arrive)
                 .map(|o| o.id)
                 .collect();
-            send(state, out, ids, Order::AttackMove(middle(cell)));
+            // WP9.3e-1: with the formation march on the staging leg is a `Move` (one command, so the simulation forms
+            // the group); the units on it are given the `AttackMove` on the goal once the group breaks.
+            let leg = if state.profile.army.march_break_radius != 0 {
+                Order::Move(middle(cell))
+            } else {
+                Order::AttackMove(middle(cell))
+            };
+            send(state, out, ids, leg);
             continue;
         }
         let t = g.goal;
+        // WP9.3e-1: a member still on the staging `Move` when the group breaks is ordered on, once.
+        let since = (state.profile.army.march_break_radius != 0).then_some(g.since);
         let mut march = Vec::new();
         let mut arrived = Vec::new();
         for o in obs
@@ -1111,7 +1157,7 @@ pub fn operations(
             .iter()
             .filter(|o| g.members.binary_search(&o.id).is_ok())
         {
-            if !orderable(state, o, now, None) {
+            if !orderable(state, o, now, since) {
                 continue;
             }
             if cheb(o.cell, t) > arrive {
