@@ -1054,6 +1054,23 @@ mod tests {
     }
 
     #[test]
+    fn the_numbers_of_wp9_3e_1_are_off_in_the_base_pin_and_pinned_as_literals_when_on() {
+        // Off (the base state's profile has neither): the base pin stands.
+        let d = base_state().digest();
+        assert_eq!(d, 0x4d0a_8207_c799_2fad);
+        let mut march = base_state();
+        march.profile.army.march_break_radius = 8;
+        let mut search = base_state();
+        search.profile.army.stage_search = true;
+        let mut both = march.clone();
+        both.profile.army.stage_search = true;
+        // Literals, so that the tag (0x97) and the order of the two numbers are pinned.
+        assert_eq!(march.digest(), 0xb22a_eeae_5dc5_7d63, "march only");
+        assert_eq!(search.digest(), 0x0630_119f_be17_e381, "search only");
+        assert_eq!(both.digest(), 0x7e98_4d3e_15db_8712, "both");
+    }
+
+    #[test]
     fn the_bounce_ledger_and_the_harvesters_seen_are_hashed_only_when_their_rules_are_on() {
         // Off (the shipped profile): the ledger and the harvesters seen are not read, so not hashed; the base pin stands.
         let d = base_state().digest();

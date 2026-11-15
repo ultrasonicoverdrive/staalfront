@@ -428,11 +428,14 @@ fn staging_legs(game: u32, march: bool) -> [Option<Leg>; 2] {
     legs
 }
 
+/// `(exit tick, most members on a Move, members, exit spread, group spread, nearest enemy seen)`.
+type LegWant = (u64, usize, usize, u32, u32, Option<u32>);
+
 /// The first strike of each seat on its staging leg with the march on, per game (`[seat 0, seat 1]`): in game 0 seat 0 is on SW,
 /// in game 4 on NE. Measured on the shipped assets: every strike goes out on a `Move` as one group of six and breaks 920 to
 /// 1,040 ticks after the launch (a launch at about 10,080), 20 to 25 cells short of its staging cell, with the other wave in
 /// sight at 2 to 4 cells; the spread of the group at the break is 3 to 14.
-const LEGS_ON: [(u32, [(u64, usize, usize, u32, u32, Option<u32>); 2]); 2] = [
+const LEGS_ON: [(u32, [LegWant; 2]); 2] = [
     (
         0,
         [
