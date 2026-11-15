@@ -21,7 +21,8 @@
 //! (`spread` = the largest Chebyshev distance of a wave unit from the mean cell of the wave; `gather_dist` = Chebyshev
 //! distance of the contact from the side's gather cell; `left` = value of the wave units still alive [`WINDOW`] ticks later,
 //! `winner` the seat with more of it, `-` on a tie; the shots are those the wave units fired in the window, `unarmed` the ones
-//! at a target with no weapon: a structure, a harvester). `-` as the clash tick: no clash in the game.
+//! at a target with no weapon: a structure, a harvester); then the whole strike group of each side alive at the contact
+//! (`units value spread`, seat 0 then seat 1). `-` as the clash tick: no clash in the game.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -82,6 +83,22 @@ struct Clash {
     unarmed: [u32; 2],
     armed: BTreeMap<EntityId, bool>,
     left: Option<[u64; 2]>,
+    /// The whole strike group of each side at the contact (alive members): units, value, spread.
+    group: [(usize, u64, i64); 2],
+}
+
+/// The largest Chebyshev distance of a unit from the mean cell of the units.
+fn spread_of(world: &World, ids: &[EntityId]) -> i64 {
+    let cells: Vec<(i64, i64)> = ids.iter().filter_map(|id| cell_xy(world, *id)).collect();
+    if cells.is_empty() {
+        return 0;
+    }
+    let n = cells.len() as i64;
+    let mean = (
+        cells.iter().map(|c| c.0).sum::<i64>() / n,
+        cells.iter().map(|c| c.1).sum::<i64>() / n,
+    );
+    cells.iter().map(|c| cheb(*c, mean)).max().unwrap_or(0)
 }
 
 fn find_clash(
@@ -120,18 +137,7 @@ fn find_clash(
     let mut spread = [0i64; 2];
     for seat in 0..2 {
         value[seat] = wave_value(world, seat, &waves[seat]);
-        let cells: Vec<(i64, i64)> = waves[seat]
-            .iter()
-            .filter_map(|id| cell_xy(world, *id))
-            .collect();
-        if !cells.is_empty() {
-            let n = cells.len() as i64;
-            let mean = (
-                cells.iter().map(|c| c.0).sum::<i64>() / n,
-                cells.iter().map(|c| c.1).sum::<i64>() / n,
-            );
-            spread[seat] = cells.iter().map(|c| cheb(*c, mean)).max().unwrap_or(0);
-        }
+        spread[seat] = spread_of(world, &waves[seat]);
     }
     Some(Clash {
         tick: world.tick().0,
@@ -148,6 +154,18 @@ fn find_clash(
         unarmed: [0; 2],
         armed: BTreeMap::new(),
         left: None,
+        group: [0, 1].map(|seat| {
+            let ids: Vec<EntityId> = strikers[seat]
+                .iter()
+                .copied()
+                .filter(|id| world.get(*id).is_some())
+                .collect();
+            (
+                ids.len(),
+                wave_value(world, seat, &ids),
+                spread_of(world, &ids),
+            )
+        }),
     })
 }
 
@@ -209,7 +227,7 @@ fn trace_line(
     };
     let dist = |d: Option<i64>| d.map_or("-".to_string(), |d| d.to_string());
     format!(
-        "{head} {} {} {} {} | {} {} {} {} | {} {} {} {} | {} {} {} | {} {} {} {}",
+        "{head} {} {} {} {} | {} {} {} {} | {} {} {} {} | {} {} {} | {} {} {} {} | {} {} {} {} {} {}",
         c.tick,
         c.contact.0,
         c.contact.1,
@@ -229,6 +247,12 @@ fn trace_line(
         c.unarmed[0],
         c.shots[1],
         c.unarmed[1],
+        c.group[0].0,
+        c.group[0].1,
+        c.group[0].2,
+        c.group[1].0,
+        c.group[1].1,
+        c.group[1].2,
     )
 }
 
@@ -324,10 +348,10 @@ fn play_one_row() {
                     }
                 }
             }
-            if let Some(c) = clash.as_mut() {
-                if world.tick().0 <= c.tick + WINDOW {
-                    note_armed(&world, c);
-                }
+            if let Some(c) = clash.as_mut()
+                && world.tick().0 <= c.tick + WINDOW
+            {
+                note_armed(&world, c);
             }
             let report = world.step();
             if trace_out.is_some() {
