@@ -722,6 +722,24 @@ fn corruptions() -> Vec<Corruption> {
                 b[at] = ORDER_QUEUE_CAP as u8 + 1;
             },
         ),
+        (
+            "unknown order",
+            |w| {
+                w.entities.order[5] = Order::Idle;
+                w.entities.queue[5] = OrderQueue::EMPTY;
+                w.entities.behavior[5] = Behavior::Idle;
+            },
+            |b| {
+                // The idle order of slot 5 is two bytes before its `guard_walking` flag.
+                let mut w = busy(fresh(), 8);
+                w.entities.order[5] = Order::Idle;
+                w.entities.queue[5] = OrderQueue::EMPTY;
+                w.entities.behavior[5] = Behavior::Idle;
+                let at = guard_walking_byte(&w) - 2;
+                assert_eq!(b[at], 0);
+                b[at] = 9;
+            },
+        ),
         ("the free list", |w| w.free.push(5), no_edit),
         (
             "a free slot is missing from the free list",

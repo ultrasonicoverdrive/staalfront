@@ -66,11 +66,16 @@ of WP13.1e use it. All tags are pinned by `command_tags_are_pinned` and `the_hea
 terrain (whether it has a layer and its digest), the unit-table digests (stats, reach, turret), the
 movement table, the weapon table, the building table and its placement digest, who is which
 faction, the collision and formation settings, the path budget, the flowfield threshold and the
-replan settings, the targeting and destruction settings (or that there are none), and which of the
-optional rule sets (ore, harvest, money, production, power, repair, vision, match) the world has. The
-numbers of those optional rule sets join in WP13.1c, the AI profile digests in WP13.1d. A different
-digest on restore is `SaveError::Rules` (`other_assets_or_settings_are_refused`: other hit points
-in the unit table, another collision setting, another seed).
+replan settings, the targeting and destruction settings (or that there are none), and the numbers of
+every optional rule set a world that saves may have: the ore (its rules and the start amount of every
+field cell, through the ore fingerprint, which at `version == 0` is the start), the money rules
+(`credits_per_ore`) and the repair and sale rules (all four numbers). Of the other optional rule sets
+(harvest, production, power, vision, match) only whether the world has them is hashed: a world with
+any of them does not save yet, and their numbers join in WP13.1c; the AI profile digests join in
+WP13.1d. A different digest on restore is `SaveError::Rules` (`other_assets_or_settings_are_refused`:
+other hit points in the unit table, another collision setting, another seed;
+`other_ore_money_or_repair_numbers_are_other_rules`: another ore start amount, another
+`credits_per_ore`, another sale time).
 
 ## Errors
 
@@ -81,12 +86,18 @@ or bad input and never panics; a count is checked against the bytes that are lef
 is reserved, so a forged length cannot make it allocate more than the file holds. `restore` also
 refuses, as `Corrupt`:
 
-* an entity outside the map (`0 <= x <= width`, `0 <= y <= height`), an anchor cell outside it, a
-  `def` that is not `NO_DEF` and not a table entry of the entity's kind, an unknown behaviour or
-  order tag, a queue longer than its ring, a random stream with an even increment;
+* a tick of `u64::MAX` (the counter could not advance);
+* an entity outside the map (`0 <= x <= width`, `0 <= y <= height`), a walk target, a wander-area
+  corner or an order point (the current order and every queued one) outside it, an anchor cell
+  outside it, a `def` that is not `NO_DEF` and not a table entry of the entity's kind, more hit points
+  than the kind has (zero for an entity without a table entry), a table structure without an anchor
+  cell or a table entry that is not a structure with one, an entity that cannot move (a structure, an
+  object) with a behaviour other than idle or an order, an unknown behaviour, order or command tag,
+  a queue longer than its ring, a random stream with an even increment;
 * a free list with a slot that is live, out of range or listed twice, and a free slot that is not
   on the list without being retired (generation `u32::MAX`);
-* a command queue out of key order, for a past tick, with the reserved number `u64::MAX`, or numbered
+* a command queue out of key order (or with a key twice), sequence counters out of player order, a
+  command for a past tick, with the reserved number `u64::MAX`, or numbered
   at or past its player's counter;
 * two structures on one cell, a footprint off the map, and an occupied-cell count that is not the
   one the file gives;
@@ -97,8 +108,10 @@ refuses, as `Corrupt`:
 
 * `live` (the number of live slots): counted from the live flags.
 * `prev_pos`, `prev_facing`, `prev_turret`: set equal to the current values. They exist for render
-  interpolation; the next step overwrites them before anything reads them (only the formation pass
-  reads `prev_pos`, and formations do not save yet).
+  interpolation. The movement stage of the next step (`behavior::advance_all`) sets them to the
+  current values for every live entity before anything reads them: the crowd pass reads `prev_pos`
+  after that stage (`crowd.rs`, the step of the tick and the position before it), the formation pass
+  too (formations do not save yet). The continuation test with the crowd pass on shows it.
 * The occupancy grid: every live structure claims its footprint again, in slot order (the anchor
   is the `cell` column, the footprint the table entry's or one cell for a legacy `Place`). The count
   in section `W` is compared afterwards.
@@ -139,9 +152,17 @@ The exact test per section (checked in this order, the first one that fails name
 | `repair` | a structure is repairing or being sold |
 
 The subsystem gates come first; then, slot by slot, the column gates (the last four rows, and the
-route, membership, weapon and kills columns of the rows above). The weapon, targeting and building, repair and
-destruction rules themselves are allowed: a world with a weapon table whose weapons never fired
-saves.
+route, membership, weapon and kills columns of the rows above). Only their state is gated, not the
+presence of the targeting, destruction, building and repair rules; a world with a weapon table is
+not tested here yet (WP13.1c).
+
+Not checked on restore, on purpose: an owner against a player count (a world without match or
+placement rules has no player count; nothing outside the gated sections indexes by owner), and a
+live slot whose generation is `u32::MAX` (legal: its death retires the slot through `checked_add`
+instead of putting it on the free list, so nothing overflows). The bit-flip test restores every
+single-bit change of a save and steps each world that restores four ticks; none panics
+(`every_truncation_is_an_error_and_no_flip_panics`). Every `Corrupt` check above has a case in
+`every_impossible_world_is_corrupt`, every gate one in `a_section_that_is_not_saved_yet_refuses_the_save`.
 
 **Crowd is saved in this WP**, not in 13.1b as the split planned: its whole state is the per-entity
 `CrowdState` (the `Crowd` struct holds settings, shapes derived from the tables, scratch and stats),
