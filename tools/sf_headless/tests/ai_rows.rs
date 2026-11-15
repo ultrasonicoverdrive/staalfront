@@ -11,6 +11,17 @@
 //! of the strike group), and, per seat, the tick of the first own harvester lost and of the first own structure hit or lost. One line per game:
 //! `index swapped ending seat0_attacks seat1_attacks seat0_harv_lost seat0_struct_hit seat1_harv_lost seat1_struct_hit | launches0 | launches1`
 //! with `-` for "never" and launches as `wave:value:tick` separated by commas.
+//!
+//! **Trace (WP9.3b-0).** With `ROWS_TRACE=<file>` the harness also writes one line per game about the *first clash* of the two
+//! sides, read from the world itself (the harness is omniscient; nothing of it reaches an AI and no shipped code changes). The
+//! first clash is the first shot of a member of one of its strike groups (as the AI last saw them) at an armed unit of the other side (no structure, no harvester). The wave of
+//! a side is every armed mobile unit it owns within [`WAVE_RADIUS`] cells (Chebyshev) of the point of contact at that tick.
+//! The line: `index swapped first_launcher launch0 launch1 clash_tick contact_x contact_y first_shooter |
+//! n0 value0 spread0 gather_dist0 | n1 value1 spread1 gather_dist1 | left0 left1 winner | shots0 unarmed0 shots1 unarmed1`
+//! (`spread` = the largest Chebyshev distance of a wave unit from the mean cell of the wave; `gather_dist` = Chebyshev
+//! distance of the contact from the side's gather cell; `left` = value of the wave units still alive [`WINDOW`] ticks later,
+//! `winner` the seat with more of it, `-` on a tie; the shots are those the wave units fired in the window, `unarmed` the ones
+//! at a target with no weapon: a structure, a harvester). `-` as the clash tick: no clash in the game.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -21,10 +32,204 @@ use sf_headless::tournament::{
     Ending, STALEMATE_WINDOW, classify, factions_for, load_setup, prepare_sited, seeds_for,
     sites_swapped,
 };
-use sf_sim::{EntityId, Tick, Verdict};
+use sf_math::Fx;
+use sf_sim::{EntityId, PlayerId, Tick, Verdict, World};
 
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} is not set"))
+}
+
+/// Cells (Chebyshev) from the point of contact within which an armed unit counts as part of a side's wave.
+const WAVE_RADIUS: i64 = 15;
+/// Ticks after the first contact in which the clash is judged.
+const WINDOW: u64 = 600;
+
+fn cell_xy(world: &World, id: EntityId) -> Option<(i64, i64)> {
+    let v = world.get(id)?;
+    Some((v.pos.x.floor_int(), v.pos.y.floor_int()))
+}
+
+fn cheb(a: (i64, i64), b: (i64, i64)) -> i64 {
+    (a.0 - b.0).abs().max((a.1 - b.1).abs())
+}
+
+/// An armed mobile unit: a weapon and no footprint.
+fn armed_mobile(world: &World, id: EntityId) -> bool {
+    world
+        .stats_of(id)
+        .is_some_and(|s| s.weapon_range > Fx::ZERO && s.footprint.is_none())
+}
+
+fn wave_value(world: &World, seat: usize, ids: &[EntityId]) -> u64 {
+    let lens = Lens::new(world, PlayerId(seat as u8));
+    ids.iter()
+        .filter_map(|id| {
+            let v = world.get(*id)?;
+            lens.unit_cost(v.kind).map(u64::from)
+        })
+        .sum()
+}
+
+struct Clash {
+    tick: u64,
+    contact: (i64, i64),
+    shooter: usize,
+    waves: [Vec<EntityId>; 2],
+    value: [u64; 2],
+    spread: [i64; 2],
+    gather_dist: [Option<i64>; 2],
+    shots: [u32; 2],
+    unarmed: [u32; 2],
+    armed: BTreeMap<EntityId, bool>,
+    left: Option<[u64; 2]>,
+}
+
+fn find_clash(
+    world: &World,
+    gathers: [Option<(i64, i64)>; 2],
+    strikers: &[BTreeSet<EntityId>; 2],
+) -> Option<Clash> {
+    let shot =
+        world
+            .shots()
+            .iter()
+            .find(|s| match (world.get(s.attacker), world.get(s.target)) {
+                (Some(a), Some(t)) => {
+                    a.owner != t.owner
+                        && strikers
+                            .get(usize::from(a.owner.0))
+                            .is_some_and(|set| set.contains(&s.attacker))
+                        && armed_mobile(world, s.attacker)
+                        && armed_mobile(world, s.target)
+                }
+                _ => false,
+            })?;
+    let contact = cell_xy(world, shot.target)?;
+    let shooter = usize::from(world.get(shot.attacker)?.owner.0);
+    let mut waves: [Vec<EntityId>; 2] = [Vec::new(), Vec::new()];
+    for v in world.snapshot().iter() {
+        let seat = usize::from(v.owner.0);
+        if seat < 2
+            && armed_mobile(world, v.id)
+            && cell_xy(world, v.id).is_some_and(|c| cheb(c, contact) <= WAVE_RADIUS)
+        {
+            waves[seat].push(v.id);
+        }
+    }
+    let mut value = [0u64; 2];
+    let mut spread = [0i64; 2];
+    for seat in 0..2 {
+        value[seat] = wave_value(world, seat, &waves[seat]);
+        let cells: Vec<(i64, i64)> = waves[seat]
+            .iter()
+            .filter_map(|id| cell_xy(world, *id))
+            .collect();
+        if !cells.is_empty() {
+            let n = cells.len() as i64;
+            let mean = (
+                cells.iter().map(|c| c.0).sum::<i64>() / n,
+                cells.iter().map(|c| c.1).sum::<i64>() / n,
+            );
+            spread[seat] = cells.iter().map(|c| cheb(*c, mean)).max().unwrap_or(0);
+        }
+    }
+    Some(Clash {
+        tick: world.tick().0,
+        contact,
+        shooter,
+        waves,
+        value,
+        spread,
+        gather_dist: [
+            gathers[0].map(|g| cheb(g, contact)),
+            gathers[1].map(|g| cheb(g, contact)),
+        ],
+        shots: [0; 2],
+        unarmed: [0; 2],
+        armed: BTreeMap::new(),
+        left: None,
+    })
+}
+
+/// Before a step inside the window: remember which entities are armed (a target killed in the step is gone afterwards).
+fn note_armed(world: &World, clash: &mut Clash) {
+    for v in world.snapshot().iter() {
+        clash.armed.insert(v.id, armed_mobile(world, v.id));
+    }
+}
+
+/// After a step inside the window: count the shots of the wave units.
+fn count_shots(world: &World, clash: &mut Clash) {
+    for s in world.shots() {
+        for seat in 0..2 {
+            if clash.waves[seat].contains(&s.attacker) {
+                clash.shots[seat] += 1;
+                if !clash.armed.get(&s.target).copied().unwrap_or(false) {
+                    clash.unarmed[seat] += 1;
+                }
+            }
+        }
+    }
+}
+
+fn trace_line(
+    index: u32,
+    swapped: bool,
+    launches: [Option<u64>; 2],
+    world: &World,
+    clash: Option<&Clash>,
+) -> String {
+    let first = match launches {
+        [Some(a), Some(b)] if a < b => "0".to_string(),
+        [Some(a), Some(b)] if b < a => "1".to_string(),
+        [Some(_), None] => "0".to_string(),
+        [None, Some(_)] => "1".to_string(),
+        _ => "-".to_string(),
+    };
+    let head = format!(
+        "{index} {} {first} {} {}",
+        u8::from(swapped),
+        tick_text(launches[0]),
+        tick_text(launches[1])
+    );
+    let Some(c) = clash else {
+        return format!("{head} -");
+    };
+    // The game ended inside the window: what was left at the end.
+    let left = c.left.unwrap_or_else(|| {
+        [
+            wave_value(world, 0, &c.waves[0]),
+            wave_value(world, 1, &c.waves[1]),
+        ]
+    });
+    let winner = match left[0].cmp(&left[1]) {
+        std::cmp::Ordering::Greater => "0",
+        std::cmp::Ordering::Less => "1",
+        std::cmp::Ordering::Equal => "-",
+    };
+    let dist = |d: Option<i64>| d.map_or("-".to_string(), |d| d.to_string());
+    format!(
+        "{head} {} {} {} {} | {} {} {} {} | {} {} {} {} | {} {} {} | {} {} {} {}",
+        c.tick,
+        c.contact.0,
+        c.contact.1,
+        c.shooter,
+        c.waves[0].len(),
+        c.value[0],
+        c.spread[0],
+        dist(c.gather_dist[0]),
+        c.waves[1].len(),
+        c.value[1],
+        c.spread[1],
+        dist(c.gather_dist[1]),
+        left[0],
+        left[1],
+        winner,
+        c.shots[0],
+        c.unarmed[0],
+        c.shots[1],
+        c.unarmed[1],
+    )
 }
 
 fn tick_text(t: Option<u64>) -> String {
@@ -52,6 +257,9 @@ fn play_one_row() {
     let cap = 60_000u64;
     let setup = load_setup(&assets, &match_path).unwrap();
     let mut out = std::fs::File::create(out_path).unwrap();
+    let mut trace_out = std::env::var("ROWS_TRACE")
+        .ok()
+        .map(|p| std::fs::File::create(p).unwrap());
     for index in 0..games {
         let factions = factions_for(setup.file_factions(), index);
         let swapped = sites_swapped(index);
@@ -63,6 +271,8 @@ fn play_one_row() {
         let mut last_loss = 0u64;
         let mut winner: Option<usize> = None;
         let mut decided = false;
+        let mut clash: Option<Clash> = None;
+        let mut first_launch: [Option<u64>; 2] = [None, None];
         while world.tick().0 < cap {
             for (seat, ai) in ais.iter_mut().enumerate() {
                 if ai.due(world.tick()) {
@@ -114,7 +324,52 @@ fn play_one_row() {
                     }
                 }
             }
+            if let Some(c) = clash.as_mut() {
+                if world.tick().0 <= c.tick + WINDOW {
+                    note_armed(&world, c);
+                }
+            }
             let report = world.step();
+            if trace_out.is_some() {
+                for (seat, w) in watch.iter().enumerate() {
+                    if first_launch[seat].is_none() {
+                        first_launch[seat] = w.launches.first().map(|l| l.2);
+                    }
+                }
+                match clash.as_mut() {
+                    None => {
+                        let gathers = [0, 1].map(|s| {
+                            ais[s]
+                                .state()
+                                .gather
+                                .map(|g| (i64::from(g.x), i64::from(g.y)))
+                        });
+                        let strikers = [0, 1].map(|s| {
+                            ais[s]
+                                .state()
+                                .groups
+                                .iter()
+                                .flat_map(|g| g.members.iter().copied())
+                                .collect::<BTreeSet<EntityId>>()
+                        });
+                        clash = find_clash(&world, gathers, &strikers);
+                        if let Some(c) = clash.as_mut() {
+                            note_armed(&world, c);
+                            count_shots(&world, c);
+                        }
+                    }
+                    Some(c) if world.tick().0 <= c.tick + WINDOW => {
+                        count_shots(&world, c);
+                        if world.tick().0 == c.tick + WINDOW {
+                            c.left = Some([
+                                wave_value(&world, 0, &c.waves[0]),
+                                wave_value(&world, 1, &c.waves[1]),
+                            ]);
+                        }
+                    }
+                    Some(_) => {}
+                }
+            }
             if report.deaths > 0 {
                 last_loss = world.tick().0;
             }
@@ -162,6 +417,15 @@ fn play_one_row() {
         )
         .unwrap();
         out.flush().unwrap();
+        if let Some(t) = trace_out.as_mut() {
+            writeln!(
+                t,
+                "{}",
+                trace_line(index, swapped, first_launch, &world, clash.as_ref())
+            )
+            .unwrap();
+            t.flush().unwrap();
+        }
         let _ = Tick(0);
     }
 }
