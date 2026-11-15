@@ -91,6 +91,7 @@ pub(crate) fn field_cur_for_test() -> field::Cur {
 /// The file tags of the route states, the field states and the build stages, and of the job modes
 /// and stages (save tests).
 #[cfg(test)]
+#[allow(clippy::type_complexity)]
 pub(crate) fn state_tags_for_test() -> ([u8; 4], [u8; 3], [u8; 7], [u8; 3], [u8; 9]) {
     use field::{FieldState, Stage};
     let (modes, phases) = job::tags_for_test();

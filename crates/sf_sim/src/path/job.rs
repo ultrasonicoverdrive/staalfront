@@ -1406,11 +1406,6 @@ impl Job {
 }
 
 #[cfg(test)]
-mod tests {
-    // The planner is tested through `Pathing` (see `path/tests.rs`).
-}
-
-#[cfg(test)]
 impl Job {
     /// 0: more legs than a job refines; 1: a slot past the entities; 2: a ready leg without cells
     /// (with `work`); 3: the smoothing past the raw route (save tests).
@@ -1462,4 +1457,9 @@ pub(crate) fn tags_for_test() -> ([u8; 3], [u8; 9]) {
             Phase::Finish.tag(),
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    // The planner is tested through `Pathing` (see `path/tests.rs`).
 }

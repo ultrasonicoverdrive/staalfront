@@ -187,6 +187,15 @@ impl IndexedHeap {
 }
 
 #[cfg(test)]
+impl IndexedHeap {
+    /// Puts the first element in a second time (save tests).
+    pub(crate) fn corrupt_for_test(&mut self) {
+        let first = self.heap.first().copied().unwrap_or(0);
+        self.heap.push(first);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -248,14 +257,5 @@ mod tests {
         let popped: Vec<u32> = std::iter::from_fn(|| h.pop()).collect();
         let expected: Vec<u32> = keys.iter().map(|&(_, e)| e).collect();
         assert_eq!(popped, expected);
-    }
-}
-
-#[cfg(test)]
-impl IndexedHeap {
-    /// Puts the first element in a second time (save tests).
-    pub(crate) fn corrupt_for_test(&mut self) {
-        let first = self.heap.first().copied().unwrap_or(0);
-        self.heap.push(first);
     }
 }

@@ -255,6 +255,14 @@ impl Corridor {
 }
 
 #[cfg(test)]
+impl Corridor {
+    /// A sector reached by a node of another sector (save tests).
+    pub(crate) fn corrupt_for_test(&mut self) {
+        self.reached[0] = SLOTS as u32;
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::path::grid::Grid;
@@ -387,13 +395,5 @@ mod tests {
         assert_eq!(c.run(&graph, &mut budget), Reach::Some);
         assert!(c.reached(graph.sectors.of_cell(3, 3)).is_none());
         assert!(c.reached(graph.sectors.of_cell(40, 30)).is_some());
-    }
-}
-
-#[cfg(test)]
-impl Corridor {
-    /// A sector reached by a node of another sector (save tests).
-    pub(crate) fn corrupt_for_test(&mut self) {
-        self.reached[0] = SLOTS as u32;
     }
 }

@@ -1063,7 +1063,7 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         e.turret_target[i] = get_opt_id(r)?;
         e.crowd[i] = get_crowd(r)?;
         check_crowd(&e.crowd[i], &limits, &inside)?;
-        // Thousandths of a turn step: `turn_carrying` keeps the rest of a division by 1000.
+        // Thousandths of a turn step, always below one whole step (`turning::turn_carrying`).
         e.turn_carry[i] = r.u16()?;
         if e.turn_carry[i] >= TURN_CARRY_LIMIT {
             return Err(SaveError::Corrupt("a turn carry of a whole step or more"));
