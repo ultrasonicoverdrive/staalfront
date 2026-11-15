@@ -284,6 +284,73 @@ impl Pathing {
         p
     }
 
+    /// The section whose state is not what a fresh world has, if any: `"pathing"` once a route
+    /// was served or a sector rebuilt, `"flowfields"` once a field was made (WP13.1a saves a
+    /// world only without either). Destructured without `..`: the graphs, the budget and the
+    /// replan settings are rules, the stats a report, the work memory scratch while no job runs.
+    /// The flowfield clock goes up by one in every step (`serve` ages the fields first thing), so
+    /// without fields it is the tick (modulo 2^32) and is rebuilt by
+    /// [`Pathing::restore_clock`].
+    pub(crate) fn unsaved_section(&self, tick: crate::ids::Tick) -> Option<&'static str> {
+        let Pathing {
+            graphs: _,
+            work: _,
+            job,
+            epoch,
+            sector_epoch,
+            budget: _,
+            next_ticket,
+            next_slot,
+            scan,
+            fields,
+            replan: _,
+            stats: _,
+        } = self;
+        if job.is_some()
+            || *epoch != 0
+            || sector_epoch.iter().any(|&s| s != 0)
+            || *next_ticket != 0
+            || *next_slot != 0
+            || *scan
+        {
+            return Some("pathing");
+        }
+        let mut at_rest = Fields::new(fields.threshold);
+        at_rest.clock = tick.0 as u32;
+        if *fields != at_rest {
+            return Some("flowfields");
+        }
+        None
+    }
+
+    /// Sets the flowfield clock of a restored world (see [`Pathing::unsaved_section`]).
+    pub(crate) fn restore_clock(&mut self, tick: crate::ids::Tick) {
+        self.fields.clock = tick.0 as u32;
+    }
+
+    /// Leaves one piece of the tick-0 state of the service (save tests): 0 epoch, 1 a sector
+    /// epoch, 2 the ticket, 3 the start slot, 4 the scan flag, 5 the flowfield counters.
+    #[cfg(test)]
+    pub(crate) fn dirty_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.epoch += 1,
+            1 => self.sector_epoch.push(1),
+            2 => self.next_ticket += 1,
+            3 => self.next_slot += 1,
+            4 => self.scan = true,
+            _ => self.fields.next_order += 1,
+        }
+    }
+
+    /// Resets the stats, which a restored world does not bring back (save tests).
+    #[cfg(test)]
+    pub(crate) fn clear_stats(&mut self) {
+        self.stats = PathStats {
+            budget: self.budget,
+            ..PathStats::default()
+        };
+    }
+
     /// Whether any class has a graph.
     pub fn is_active(&self) -> bool {
         !self.graphs.is_empty()

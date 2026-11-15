@@ -123,9 +123,12 @@
 
 #![no_std]
 
+// The byte writer of the save file (WP13.1a) needs a growable buffer; nothing else allocates.
+extern crate alloc;
 #[cfg(test)]
 extern crate std;
 
+pub mod bytes;
 pub mod facing;
 pub mod fx;
 pub mod hash;
