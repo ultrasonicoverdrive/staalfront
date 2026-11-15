@@ -834,6 +834,9 @@ mod tests {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well (WP9.1c-3: 0x392b1f3256aa3c19 ->
         // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`; WP9.2a: -> 0x8383_758e_5b5e_90e6, the numbers of the groups in the shipped profile and the group state; with them off and one group the old value comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin`; WP9.2a-2: 0x8383_758e_5b5e_90e6 -> 0x4d0a_8207_c799_2fad, `gather_refinery_gap` 2 and `gather_everyone` true in the shipped profile; with both off, 0x8383_758e_5b5e_90e6 comes back, `the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin` covers the older pin).
+        // WP9.3c: this state carries the goal list of before WP9.3c (`list_before_wp9_3c`), so the shipped goal list no
+        // longer moves this pin (`the_digest_of_the_shipped_profile_state_is_pinned` pins it); every other number of
+        // normal.ron still does.
         assert_eq!(base_state().digest(), 0x4d0a_8207_c799_2fad);
     }
 

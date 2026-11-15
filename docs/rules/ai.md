@@ -101,8 +101,10 @@ Every 40 ticks (manager 1 of the rotation), `base::turn`:
 4. **Power first** (only in a game with power rules). With the table's numbers, `made` = the `power` of own producers standing or going up,
    `used` = the same for consumers. If `made < used + use(choice) + power_margin`, the goal list's first power plant is built instead,
    **unless that plant is blocked (decision 6): then the choice stands**; the shortage floor of `power.md` means slower, never stuck.
-   Nominal on purpose: a damaged plant is repair's job. On the shipped list this puts a third power plant before the radar: 140 used, the
-   radar's 50 and the margin of 20 make 210, over the 200 made.
+   Nominal on purpose: a damaged plant is repair's job. On the goal list of before WP9.3c this put a third power plant before the radar: 140
+   used, the radar's 50 and the margin of 20 made 210, over the 200 made. *WP9.3c: the shipped list ends at the second refinery, where 120 is
+   used and the margin of 20 makes 140, under the 200 made, so the rule adds no third plant to it; the frozen profiles that keep the radar
+   still get one (`ai_base`, `ai_vs_passive`).*
 5. **Afford: the full price is saved first (decision 1).** Free credits at least the cost, or, with storage, at least
    `capacity * silo_percent / 100` when that is less (the store cannot hold more). **Emergencies start unfunded**: a refinery when none
    stands or goes up, a power plant when less power is made than used. With no harvester at all (none queued either) and a refinery
@@ -613,7 +615,7 @@ farther than `arrive_radius` from the threat cell, not ordered within `resend_ti
 is left alone. While a threat stands nothing is gathered and no attack is launched.
 
 **Known gap** (decision 3): while the whole army is out on an attack, a hit on a structure that is not the construction centre is answered by
-nothing but the towers (no unit is at home, and the attackers are not called back). *13-11-2026 (WP9.2a): the rule `home_guard_permille` closes it in the code, but the shipped profile has it off (measured harmful); see "Groups".*
+nothing but the towers (no unit is at home, and the attackers are not called back). *13-11-2026 (WP9.2a): the rule `home_guard_permille` closes it in the code, but the shipped profile has it off (measured harmful); see "Groups".* *14-11-2026 (WP9.3c): the shipped list has no tower any more, so in shipped play such a hit is answered only by units that happen to stand at home; see "Defence lock (WP9.3c)".*
 
 ### The attack (A4, A5, A6)
 
@@ -681,7 +683,7 @@ construction saves for 1,500: the gap is the income of **one harvester, about 20
 credits on twelve units (2,000) and the first four goals, and the second harvester comes only with the vehicle factory. With the attack switched
 off (no win) **the goal list does not complete in 30,000 ticks**: `ai_vs_passive` makes 9 of its builds (the vehicle factory at 11,650, the last at
 29,090), `m1_ai` its last at 29,777; the army stays at 12 (`the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks`,
-`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. *(WP9.1c-3: with the final opening the list completes at 22,730 in `ai_vs_passive` (the 20,000 target missed, the cause is the map's ore) and at 19,777 in `m1_ai` (met); see "The opening".)* *14-11-2026 (WP9.2a-2): superseded, 20,297 since WP9.2a-2, see "The start-site advantage".* The guard against the known risk (under steady losses the army stays below the
+`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. *(WP9.1c-3: with the final opening the list completes at 22,730 in `ai_vs_passive` (the 20,000 target missed, the cause is the map's ore) and at 19,777 in `m1_ai` (met); see "The opening".)* *14-11-2026 (WP9.2a-2): superseded, 20,297 since WP9.2a-2, see "The start-site advantage".* *14-11-2026 (WP9.3c): 11,737 since WP9.3c, when the shipped list was cut to end at the second refinery, see "Defence lock (WP9.3c)".* The guard against the known risk (under steady losses the army stays below the
 floor and the goal list stalls): once an attack has gone out, the floor holds only while the army defends.
 
 Measured on `ai_vs_passive` (the AI as player 0 at (12, 68) with 4,000 credits against m1's static opponent, release, 40,000 ticks, the tick the
@@ -807,11 +809,13 @@ assert is 100 us per turn (release).
 ## The opening (WP9.1c-3)
 
 *Decision of the orchestrator, 12-11-2026: option A of the opening design (the vehicle factory second), data only; fix round 1 the same day: the second
-refinery before the first tower and `attack_value` 2,000, both adopted on measurement.* Shipped profile (`assets/ai/normal.ron`):
+refinery before the first tower and `attack_value` 2,000, both adopted on measurement.* The profile as WP9.1c-3 shipped it (`assets/ai/normal.ron` of that day; the two numbers below still stand, the goal list was cut in WP9.3c):
 
-* **Goal list**, both factions: power plant, refinery, **vehicle factory**, barracks, second power plant, **second refinery**, tower, radar, second tower,
-  advanced defences (Veyran: the fortified bunker after the first tower). Pinned: `the_shipped_profile_is_pinned` (`sf_data`) and the resolved list
-  (`the_roles_of_the_shipped_profile_become_the_kinds_of_the_shipped_definitions`, `sf_ai`).
+* **Goal list**, both factions, as shipped by WP9.1c-3: power plant, refinery, **vehicle factory**, barracks, second power plant, **second refinery**, and then
+  tower, radar, second tower, advanced defences (Veyran: the fortified bunker after the first tower). *14-11-2026 (WP9.3c): the shipped list has ended at the
+  second refinery since WP9.3c; the tower, the radar, the second tower, the advanced defences and the Veyran bunker were removed, see "Defence lock (WP9.3c)".
+  `the_shipped_profile_is_pinned` (`sf_data`) and `the_roles_of_the_shipped_profile_become_the_kinds_of_the_shipped_definitions` (`sf_ai`) pinned the long
+  list then and pin the six-entry list now.*
 * **`attack_value` 2,000** (was 3,000), **equal to `army_floor_value`**: the first wave leaves as soon as the floor's worth of units stands gathered, in any
   seat. Pinned with the equality (`the_attack_goes_at_attack_value_and_not_one_credit_below`).
 * **`max_wait` 12,000** (was 6,000): it ends the army floor and is the fallback trigger (below). `army_floor_value` stays 2,000.
@@ -825,7 +829,7 @@ reserve on units, so the vehicle factory waited until 11,650 and the goal list d
 
 ### Measured (ticks)
 
-Shipped profile; `ai_vs_passive` = player 0 on the frozen copy (Meridian), `m1_ai` = the game seat (Veyran, with the fortified bunker in its list).
+The profile as shipped at WP9.1c-3 (the `m1_ai` numbers were re-pinned by WP9.2a, WP9.2a-2 and WP9.3c, see those sections); `ai_vs_passive` = player 0 on the frozen copy (Meridian), `m1_ai` = the game seat (Veyran, which then had the fortified bunker in its list).
 
 | | `ai_vs_passive` | `m1_ai` |
 |---|---|---|
@@ -846,12 +850,14 @@ harvester 1,880 and before 4,000, first unit queued 4,460 and after it, floor re
 `the_ai_beats_the_static_opponent_of_m1_before_t2` (win 13,839, the wave, the gather counts, the last build), `the_opening_in_the_game_seat` (the `m1_ai` column
 and the credits every 500 ticks from 500 to 11,500), `the_army_timing_in_the_game_seat`, and the two attack-off tests
 (`the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks`, `the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`: the list **completes**,
-at 22,730 and 19,777 ticks, the last build being the advanced defences). The credits trace of `ai_vs_passive` under the final profile was not recorded; the
+at 22,730 and 19,777 ticks, the last build being the advanced defences). *14-11-2026 (WP9.3c): the first still pins 22,730 and the advanced defences, because
+`ai_vs_passive` runs on its frozen profile with the long list; the second runs the shipped profile and has pinned 11,737 and the second refinery since WP9.3c
+(20,297 between WP9.2a-2 and WP9.3c; the long list is kept in `the_old_goal_list_still_completes_at_20_297`).* The credits trace of `ai_vs_passive` under the final profile was not recorded; the
 `m1_ai` one is pinned.
 
 ### The 20,000 target and the ore of the map
 
-The brief's target, "goal list complete by 20,000 with the attack off", is **met in `m1_ai` (19,777) and not in `ai_vs_passive` (22,730)**. *14-11-2026 (WP9.2a-2): superseded, 20,297 since WP9.2a-2, see "The start-site advantage"; the target is now "by 20,500" (orchestrator decision, PLAN.md).* The cause is the
+The brief's target, "goal list complete by 20,000 with the attack off", is **met in `m1_ai` (19,777) and not in `ai_vs_passive` (22,730)**. *14-11-2026 (WP9.2a-2): superseded, 20,297 since WP9.2a-2, see "The start-site advantage"; the target became "by 20,500" (orchestrator decision, PLAN.md).* *14-11-2026 (WP9.3c): superseded again: the shipped list ends at the second refinery and is complete at 11,737 in `m1_ai`, bound 12,000; 20,297 and "by 20,500" held for the list of before WP9.3c, see "Defence lock (WP9.3c)".* The cause is the
 map's ore, not the AI. Read off `assets/maps/m1/terrain.png` by the sweep of this PR: **174 ore cells in six diamond fields of 29 cells**. A cell starts with
 120 (`ore.ron`, inline in `ai_vs_passive.ron`), so a field holds 29 x 120 = **3,480 credits**, and it regrows 1 per cell per 200 ticks, 29 per 200 ticks for a field,
 **about 145 per 1,000 ticks**. The trace of the run with the tower first (cumulative ore delivered at ticks 1,000 to 12,000: 0, 200, 800, 1,400, 1,800, 2,200,
@@ -1166,7 +1172,7 @@ All with `gather_refinery_gap` 0 and `gather_everyone` false the old value retur
 * `the_digest_of_the_base_state_is_pinned`: `0x8383_758e_5b5e_90e6` -> `0x4d0a_8207_c799_2fad` (the shipped profile has the numbers); with both off the old value returns (`the_digest_of_the_base_state_with_the_gather_numbers_off_is_the_wp9_2a_pin`).
 * `ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned`: 15,908 -> 15,249 (above).
 * `m1_ai` (`crates/sf_game/tests/ai_in_game.rs`; the AI is the NE seat): the barracks is ordered at 2,977 (was 3,017), the first unit queued at 4,547 (was 4,587), the floor reached at 9,654 (was 9,374), the first wave at 10,037 (was 9,717) and the match won at 12,673 (was 12,312), last structure at 11,657 (was 12,097). One rule at a time: gap only 2,977 / 4,547 / first wave 9,997 / won 12,621; everyone only 3,017 (unchanged) / 4,587 / 9,997 / 12,595; both off: every old value. The first differences come before any army exists (the second power plant at 2,137, was 2,177): the gather cell and its ring are kept free of structures by the placement search (`placement.rs`), so a gather cell that moves moves the cells the later structures take.
-* `the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`: the list's last build at **20,297 (was 19,777)**. **The WP9.1c-3 target of 20,000 is no longer met in this seat** (gap only 20,297, everyone only 20,537, both 20,297; gap 1 with everyone 20,017; gap 2 to 4 give the same cell). It is written down here as a known cost; the test asserts the new number and an upper bound of 21,000 instead of 20,000. Not chased by tuning the gap to land under 20,000.
+* `the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`: the list's last build at **20,297 (was 19,777)**. **The WP9.1c-3 target of 20,000 is no longer met in this seat** (gap only 20,297, everyone only 20,537, both 20,297; gap 1 with everyone 20,017; gap 2 to 4 give the same cell). It is written down here as a known cost; the test asserts the new number and an upper bound of 21,000 instead of 20,000. Not chased by tuning the gap to land under 20,000. *WP9.3c: this pin is 11,737 now, bound 12,000, with the list that ends at the second refinery; 20,297 returns with the old list (`the_old_goal_list_still_completes_at_20_297`).*
 * `an_ai_attack_wave_in_the_games_picture`: the third picture moved from tick 11,500 to 12,400 (the wave arrives at the human's centre later; the centre falls at 12,673).
 * `the_commands_of_a_duel_game_stay_at_a_bounded_rate`: bound 2.3 -> 3.1 per 1,000 ticks (measured 2.32 and 1.45; the extra commands are the 24 single-unit `Move`s of the gathering and a game that is no longer decided in 40,000 ticks; rules off: 1.71 and 1.37 in 37,931 ticks as before).
 * `the_frozen_profile_is_the_shipped_one_with_the_numbers_of_wp9_2a_off` and `tournament_decided` (`DECIDED` stays 1,224 and 2,885): the fixtures switch the two gather numbers off too (they are about the equality with the frozen profile and about a game decided in a few thousand ticks, not about the gathering; with them on the strong seat 0 wins at 1,480 instead of 1,224).
@@ -1184,7 +1190,7 @@ All with `gather_refinery_gap` 0 and `gather_everyone` false the old value retur
 
 * The map: base layout, distance to the ore, the staging cells (SW's lies 5 to 8 cells from the NE ore field) and the mirror of M1 stay as they are (Tijmen).
 * The games are decided less often (48 of 100, was 76) and the SW share of the decided games is still 71 to 79 %; neither was fixed. A march leash was built, measured (table above) and removed.
-* The WP9.1c-3 target of 20,000 for the goal list in the game seat is missed by 297 ticks (above).
+* The WP9.1c-3 target of 20,000 for the goal list in the game seat was missed by 297 ticks (above). *WP9.3c: the short list is complete at 11,737.*
 * A seat effect at seed 777 (seat 1 wins 31 : 14) was seen and not examined. 100 games per row is a small sample: differences of a few games are noise.
 * The staging cells were not looked at (a strike that stages next to the enemy ore field is what starves the enemy), nor a second refinery moving the gather cell again (it can: the cell is re-checked every army turn and the army walks to the new one).
 * Not run on the real game with a human: the game seat was looked at in `m1_ai` (idle human) only.
@@ -1229,10 +1235,10 @@ faction:
 
 The shipped list, the same six entries for Meridian and Veyran since WP9.3c (see "Defence lock (WP9.3c)"): power_plant 1, refinery 1,
 vehicle_factory 1, barracks 1, power_plant 2, refinery 2. Until WP9.3c the Meridian list went on with defence_tower 1, radar 1,
-defence_tower 2 and advanced_defences 1, and Veyran had fortified_bunker 1 after the first tower (that list was pinned in the frozen
-fixtures `normal_9_2a2.ron` and `normal_9_2b1.ron`, which keep it). The ore silo is a rule of the economy
-(`silo_percent`), not a list entry. The shipyard and vessels are out of 9.1. All pinned by `the_shipped_profile_is_pinned` (literals) and,
-as kinds, by `the_roles_of_the_shipped_profile_become_the_kinds_of_the_shipped_definitions`.
+defence_tower 2 and advanced_defences 1, and Veyran had fortified_bunker 1 after the first tower (the frozen fixtures `normal_old.ron`,
+`normal_9_2a2.ron` and `normal_9_2b1.ron` keep that list, pinned in full as literals by `ai_duel.rs`, `ai_counter.rs` and `ai_escalate.rs`). The ore silo
+is a rule of the economy (`silo_percent`), not a list entry. The shipyard and vessels are out of 9.1. The shipped six-entry list is pinned by
+`the_shipped_profile_is_pinned` (literals) and, as kinds, by `the_roles_of_the_shipped_profile_become_the_kinds_of_the_shipped_definitions`.
 
 ## In a headless scenario
 
@@ -1507,14 +1513,14 @@ Pictures: `docs/screenshots/wp9.3c/` (see its README): the north-east base in `m
 
 ## Not done
 
-* **WP9.3c gaps.** The computer builds no defence ("Defence lock (WP9.3c)"); the seat difference of the shipped row (85 wins as seat 1, 61 as seat 0) and why the radar costs the NE site so much are not traced; a human player's view of an AI without towers is untested. Tower, weapon and unit numbers are Tijmen's decision and were not touched. WP9.3a-2 (retreat) is parked; if the AI needs defences again, the next build is an economy-first target rule (WP9.3d).
+* **WP9.3c gaps.** The computer builds no defence ("Defence lock (WP9.3c)"); the seat difference of the shipped row (85 wins as seat 1, 61 as seat 0 on seeds 458,758 / 777 / 888; on the held-out seed 999 it does not show: 25 as seat 0, 23 as seat 1) and why the radar costs the NE site so much are not traced; a human player's view of an AI without towers is untested. Tower, weapon and unit numbers are Tijmen's decision and were not touched. WP9.3a-2 (retreat) is parked; if the AI needs defences again, the next build is an economy-first target rule (WP9.3d).
 * **WP9.3a-1 gaps.** Both rules are built and off: no row passed the ship rule (R2 leaves the site-balanced mean at 22.9 % and NE wins below losses; the harvester threat costs 22 to 28 decided mirror games, 111 of 300 against a floor of 124). Not traced: why the larger waves of R2 do not decide more games, why the NE harvesters are lost before any structure is hit (86 of 144 duel games) with or without the call, and why the call costs decided games. Not measured: `escalate_permille` above 500, a cap above 8,000, a defence of the ore field before the first hit. A harvester threat in a defence that is already running (a structure hit elsewhere) does nothing: any running defence blocks it, not only one at the same cell. `ai_harvest_raid` is on the south-west site only (the rule is symmetric; the NE site is in the duels). The retreat is WP9.3a-2.
 * **WP9.2b-1 gaps.** The counter mix is off: it did not beat the static rocket row (49.0 % against 40.3 % site-balanced), and it was worse than the control from the SW site (25.7 to 26.4 % against 32.6 %); why it helps from NE and hurts from SW was not traced. Not measured: other static mixes, `intel_ticks` other than 3000, `counter_permille` between 0 and 1000, a mix without the tank, the new roles of WP9.5b (heavy tank, siege artillery and the faction units are buildable but not in the mix). Nothing remembered is tallied (structures, or units that left sight, beyond `intel_ticks`). The 55 % site-balanced aim is not met: the shipped mix is the control (22.9 %); the static mixes 4 : 4 : 3, 4 : 3 : 3 and 5 : 3 : 3 reach 49.0 to 49.7 % but decide too few mirror games (110, 108, 112 of 300 against 139) and are not shipped.
 * **Choice of an economy target (the dropped WP9.2b-2, 14-11-2026).** Not built: the siege test was true at 1 of 2,461 launches on `m1_duel` (towers stand 9 to 12 cells from the centre, outside radius 8; an armed structure is remembered at only 46 % of launches; every economy structure is within 6 cells of the centre), so it would never act; its budget goes to WP9.3a, and it needs economy structures placed away from the centre, a defence memory that survives to launch and cover measured per target before it returns.
 * **WP9.1c-2 gaps.** The army floor costs the economy: on M1's 4,000 credits the goal list does not complete in 30,000 ticks without an attack
   ("The army floor", the money). One group at a time (no second wave while one is out; units made meanwhile gather); no retreat, regroup, focus fire or
-  target priority beyond "the construction centre first" (9.2/9.3); while the whole army is out, a hit on a structure other than the centre is
-  answered only by the towers (decision 3, "Threat"); the finishing `Attack` is tested on an observation the test builds, not in a scenario (in
+  target priority beyond "the construction centre first" (9.2/9.3); while the whole army is out, a hit on a structure other than the centre was
+  answered only by the towers and, since WP9.3c took the towers out of the shipped list, only by units that happen to stand at home (decision 3, "Threat"); the finishing `Attack` is tested on an observation the test builds, not in a scenario (in
   `ai_vs_passive` the wave's `AttackMove` brings the centre down on its own); the defence is a cell, not a unit, so raiders that run are
   not chased beyond what an `AttackMove` meets; `ai_vs_passive` and `m1_ai` are won against a passive opponent only, no opponent that rebuilds or
   answers. The army floor stalls the goal list until the army reaches it (on `m1_ai` the list stops at its fourth entry until the AI has won at
@@ -1739,7 +1745,7 @@ stretch without a new low: at rate 3 it is 39,549 to 39,829 ticks for 2 to 5 tan
 * A free, fast centre repair out-heals small waves: the construction centre has no `cost`, so its repair is free; `repair.ron` had
   `hp_per_tick` 3, and the AI repairs below 70 %. Four light tanks deal about 2.1 hp/tick against the centre, twelve about 6.3. **Measured and changed in WP9.1e**
   (below, and `docs/rules/repair_sell.md` "The rate and the wave"): the rate is 1 now.
-* Veyran never wins as the attacker and is never beaten in a mirror: its list carries an extra `fortified_bunker`, which makes its base harder and its economy later.
+* Veyran never wins as the attacker and is never beaten in a mirror: its list carried an extra `fortified_bunker` (removed in WP9.3c), which made its base harder and its economy later.
   Meridian wins only from seat 1.
 * Seat 1 wins only: a site asymmetry (the approach or the `beside` target cell at (12, 68) against (72, 14), the distance to ore) or the think order (player 0 always
   thinks first, `stagger` 3). A map mirrored in code would separate the two.
