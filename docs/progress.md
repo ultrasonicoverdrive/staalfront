@@ -3540,6 +3540,20 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * No CI scenario saves yet (each holds state of a gated section); the round trip, the byte-equal
   resave and the checksum continuation are shown on a world built in the tests. No pin moved.
 
+### WP13.1b notes: saving pathing, flowfields, formations and turning (15-11-2026)
+
+* Format version 2: sections `P` (path service, planner memory, job in flight, routes), `F`
+  (flowfields whole) and `M` (formations); the entity section gains `prev_pos`, the turn carry and
+  the formation memory. The gates for these four sections are gone. Details: `docs/rules/save.md`.
+* The path graphs are rebuilt on restore, not saved: equal by `PartialEq` to graphs changed one
+  placement at a time (`rebuilt_graphs_equal_the_ones_placements_made`).
+* `prev_pos` is state, not derived: the formation pass reads it before the movement stage.
+* 13 CI scenarios (movement ones) run through a save every 97 ticks and end on their pins
+  (`tools/sf_headless/tests/save_paths.rs`). No pin moved.
+* Crowd fix: `attempts + 1` with `stuck_attempts = 255` overflowed; now saturating (same value
+  below 255, so no checksum moves).
+* Known gap: in-flight search memory is checked for structure, not for consistency with its job.
+
 ### WP9.3c notes: the defence lock gate (14-11-2026)
 
 * **What changed.** Data only: `assets/ai/normal.ron`, both goal lists end at the second refinery (no tower, advanced defences, radar or bunker). Tests re-pinned with cause (below); `docs/rules/ai.md` "Defence lock (WP9.3c)"; PLAN note of 14-11-2026; screenshots `docs/screenshots/wp9.3c/`.
