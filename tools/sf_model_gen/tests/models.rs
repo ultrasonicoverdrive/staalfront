@@ -673,7 +673,6 @@ fn the_states_read_as_their_stage() {
                 .unwrap_or(slab)
         };
         let brk = (top(true) + top(false)) / 2;
-        let (lo, hi) = sf_model_gen::stages::bounds(&m.lods[0].world_tris());
         let bound = slab + (finished_roof - slab) * 6 / 10 + 120 * 600 / 1000;
         assert!(
             brk <= bound,
