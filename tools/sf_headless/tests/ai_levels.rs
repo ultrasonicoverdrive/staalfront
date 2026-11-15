@@ -119,7 +119,7 @@ fn easy_wins_against_the_static_opponent_before_the_end_and_builds_its_whole_lis
     let won = won_at(&s);
     println!("easy won at {won:?}");
     assert_eq!(won, Some(EASY_WON));
-    assert!(EASY_WON < EASY_TICKS);
+    const { assert!(EASY_WON < EASY_TICKS) };
     // The goal list of easy (Meridian): power plant, refinery, vehicle factory, barracks, a second power plant, and no
     // second refinery; the kinds are those of unit_defs.ron (1, 2, 4, 3).
     let f = go(&s);
@@ -137,7 +137,7 @@ fn hard_wins_against_the_static_opponent_before_the_end_and_builds_the_whole_shi
     let won = won_at(&s);
     println!("hard won at {won:?}");
     assert_eq!(won, Some(HARD_WON));
-    assert!(HARD_WON < HARD_TICKS);
+    const { assert!(HARD_WON < HARD_TICKS) };
     let f = go(&s);
     let b = builds(&f);
     println!("hard builds {b:?}");

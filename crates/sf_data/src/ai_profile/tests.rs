@@ -810,7 +810,7 @@ fn easy_and_hard_load_and_change_only_the_numbers_the_level_names() {
 
 #[test]
 fn the_think_interval_of_easy_is_inside_the_limits_and_keeps_the_players_apart() {
-    assert!(40 <= MAX_THINK_INTERVAL);
+    const { assert!(40 <= MAX_THINK_INTERVAL) };
     // 40 / gcd(40, 3) = 40 >= 8 players; an interval of 5 would not do.
     let with = |from: &str, to: &str| AiProfile::from_ron(&EASY.replacen(from, to, 1));
     assert!(with("think_interval: 40", "think_interval: 5").is_err());
