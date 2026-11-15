@@ -3617,3 +3617,31 @@ What it does not settle:
 * **Gaps.** Nobody played the levels; hard wins without a loss (not traced which of its numbers does it); the gap to normal is wide on both pairs and was not narrowed; the escalation of hard was measured useless in 9.3a-1 and not tested alone. `sf_game --ai` (9.4c) and unfair (9.4b) are not built.
 * **Time split** (estimates from date stamps). Build round: (a) cargo and scenario runs ~80 min, (b) CI ~44 min, (c) the rest ~30 min. Sweep round: (a) ~55 min, (b) ~75 min, (c) ~15 min.
 * **Pins.** None moved: `normal.ron`, every `*.expected` of earlier phases, `golden.rs` (full test run and release `--expect` below). New pins: the two scenarios, the two profile digests.
+
+### WP11.4b notes: own music for the calm and combat moods (15-11-2026)
+
+Audio only: nothing in `sf_sim`, no pin of an earlier phase moved. The build container could not play sound; the tracks were checked by
+measurement (peak, loop join, size, decode). **Listened (15-11-2026):** Tijmen played both tracks (head a0f43ec) and said "muziek is goed". How to listen (`cargo run -p sf_game --release -- --sandbox --fight`
+without `--ra-audio`; calm plays at the start, combat once the fight is counted). Rules: `docs/rules/audio.md` section 3d.
+
+* **What was built.** `tools/sf_music_gen` (library, binary, no dependency but `sf_sound_gen` for noise, filters and envelopes): oscillators
+  with a phase counter, a step sequencer, instruments (kick, snare, hats, toms, a metal hit, pad, sub bass, saw bass, pluck, stab, lead), echo and
+  reverb that run round the loop, our own FLAC encoder. Two tracks in `assets/audio/music/`: `calm.flac` (84 BPM, D minor, 68.6 s, 1,509,638 bytes) and
+  `combat.flac` (128 BPM, D minor, 67.5 s, 2,021,170 bytes), 3,530,808 bytes together against the budget of 4,000,000. `bank.ron` has `music.calm`
+  (volume 0.7) and `music.combat` (1.0), category Music, looped; `audio.ron` `music.fallback` names them. `sf_audio` turned on kira's `flac` feature
+  (one new crate in `Cargo.lock`, `symphonia-bundle-flac`, pure Rust).
+* **Why FLAC.** kira with the workspace's features read WAV and Ogg Vorbis. Mono 22.05 kHz WAV is 3.0 MB a track (6 MB for two, over budget); a
+  pure-Rust Ogg encoder does not exist in the dependencies and would not be byte-stable. FLAC is lossless, so "committed file equals a fresh run" holds, and the
+  fixed-predictor encoder is about 200 lines. Half the size of the WAV: calm 49 %, combat 67 % (noisy hats and a loud mix compress less).
+* **Tests** (`tools/sf_music_gen/tests/generator.rs`, 8): two runs equal and a pinned length and FNV hash per file; the committed files equal a fresh run; no stray
+  file; tempo, length and size budget; no clipping and no flat top; the loop join; the ends are not silent; equal loudness of the two files; the game's
+  decoder (kira) reads both files back sample for sample. `sf_audio` `the_shipped_fallback_music_plays_per_mood_without_red_alert_files`: the shipped config and
+  bank, no Red Alert files, calm then combat start `music.calm` and `music.combat` (trace), looped, Music category, no failed play. `sf_audio` `config::tests` pin the
+  shipped fallback names. `sf_game` `a_20_tank_fight_is_not_louder_than_the_music` now pins the `music.combat` bank volume (0.885 x 1.0 x 0.6 = 0.531
+  against the fight's 0.466) and says in its comment that this is peak against peak, guarded only by the pins.
+* **Mutations** (scratch, reverted): `Song::put` without the wrap (`j = start + i; if j >= n { continue }`): `the_loop_joins_without_a_jump` fails (calm: the last and first
+  sample are 10,684 apart, music steps of 1,437 are normal). The other mutations are in the PR body.
+* **Gaps.** The fallback music decodes on the calling thread at its first start, once per track per run (release build: 21 ms for calm, 19 ms for combat, about a frame; debug 298 and 245 ms); a background decode like the
+  Red Alert tracks would remove the hitch and was left out because it touches `drive_music`, which WP11.2b's branch also edits. One track per mood: the same loop
+  repeats. The loop test proves no click at the join, not that the join sounds musical; the phrase of the last bars is built to flow into the first (a long fade of the last pad into the
+  first chord), by design only.
