@@ -15,8 +15,8 @@ use sf_data::units::Faction;
 use sf_headless::cli::{EXIT_INVALID, EXIT_OK, run_cli};
 use sf_headless::tournament::{
     Ending, GAME_SPEED_RAW, GameRecord, Report, STALEMATE_WINDOW, factions_for, load_setup,
-    play_game, play_seeded, prepare, prepare_sited, render_table, run_games, seeds_for,
-    sites_swapped,
+    load_setup_with, play_game, play_seeded, prepare, prepare_sited, render_table, run_games,
+    seeds_for, sites_swapped,
 };
 
 /// The cap of the smoke games, in ticks. The AIs have built by then, but since WP9.1c-3's opening no attack has
@@ -423,4 +423,50 @@ fn the_start_sites_swap_in_the_world_every_four_games() {
             .unwrap()
             .sites_swapped
     );
+}
+
+// --- WP9.4a: `--profiles` ---------------------------------------------------------------------------
+
+/// The profile each seat's AI played, from the records of the AIs (ascending by player = by seat).
+fn played_profiles(r: &GameRecord) -> Vec<&str> {
+    r.ais.iter().map(|a| a.profile.as_str()).collect()
+}
+
+/// `--profiles` replaces the profiles of the two seats, and a profile stays with its seat when the start sites
+/// swap (games 0 and 4 have the same seatings and opposite sites).
+#[test]
+fn the_profiles_flag_puts_the_named_profiles_on_the_seats_and_keeps_them_when_the_sites_swap() {
+    let names = ["easy".to_string(), "hard".to_string()];
+    let setup = load_setup_with(&assets(), &duel_path(), Some(&names)).unwrap();
+    assert_eq!(setup.profile_names(), names);
+    for index in [0, 1, 4, 5] {
+        let r = play_game(&setup, 1, index, 200, STALEMATE_WINDOW).unwrap();
+        assert_eq!(played_profiles(&r), ["easy", "hard"], "game {index}");
+    }
+    assert!(!sites_swapped(0) && sites_swapped(4));
+    // Without the flag the file's profile plays on both seats.
+    let plain = load_setup(&assets(), &duel_path()).unwrap();
+    assert_eq!(plain.profile_names(), ["normal", "normal"]);
+    let r = play_game(&plain, 1, 0, 200, STALEMATE_WINDOW).unwrap();
+    assert_eq!(played_profiles(&r), ["normal", "normal"]);
+}
+
+#[test]
+fn the_profiles_flag_refuses_a_profile_that_is_not_shipped_and_is_shown_by_the_command() {
+    let (code, _, err) = tournament(&["--games", "1", "--profiles", "nonesuch,normal"]);
+    assert_eq!(code, EXIT_INVALID);
+    assert!(
+        err.contains("nonesuch.ron") && err.contains("cannot read"),
+        "{err}"
+    );
+    let (code, _, err) = tournament(&["--games", "1", "--profiles", "easy"]);
+    assert_eq!(code, EXIT_INVALID);
+    assert!(err.contains("exactly two names"), "{err}");
+    let (code, out, err) = tournament(&["--games", "1", "--cap", "300", "--profiles", "hard,easy"]);
+    assert_eq!(code, EXIT_OK, "{err}");
+    assert!(
+        err.contains("profiles: seat 0 = hard, seat 1 = easy"),
+        "{err}"
+    );
+    assert!(out.contains("tournament: m1_duel, 1 games"), "{out}");
 }
