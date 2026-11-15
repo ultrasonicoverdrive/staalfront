@@ -328,6 +328,20 @@ impl Pathing {
         self.fields.clock = tick.0 as u32;
     }
 
+    /// Leaves one piece of the tick-0 state of the service (save tests): 0 epoch, 1 a sector
+    /// epoch, 2 the ticket, 3 the start slot, 4 the scan flag, 5 the flowfield counters.
+    #[cfg(test)]
+    pub(crate) fn dirty_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.epoch += 1,
+            1 => self.sector_epoch.push(1),
+            2 => self.next_ticket += 1,
+            3 => self.next_slot += 1,
+            4 => self.scan = true,
+            _ => self.fields.next_order += 1,
+        }
+    }
+
     /// Resets the stats, which a restored world does not bring back (save tests).
     #[cfg(test)]
     pub(crate) fn clear_stats(&mut self) {

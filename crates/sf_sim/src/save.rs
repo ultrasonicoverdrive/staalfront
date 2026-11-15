@@ -266,6 +266,14 @@ fn get_order(r: &mut ByteReader<'_>) -> SaveResult<Order> {
     })
 }
 
+/// The point an order walks to, if it names one.
+fn order_point(o: Order) -> Option<Vec2> {
+    match o {
+        Order::Move(p) | Order::AttackMove(p) | Order::Guard(GuardTarget::Point(p)) => Some(p),
+        _ => None,
+    }
+}
+
 fn get_behavior(r: &mut ByteReader<'_>) -> SaveResult<Behavior> {
     Ok(match r.u8()? {
         0 => Behavior::Idle,
@@ -772,6 +780,14 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         e.behavior[i] = get_behavior(r)?;
         e.target[i] = get_opt_vec2(r)?;
         e.area[i] = get_area(r)?;
+        if e.target[i].is_some_and(|t| !inside(t))
+            || !inside(e.area[i].min)
+            || !inside(e.area[i].max)
+        {
+            return Err(SaveError::Corrupt(
+                "a target or wander area lies outside the map",
+            ));
+        }
         e.rng[i] = get_rng(r)?;
         e.cell[i] = r.u32()?;
         if e.cell[i] != NO_CELL && u64::from(e.cell[i]) >= cells {
@@ -788,7 +804,21 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
                 ));
             }
         }
+        let stats = (e.def[i] != NO_DEF).then(|| *world.units.at(e.def[i] as usize));
         e.hp[i] = r.u32()?;
+        if e.hp[i] > stats.map_or(0, |s| s.hp) {
+            return Err(SaveError::Corrupt(
+                "an entity has more hit points than its kind",
+            ));
+        }
+        // A table structure stands on its anchor cell and nothing else of the table does.
+        if let Some(s) = stats
+            && s.footprint.is_some() != (e.cell[i] != NO_CELL)
+        {
+            return Err(SaveError::Corrupt(
+                "a structure without a cell, or a cell without a structure",
+            ));
+        }
         e.order[i] = get_order(r)?;
         let queued = usize::from(r.u8()?);
         if queued > ORDER_QUEUE_CAP {
@@ -799,6 +829,23 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
             q.push_back(get_order(r)?);
         }
         e.queue[i] = q;
+        if core::iter::once(e.order[i])
+            .chain(e.queue[i].iter())
+            .any(|o| order_point(o).is_some_and(|p| !inside(p)))
+        {
+            return Err(SaveError::Corrupt("an order point lies outside the map"));
+        }
+        // What cannot move (a structure, an object) has no behaviour and no order.
+        let immobile = e.cell[i] != NO_CELL || stats.is_some_and(|s| s.movement_class.is_none());
+        if immobile
+            && (e.behavior[i] != Behavior::Idle
+                || e.order[i] != Order::Idle
+                || !e.queue[i].is_empty())
+        {
+            return Err(SaveError::Corrupt(
+                "an entity that cannot move has a behaviour or an order",
+            ));
+        }
         e.guard_walking[i] = r.bool()?;
         e.turret[i] = Facing::new(r.u8()?);
         e.prev_turret[i] = e.turret[i];
@@ -915,7 +962,38 @@ impl World {
             }
             None => h.write_u8(0),
         }
-        // Which of the optional rule sets the world has (their numbers join in WP13.1c).
+        // The optional rule sets that a world which saves may have: their numbers. The ore layout
+        // enters by its fingerprint, which at `version == 0` (the only ore that saves) is the start
+        // amount of every field cell.
+        match &self.ore {
+            Some(ore) => {
+                h.write_u8(1);
+                for word in ore.fingerprint() {
+                    h.write_u64(word);
+                }
+            }
+            None => h.write_u8(0),
+        }
+        match &self.money {
+            Some(m) => {
+                h.write_u8(1);
+                h.write_u32(m.rules.credits_per_ore);
+            }
+            None => h.write_u8(0),
+        }
+        match &self.repair {
+            Some(rs) => {
+                let r = rs.rules;
+                h.write_u8(1);
+                h.write_u32(u32::from(r.hp_per_tick));
+                h.write_u32(r.full_cost_permille);
+                h.write_u32(r.sell_ticks);
+                h.write_u32(r.refund_permille);
+            }
+            None => h.write_u8(0),
+        }
+        // Which of the other optional rule sets the world has: a world with any of them does not
+        // save yet (harvest, production, power, vision, match); their numbers join in WP13.1c.
         for present in [
             self.ore.is_some(),
             self.harvest.is_some(),
@@ -1041,6 +1119,10 @@ impl World {
             return Err(SaveError::Rules);
         }
         let tick = Tick(r.u64()?);
+        // The tick counter must be able to advance (and command ticks to follow it).
+        if tick.0 == u64::MAX {
+            return Err(SaveError::Corrupt("the tick cannot advance"));
+        }
         if r.usize()? != SECTIONS.len() {
             return Err(SaveError::Corrupt("wrong number of sections"));
         }

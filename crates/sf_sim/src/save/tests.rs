@@ -543,15 +543,324 @@ fn every_truncation_is_an_error_and_no_flip_panics() {
     let mut extra = bytes.clone();
     extra.push(0);
     assert!(World::restore(fresh(), &extra).is_err());
-    // Every bit of the header and the world section, and a stride through the rest.
+    // Every bit of every byte. A world that still restores is stepped a few ticks: whatever the
+    // file says, nothing may panic afterwards either.
     let template = fresh();
-    for byte in (0..bytes.len()).filter(|&b| b < 80 || b % 7 == 0) {
+    let mut restored = 0;
+    for byte in 0..bytes.len() {
         for bit in 0..8 {
             let mut d = bytes.clone();
             d[byte] ^= 1 << bit;
-            let r = std::panic::catch_unwind(|| World::restore(template.clone(), &d).map(|_| ()));
-            assert!(r.is_ok(), "flip {byte}:{bit} panicked");
+            let r = std::panic::catch_unwind(|| match World::restore(template.clone(), &d) {
+                Ok(mut w) => {
+                    for _ in 0..4 {
+                        w.step();
+                    }
+                    true
+                }
+                Err(_) => false,
+            });
+            match r {
+                Ok(ok) => restored += usize::from(ok),
+                Err(_) => panic!("flip {byte}:{bit} panicked"),
+            }
         }
+    }
+    // Most flips land in values with no invariant (a random stream, a position inside the map).
+    assert!(restored > bytes.len(), "{restored} flipped saves restored");
+}
+
+/// The body of every section: `(tag, start, length)`.
+fn sections(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
+    let mut out = Vec::new();
+    let mut at = 28;
+    while at < bytes.len() {
+        let len = u32::from_le_bytes(bytes[at + 1..at + 5].try_into().unwrap()) as usize;
+        out.push((bytes[at], at + 5, len));
+        at += 5 + len;
+    }
+    out
+}
+
+/// The byte of slot 5's `guard_walking` flag, found as the one byte two saves differ in.
+fn guard_walking_byte(w: &World) -> usize {
+    let a = w.save().unwrap();
+    let mut v = w.clone();
+    v.entities.guard_walking[5] = !v.entities.guard_walking[5];
+    let b = v.save().unwrap();
+    let diff: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
+    assert_eq!(diff.len(), 1);
+    diff[0]
+}
+
+type Corruption = (&'static str, fn(&mut World), fn(&mut Vec<u8>));
+
+fn no_edit(_: &mut Vec<u8>) {}
+fn no_change(_: &mut World) {}
+
+/// A queue of two despawns of player 0 for tick 900, numbered 0 and 1 (in that order).
+fn two_despawns(w: &mut World) {
+    let mut pending = BTreeMap::new();
+    for seq in 0..2 {
+        pending.insert(
+            (Tick(900), PlayerId(0), seq),
+            Command::Despawn {
+                id: EntityId::new(1, 0),
+            },
+        );
+    }
+    w.queue = CommandQueue::from_parts(pending, BTreeMap::from([(PlayerId(0), 2)]));
+}
+
+/// One impossible world per check of `restore`, made by changing a valid world before it is saved
+/// (`save` does not judge what it writes) or by editing the bytes, with the exact error.
+fn corruptions() -> Vec<Corruption> {
+    vec![
+        (
+            "an entity stands outside the map",
+            |w| w.entities.pos[5].x = Fx::from_int(65),
+            no_edit,
+        ),
+        (
+            "a target or wander area lies outside the map",
+            |w| w.entities.target[2] = Some(p(99, 1)),
+            no_edit,
+        ),
+        (
+            "a target or wander area lies outside the map",
+            |w| w.entities.area[2].max = p(1, 49),
+            no_edit,
+        ),
+        (
+            "an order point lies outside the map",
+            |w| w.entities.order[5] = Order::Move(p(-1, 3)),
+            no_edit,
+        ),
+        (
+            "an order point lies outside the map",
+            |w| {
+                w.entities.queue[5].push_back(Order::AttackMove(p(70, 3)));
+            },
+            no_edit,
+        ),
+        (
+            "an entity occupies a cell outside the map",
+            |w| w.entities.cell[9] = 64 * 48,
+            no_edit,
+        ),
+        (
+            "an entity has no unit table entry for its kind",
+            |w| w.entities.def[5] = 3,
+            no_edit,
+        ),
+        (
+            "an entity has no unit table entry for its kind",
+            |w| w.entities.def[5] = 1,
+            no_edit,
+        ),
+        (
+            "an entity has more hit points than its kind",
+            |w| w.entities.hp[5] = 121,
+            no_edit,
+        ),
+        (
+            "an entity has more hit points than its kind",
+            |w| w.entities.hp[1] = 1,
+            no_edit,
+        ),
+        (
+            "a structure without a cell, or a cell without a structure",
+            |w| w.entities.cell[10] = NO_CELL,
+            no_edit,
+        ),
+        (
+            "a structure without a cell, or a cell without a structure",
+            |w| w.entities.cell[5] = 0,
+            no_edit,
+        ),
+        (
+            "an entity that cannot move has a behaviour or an order",
+            |w| w.entities.behavior[9] = Behavior::Wander,
+            no_edit,
+        ),
+        (
+            "an entity that cannot move has a behaviour or an order",
+            |w| w.entities.order[10] = Order::HoldPosition,
+            no_edit,
+        ),
+        ("a random stream has an even increment", no_change, |b| {
+            // `Rng` keeps its increment odd, so the even one is written into the bytes: the
+            // low byte of slot 5's increment is the one byte a save with `inc + 2` differs in.
+            let w = busy(fresh(), 8);
+            let a = w.save().unwrap();
+            let mut v = w.clone();
+            let s = v.entities.rng[5].state();
+            v.entities.rng[5] = Rng::from_state(RngState {
+                inc: s.inc.wrapping_add(2),
+                ..s
+            });
+            let c = v.save().unwrap();
+            let at = (0..a.len()).find(|&i| a[i] != c[i]).unwrap();
+            b[at] ^= 1;
+        }),
+        (
+            "an order queue is longer than the ring",
+            |w| {
+                w.entities.order[5] = Order::Idle;
+                w.entities.queue[5] = OrderQueue::EMPTY;
+                w.entities.behavior[5] = Behavior::Idle;
+            },
+            |b| {
+                // Slot 5 has no order and an empty queue: its queue length is the byte before its
+                // `guard_walking` flag.
+                let mut w = busy(fresh(), 8);
+                w.entities.order[5] = Order::Idle;
+                w.entities.queue[5] = OrderQueue::EMPTY;
+                w.entities.behavior[5] = Behavior::Idle;
+                let at = guard_walking_byte(&w) - 1;
+                assert_eq!(b[at], 0);
+                b[at] = ORDER_QUEUE_CAP as u8 + 1;
+            },
+        ),
+        ("the free list", |w| w.free.push(5), no_edit),
+        (
+            "a free slot is missing from the free list",
+            |w| {
+                w.free.pop();
+            },
+            no_edit,
+        ),
+        (
+            "two structures on one cell",
+            |w| w.entities.cell[10] = w.entities.cell[9],
+            no_edit,
+        ),
+        (
+            "a footprint leaves the map",
+            |w| w.entities.cell[10] = 64 * 48 - 1,
+            no_edit,
+        ),
+        ("the occupied cells do not add up", no_change, |b| {
+            let at = occupancy_offset(&busy(fresh(), 8));
+            b[at] = 4;
+        }),
+        (
+            "a pending command is for a past tick",
+            |w| {
+                let pending = BTreeMap::from([(
+                    (Tick(2), PlayerId(0), 0),
+                    Command::Stop { ids: Vec::new() },
+                )]);
+                w.queue = CommandQueue::from_parts(pending, BTreeMap::from([(PlayerId(0), 1)]));
+            },
+            no_edit,
+        ),
+        (
+            "a pending command has the reserved number",
+            |w| {
+                let pending = BTreeMap::from([(
+                    (Tick(900), PlayerId(0), u64::MAX),
+                    Command::Stop { ids: Vec::new() },
+                )]);
+                w.queue = CommandQueue::from_parts(pending, BTreeMap::from([(PlayerId(0), 1)]));
+            },
+            no_edit,
+        ),
+        (
+            "a command is numbered past its counter",
+            |w| {
+                let pending = BTreeMap::from([(
+                    (Tick(900), PlayerId(0), 5),
+                    Command::Stop { ids: Vec::new() },
+                )]);
+                w.queue = CommandQueue::from_parts(pending, BTreeMap::from([(PlayerId(0), 5)]));
+            },
+            no_edit,
+        ),
+        (
+            "a command is numbered past its counter",
+            |w| {
+                let pending = BTreeMap::from([(
+                    (Tick(900), PlayerId(1), 0),
+                    Command::Stop { ids: Vec::new() },
+                )]);
+                w.queue = CommandQueue::from_parts(pending, BTreeMap::new());
+            },
+            no_edit,
+        ),
+        ("the command queue is out of order", two_despawns, |b| {
+            // The second entry gets the first one's number: a duplicate key.
+            let (_, body, _) = sections(b)[2];
+            let entry = 8 + 1 + 8 + 9;
+            let seq = body + 4 + entry + 9;
+            assert_eq!(b[seq], 1);
+            b[seq] = 0;
+        }),
+        (
+            "the sequence counters are out of order",
+            |w| {
+                two_despawns(w);
+                let (p, _) = w.queue.parts();
+                w.queue = CommandQueue::from_parts(
+                    p.clone(),
+                    BTreeMap::from([(PlayerId(0), 2), (PlayerId(1), 7)]),
+                );
+            },
+            |b| {
+                let (_, body, len) = sections(b)[2];
+                // The two counters are the last 18 bytes: swap the players.
+                let end = body + len;
+                assert_eq!((b[end - 18], b[end - 9]), (0, 1));
+                b[end - 18] = 1;
+                b[end - 9] = 0;
+            },
+        ),
+        ("unknown command", no_change, |b| {
+            // The first pending command's tag.
+            let (_, body, _) = sections(b)[2];
+            b[body + 4 + 17] = 99;
+        }),
+        (
+            "unknown behaviour",
+            |w| w.entities.target[2] = None,
+            |b| {
+                let mut w = busy(fresh(), 8);
+                w.entities.target[2] = None;
+                let _ = &mut w;
+                // Slot 0's behaviour: after its generation, flag, kind, owner, position and facing.
+                let (_, body, _) = sections(b)[1];
+                let at = body + 4 + 4 + 1 + 2 + 1 + 16 + 1;
+                assert!(b[at] <= 3);
+                b[at] = 9;
+            },
+        ),
+        ("wrong number of sections", no_change, |b| b[24] = 4),
+        ("the tick cannot advance", no_change, |b| {
+            b[16..24].copy_from_slice(&u64::MAX.to_le_bytes())
+        }),
+        ("a section has the wrong tag or length", no_change, |b| {
+            b[28] = b'X'
+        }),
+        ("a section has the wrong tag or length", no_change, |b| {
+            // The world section one byte longer: it then ends with a byte left over.
+            let len = u32::from_le_bytes(b[29..33].try_into().unwrap());
+            b[29..33].copy_from_slice(&(len + 1).to_le_bytes());
+        }),
+    ]
+}
+
+#[test]
+fn every_impossible_world_is_corrupt() {
+    for (k, (what, change, edit)) in corruptions().into_iter().enumerate() {
+        let mut w = busy(fresh(), 8);
+        change(&mut w);
+        let mut bytes = w.save().expect("save does not judge");
+        edit(&mut bytes);
+        assert_eq!(
+            World::restore(fresh(), &bytes),
+            Err(SaveError::Corrupt(what)),
+            "case {k}"
+        );
     }
 }
 
@@ -613,6 +922,55 @@ fn gates() -> Vec<Gate> {
         ("repair", |w| w.entities.repairing[10] = true),
         ("repair", |w| w.entities.sell_left[10] = 3),
         ("destruction", |w| w.entities.kills[5] = 1),
+        ("destruction", |w| {
+            w.destruction.tally.push((PlayerId(0), Default::default()));
+        }),
+        ("pathing", |w| w.pathing.dirty_for_test(0)),
+        ("pathing", |w| w.pathing.dirty_for_test(1)),
+        ("pathing", |w| w.pathing.dirty_for_test(2)),
+        ("pathing", |w| w.pathing.dirty_for_test(3)),
+        ("pathing", |w| w.pathing.dirty_for_test(4)),
+        ("flowfields", |w| w.pathing.dirty_for_test(5)),
+        ("formations", |w| w.formations.bump_serial_for_test()),
+        ("economy", |w| {
+            w.harvest = Some(Box::new(crate::harvest::Harvest::new(
+                crate::harvest::tests::RULES,
+                Vec::new(),
+                &w.units,
+                &w.buildings,
+            )));
+        }),
+        ("economy", |w| {
+            w.money = Some(crate::money::Money {
+                rules: crate::money::MoneyRules { credits_per_ore: 5 },
+                spent: vec![(PlayerId(0), 0), (PlayerId(1), 30)],
+            });
+        }),
+        ("production", |w| {
+            w.production = Some(Box::new(crate::production::Production {
+                rules: crate::production::ProductionRules {
+                    queue_limit: 3,
+                    exit_radius: 2,
+                    build_speed: crate::production::BuildSpeed::FULL,
+                },
+                table: Default::default(),
+                factories: Vec::new(),
+                rejections: Vec::new(),
+                produced: Vec::new(),
+            }));
+        }),
+        ("vision", |w| {
+            w.vision = Some(Box::new(crate::vision::Vision::new(
+                64,
+                48,
+                Default::default(),
+                Vec::new(),
+            )));
+        }),
+        ("outcome", |w| {
+            let rules = crate::outcome::MatchRules::new(&[PlayerId(0), PlayerId(1)]).unwrap();
+            w.outcome = Some(Box::new(crate::outcome::Outcome::new(rules)));
+        }),
         ("projectiles", |w| {
             w.arsenal.projectiles.insert(Projectile {
                 weapon: 0,
@@ -690,4 +1048,66 @@ fn the_crowd_memory_round_trips_with_the_crowd_pass_on() {
     c.stranded = true;
     let back = World::restore(fresh_with(500, true), &w.save().unwrap()).unwrap();
     assert_eq!(back.entities.crowd[5], w.entities.crowd[5]);
+}
+
+#[test]
+fn money_with_nothing_spent_is_no_economy_state() {
+    let mut w = busy(fresh(), 4);
+    w.money = Some(crate::money::Money {
+        rules: crate::money::MoneyRules { credits_per_ore: 5 },
+        spent: vec![(PlayerId(0), 0)],
+    });
+    w.save().expect("nothing spent saves");
+}
+
+/// The numbers of every optional rule set that a world which saves may have are in the digest.
+#[test]
+fn other_ore_money_or_repair_numbers_are_other_rules() {
+    use crate::ore::OreRules;
+    use crate::repair::{RepairRules, RepairSell};
+    let ore = |start: u16| {
+        World::new(WorldConfig::new(3).with_map_size(16, 16))
+            .unwrap()
+            .with_ore(OreRules {
+                start,
+                max: 200,
+                regrow_amount: 1,
+                regrow_period: 10,
+            })
+            .unwrap()
+    };
+    let bytes = ore(100).save().unwrap();
+    assert!(World::restore(ore(100), &bytes).is_ok());
+    assert_eq!(World::restore(ore(101), &bytes), Err(SaveError::Rules));
+
+    let money = |credits_per_ore: u32| {
+        let mut w = fresh();
+        w.money = Some(crate::money::Money {
+            rules: crate::money::MoneyRules { credits_per_ore },
+            spent: Vec::new(),
+        });
+        w
+    };
+    let bytes = money(5).save().unwrap();
+    assert!(World::restore(money(5), &bytes).is_ok());
+    assert_eq!(World::restore(money(6), &bytes), Err(SaveError::Rules));
+
+    let repair = |sell_ticks: u32| {
+        let mut w = fresh();
+        w.repair = Some(Box::new(RepairSell {
+            rules: RepairRules {
+                hp_per_tick: 2,
+                full_cost_permille: 500,
+                sell_ticks,
+                refund_permille: 500,
+            },
+            rejections: Vec::new(),
+            waiting: Vec::new(),
+            sold: Vec::new(),
+        }));
+        w
+    };
+    let bytes = repair(20).save().unwrap();
+    assert!(World::restore(repair(20), &bytes).is_ok());
+    assert_eq!(World::restore(repair(21), &bytes), Err(SaveError::Rules));
 }
