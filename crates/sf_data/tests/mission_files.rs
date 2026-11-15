@@ -34,12 +34,12 @@ fn read(path: &Path) -> String {
 
 #[test]
 fn the_files_to_compare_are_all_there() {
-    // 3 shipped match files and 13 frozen copies (11 at the time of WP10.1a, plus ai_bounce and ai_harvest_raid from WP9.3a-1); a vanished file must not make the
+    // 3 shipped match files and 15 frozen copies (11 at the time of WP10.1a, plus ai_bounce and ai_harvest_raid from WP9.3a-1, plus ai_vs_passive_easy and _hard from WP9.4a); a vanished file must not make the
     // equality test below pass on nothing.
     let files = match_files();
     let frozen = files.iter().filter(|p| p.ends_with("match.ron")).count();
     assert_eq!(files.len() - frozen, 3, "assets/matches/*.ron");
-    assert_eq!(frozen, 13, "assets/scenarios/*_defs/match.ron");
+    assert_eq!(frozen, 15, "assets/scenarios/*_defs/match.ron");
 }
 
 #[test]

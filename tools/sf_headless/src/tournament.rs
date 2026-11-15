@@ -84,6 +84,9 @@ Options:
   --json PATH      write the games and the summary as JSON to PATH
   --assets DIR     the asset directory (default: two levels above the match file)
   --stalemate N    a capped game with no unit lost in its last N ticks is a stalemate (default 10000)
+  --profiles A,B   the computer profiles of the two seats (seat 0 = the lower player id), replacing the ones the
+                   match file names: `--profiles easy,normal`. A profile stays with its seat when the start
+                   sites swap. Each name is a file `<assets>/ai/<name>.ron`.
   -h, --help       show this text
 
 Exit status: 0 success, 2 usage error, unreadable or unusable match, or unwritable JSON.
@@ -106,6 +109,8 @@ pub struct Args {
     pub assets: Option<PathBuf>,
     /// `--stalemate`.
     pub stalemate: u64,
+    /// `--profiles A,B` (WP9.4a): the profile of seat 0 and of seat 1; the match file's own when `None`.
+    pub profiles: Option<[String; 2]>,
 }
 
 /// The result of parsing the arguments.
@@ -130,6 +135,30 @@ fn parse_seed(text: &str) -> Result<u64, String> {
     parsed.map_err(|_| format!("--seed needs a whole number (decimal or 0x hex), got `{t}`"))
 }
 
+/// `--profiles A,B`: exactly two names, each of lower-case letters, digits and `_` (the rule of the match
+/// file, so a name cannot leave `assets/ai`).
+fn parse_profiles(value: &str) -> Result<[String; 2], String> {
+    let names: Vec<&str> = value.split(',').map(str::trim).collect();
+    if names.len() != 2 {
+        return Err(format!(
+            "--profiles needs exactly two names, `A,B` (seat 0, seat 1), got {} in `{value}`",
+            names.len()
+        ));
+    }
+    for n in &names {
+        if n.is_empty()
+            || !n
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(format!(
+                "--profiles: `{n}` must be a name of lower-case letters, digits and '_' (the file assets/ai/<name>.ron), like `normal`"
+            ));
+        }
+    }
+    Ok([names[0].to_string(), names[1].to_string()])
+}
+
 fn parse_count(flag: &str, value: &str, max: u64) -> Result<u64, String> {
     match value.parse::<u64>() {
         Ok(n) if (1..=max).contains(&n) => Ok(n),
@@ -152,6 +181,7 @@ where
     let mut json = None;
     let mut assets = None;
     let mut stalemate = None;
+    let mut profiles = None;
     while let Some(arg) = iter.next() {
         if arg == "-h" || arg == "--help" {
             return Ok(Parsed::Help);
@@ -163,7 +193,7 @@ where
             };
             if !matches!(
                 flag,
-                "games" | "cap" | "seed" | "json" | "assets" | "stalemate"
+                "games" | "cap" | "seed" | "json" | "assets" | "stalemate" | "profiles"
             ) {
                 return Err(format!("unknown option `--{flag}`"));
             }
@@ -187,6 +217,7 @@ where
                     .is_none(),
                 "seed" => seed.replace(parse_seed(&value)?).is_none(),
                 "json" => json.replace(PathBuf::from(value)).is_none(),
+                "profiles" => profiles.replace(parse_profiles(&value)?).is_none(),
                 _ => assets.replace(PathBuf::from(value)).is_none(),
             };
             if !fresh {
@@ -208,6 +239,7 @@ where
         json,
         assets,
         stalemate: stalemate.unwrap_or(STALEMATE_WINDOW),
+        profiles,
     }))
 }
 
@@ -402,6 +434,23 @@ impl Setup {
         &self.name
     }
 
+    /// The profile name of each seat (ascending by player id): the file's, or the one `--profiles` gave.
+    pub fn profile_names(&self) -> [String; 2] {
+        let name = |id: PlayerId| {
+            self.loaded
+                .def
+                .players
+                .iter()
+                .find(|p| PlayerId(p.id) == id)
+                .and_then(|p| match &p.controller {
+                    Controller::Ai { profile } => Some(profile.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default()
+        };
+        [name(self.seats[0]), name(self.seats[1])]
+    }
+
     /// The faction of each seat as the file writes it.
     pub fn file_factions(&self) -> [Faction; 2] {
         self.file_factions
@@ -411,7 +460,30 @@ impl Setup {
 /// Reads the match at `match_path` with the assets under `assets`: exactly two players, every one a
 /// computer opponent whose profile is read from `<assets>/ai/<profile>.ron`.
 pub fn load_setup(assets: &Path, match_path: &Path) -> Result<Setup, String> {
-    let (loaded, cells) = game::load_match_file(assets, match_path)?;
+    load_setup_with(assets, match_path, None)
+}
+
+/// [`load_setup`] with the profiles of the two seats (ascending by player id) replaced by `profiles`
+/// (`--profiles A,B`, WP9.4a). The profile is part of the seat, so it stays with it when the start sites
+/// swap; the seat's credits, faction and objects stay as the file has them.
+pub fn load_setup_with(
+    assets: &Path,
+    match_path: &Path,
+    profiles: Option<&[String; 2]>,
+) -> Result<Setup, String> {
+    let (mut loaded, cells) = game::load_match_file(assets, match_path)?;
+    if let Some(names) = profiles {
+        let mut ids: Vec<u8> = loaded.def.players.iter().map(|p| p.id).collect();
+        ids.sort_unstable();
+        for p in &mut loaded.def.players {
+            if matches!(p.controller, Controller::Ai { .. }) && ids.len() == 2 {
+                let seat = usize::from(p.id != ids[0]);
+                p.controller = Controller::Ai {
+                    profile: names[seat].clone(),
+                };
+            }
+        }
+    }
     let def = &loaded.def;
     if def.players.len() != 2 {
         return Err(format!(
@@ -1316,10 +1388,16 @@ pub fn run_cli(args: Vec<String>, out: &mut dyn Write, err: &mut dyn Write) -> u
         Ok(a) => a,
         Err(e) => return fail(err, e),
     };
-    let setup = match load_setup(&assets, &args.match_file) {
+    let setup = match load_setup_with(&assets, &args.match_file, args.profiles.as_ref()) {
         Ok(s) => s,
         Err(e) => return fail(err, e),
     };
+    let _ = writeln!(
+        err,
+        "profiles: seat 0 = {}, seat 1 = {}",
+        setup.profile_names()[0],
+        setup.profile_names()[1]
+    );
     let total = args.games;
     let started = Instant::now();
     let played = run_games(&setup, &args, |r, micros| {
