@@ -887,9 +887,10 @@ fn corruptions() -> Vec<Corruption> {
                 let mut w = busy(fresh(), 8);
                 w.entities.target[2] = None;
                 let _ = &mut w;
-                // Slot 0's behaviour: after its generation, flag, kind, owner, position and facing.
+                // Slot 0's behaviour: after its generation, flag, kind, owner, position, the
+                // position before the last step and facing.
                 let (_, body, _) = sections(b)[1];
-                let at = body + 4 + 4 + 1 + 2 + 1 + 16 + 1;
+                let at = body + 4 + 4 + 1 + 2 + 1 + 16 + 16 + 1;
                 assert!(b[at] <= 3);
                 b[at] = 9;
             },
