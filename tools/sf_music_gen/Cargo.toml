@@ -1,0 +1,21 @@
+[package]
+name = "sf_music_gen"
+description = "Generates the CC0 music of the calm and combat moods (assets/audio/music/*.flac) deterministically, integer maths only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Library plus binary, like sf_sound_gen: `src/lib.rs` composes and synthesises the tracks (testable),
+# `src/flac.rs` is a small FLAC encoder (no dependency), `src/main.rs` writes or checks the files. The
+# building blocks of the noise and the filters come from sf_sound_gen.
+[dependencies]
+sf_sound_gen = { path = "../sf_sound_gen" }
+
+[dev-dependencies]
+# Only to decode the committed files in a test, the way the game does (the same decoders as sf_audio).
+kira = { version = "0.12.5", default-features = false, features = ["flac", "wav", "pcm"] }

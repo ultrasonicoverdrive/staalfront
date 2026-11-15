@@ -1128,16 +1128,25 @@ mod tests {
             .collect()
     }
 
-    /// Decision 3 of WP11.3b: a 20-tank fight at the default settings is not louder than the music. The music
-    /// at `music_volume` 0.6 (audio.ron) peaks at 0.6 of full scale at most (a normalised track), so the fight's
-    /// mixed peak must stay at or below 0.5; a muffled bank (all volumes 0) fails the other way, the fight must be heard.
+    /// Decision 3 of WP11.3b: a 20-tank fight at the default settings is not louder than the music. Since WP11.4b
+    /// the music is real: the combat track of the shipped bank (`music.combat`, own generated music, file peak
+    /// 29000 of 32767, pinned in `sf_music_gen` `nothing_clips_and_the_peak_is_the_file_peak`) at its bank
+    /// volume 1.0 and at `music_volume` 0.6 (audio.ron) peaks at 0.53 of full scale, so the fight's mixed peak
+    /// must stay at or below 0.5; a muffled bank (all volumes 0) fails the other way, the fight must be heard.
+    /// This is a peak against a peak (the fight is short bursts, the music a steady 0.17 RMS), and the music side
+    /// is guarded only by the pins below (volumes, the file peak in `sf_music_gen`): change one and this test
+    /// must be looked at again.
     #[test]
     fn a_20_tank_fight_is_not_louder_than_the_music() {
         let cfg = AudioConfig::embedded();
         assert_eq!(cfg.mix.music_volume, 0.6);
         assert_eq!(cfg.mix.sfx_volume, 1.0);
+        assert_eq!(cfg.mix.master_volume, 1.0);
+        assert_eq!(shipped_bank().get("music.combat").unwrap().volume, 1.0);
         let peak = mixed_peak(&tank_fight());
-        println!("WP11.3b: mixed peak of the 20-tank fight {peak:.3} of full scale (music 0.6)");
+        println!(
+            "WP11.3b/11.4b: mixed peak of the 20-tank fight {peak:.3} of full scale (music.combat peaks at 0.531)"
+        );
         assert!(peak <= 0.5, "peak {peak}");
         assert!(peak >= 0.15, "the fight is too quiet to hear: {peak}");
     }
