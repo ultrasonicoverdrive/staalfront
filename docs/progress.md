@@ -3513,7 +3513,11 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Gaps.** The heavily damaged stages read mostly as a heap (a grid of chunks in the cut shell);
   the scaffolding deck hides the inside of the cut walls; the bolt rows that pad small structures
   are a filler, not designed detail; the mission objects' special states (`_off`, `_disabled`,
-  `_no_uplink`, `_burnt_out`, `_destroyed`, `_rubble`) are made but no engine rule shows them yet;
+  `_no_uplink`, `_burnt_out`, `_destroyed`, `_rubble`; 10 files, 1.27 MB) are made but no engine
+  rule shows them yet and nothing outside `models.ron` reads them: they get a reader when a mission
+  can change an object's state, i.e. with the trigger events and actions of WP10.2/WP10.3 (object
+  destroyed, disabled, uplink lost); which work package maps those states to these files is to be
+  fixed there (WP11.6c review, nit 2);
   the ferry (a vessel) is WP11.6b's; 34 MB of GLB in `assets/set_v5` (non-indexed vertices with RGB
   vertex colour; the writer was left alone so the WP11.6a pins hold).
 
