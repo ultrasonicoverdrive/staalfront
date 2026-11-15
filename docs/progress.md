@@ -3616,6 +3616,43 @@ What it does not settle:
 * **Pins.** None moved (`normal.ron`, `easy.ron`, `hard.ron`, digests, `golden.rs`, `*.expected`). New: state digest literals with the numbers on, profile and range tests, real-game staging legs per site in `ai_march.rs`.
 * **Time split.** See the PR.
 
+### WP11.6r notes: shape refinement of every style G model (15-11-2026)
+
+* **Why.** Tijmen 15-11-2026: "the models are still blocky". A shape round in the generator before
+  11.6d (decor and wrecks), 11.6e (terrain) and the style F engine WP. Kit level only; every model
+  is regenerated, no recipe was edited by hand.
+* **Kit.** Smooth normals on turned surfaces (`shade::corner_normals`, crease 40°, distinct facet
+  normals averaged per shared corner; the highlight and the downward term read the corner normal),
+  no facet variation on turned triangles; the bevel rule (`kit::auto_bevel`: boxes of 240 mm and up
+  get 8 % of their smallest side, 20-120 mm, closed boxes on their bottom edges too, LOD0 only);
+  recipe bevels half as wide again in LOD0 (at most 60 mm more); at least 16 segments on round parts
+  in LOD0 (`ROUND_MIN_SEGS`). Rules in `docs/art-style.md` sections 5 and 6.
+* **Budgets.** `sf_asset_check::class::budget`: vehicles 4000 / 1200 / 300 (was 1500 / 500 / 150),
+  buildings 8000 / 2400 / 500 (was 5000 / 1500 / 300); infantry, decor and wrecks unchanged. After
+  the round: vehicles 1,378-2,046 triangles in LOD0, finished structures 2,650-3,646. The new rules
+  are LOD0 only: every file's LOD1 and LOD2 triangle counts equal main's (bb7f284), pinned by
+  `far_levels.rs`, except the ferry and the gunboat, whose funnel and mast now stay in LOD2 (+10
+  each). The first push let the bevel rule into the stages' far levels (67 files); the review sweep
+  found it, `kit::at_level` now sets the level for the stages too.
+* **Carried over.** The contact sheets frame each model whole (the sphere fits the view, top views
+  run along the tile) at full tile size; `fit_team` keeps a share within 0.010 of its aim and
+  otherwise stops with an assertion naming the model (no `SF_FIT_SOFT`); a test for "far levels keep
+  the silhouette"; the pale pink stripes in WP11.6c's `m1_zoom_0.30_tick103.png` are the renderer's
+  hover highlight (`instancing::HIGHLIGHT_TINT` 0.55 towards white on the model under the cursor),
+  not the model; the decoy's heavy-break slack is 92 mm again (the test now ignores the fallen team
+  planks on the heap, marked with `stages::PLANK_TONE`, which reached 13 mm over the bound with the
+  new geometry; the 92 mm is asserted). `assets/set_v5`
+  34 MB -> 37 MB.
+* **Not done (gaps).** The detail floor of the finished structures (`DETAIL_FLOOR` 2650, anchor-bolt
+  rows) stays: dropped, 21 stage files break the far-level share rule (their far levels come from
+  the finished far level). Lofted hulls with their own outlines (the six WP11.6a models, the
+  transports) only get the wider recipe bevels; road wheels and track links were not reworked. The
+  v3 sniper (19.0 % team share, Tijmen's figure set, not generated) is left as is. The silhouette
+  test skips the states (derived from the finished far level) and the rubble heaps' height (one
+  random chunk tip). Extruded profiles are outside the bevel rule: the sharp block corners of the
+  fortified bunker's buttresses (96, in three of its states too), the Veyran vehicle factory (6,
+  its damaged state 4) and the amphibious transport (6) are pinned as named exceptions.
+
 ### WP9.4a notes: difficulty levels easy and hard (15-11-2026)
 
 * **What changed.** Data and the tournament only: `assets/ai/easy.ron`, `assets/ai/hard.ron` (numbers in `docs/rules/ai.md` "Difficulty levels (WP9.4a)"), `sf_headless tournament --profiles A,B` (`load_setup_with`, `Setup::profile_names`), the scenarios `ai_vs_passive_easy` / `ai_vs_passive_hard` (frozen defs copies, in the CI list), tests (`sf_data` profile pins, `sf_ai` digest/goal-list pins, `tests/ai_levels.rs`, `--profiles` tests in `src/tournament/tests.rs` and `tests/tournament.rs`), PLAN note. Nothing in `crates/sf_sim`, no new `sf_ai` rule, `normal.ron` untouched.

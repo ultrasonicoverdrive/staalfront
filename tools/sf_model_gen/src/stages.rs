@@ -146,6 +146,10 @@ pub fn team_share(tris: &[Tri], res: usize) -> f64 {
     }
 }
 
+/// How far under [`TEAM_AIM`] [`fit_team`] may end when every candidate is used (the checker's floor
+/// is 0.20, so the worst kept share is 0.206).
+pub const FIT_TOLERANCE: f64 = 0.010;
+
 /// The resolution of [`fit_team`]'s raster (the checker uses 512; 160 is within a percent here).
 pub const FIT_RES: usize = 400;
 
@@ -155,7 +159,8 @@ pub const FIT_RES: usize = 400;
 /// space.
 ///
 /// # Panics
-/// When every candidate is added and the share is still short (the recipe gives too few).
+/// When every candidate is added and the share is still more than [`FIT_TOLERANCE`] short (the
+/// recipe gives too few), with a message naming the model and the share.
 pub fn fit_team(body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
     let is_team = |t: &&Tri| t.mat == TEAM;
     let mut all: Vec<Tri> = fixed.to_vec();
@@ -175,11 +180,15 @@ pub fn fit_team(body: &mut Mesh, fixed: &[Tri], cands: Vec<Mesh>, stem: &str) {
             break;
         }
         let Some(c) = cands.next() else {
-            if std::env::var_os("SF_FIT_SOFT").is_some() {
-                eprintln!("SHORT {stem}: {share:.3} {count} body {}", body.len());
-                break;
-            }
-            panic!("{stem}: team share {share:.3} with {count} triangles after every candidate");
+            // Every candidate is in: a share within FIT_TOLERANCE of the aim is still well above
+            // the checker's floor of 20 %, so it is kept (WP11.6r: before, the fit panicked here and
+            // hid the stage tests' own failures); anything lower is a recipe with too few stripes.
+            assert!(
+                share >= TEAM_AIM - FIT_TOLERANCE && count >= TEAM_MIN_TRIS,
+                "{stem}: the team stripes give a share of {share:.3} ({count} triangles), under the \
+                 aim {TEAM_AIM} minus the tolerance {FIT_TOLERANCE}: the recipe needs more stripes"
+            );
+            break;
         };
         count += c.tris.iter().filter(is_team).count();
         all.extend(c.tris.iter().copied());
@@ -578,7 +587,7 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
             let source = if lod.has(0) { 0 } else { 2 };
             let mut parts = split(&built.lods[source]);
             strip_filler(&mut parts.body, slab);
-            let children = match stage {
+            let children = crate::kit::at_level(lod, || match stage {
                 Stage::Foundation => foundation(&f, slab, &parts, lod, seed, &stem, teamed),
                 Stage::Scaffolding => scaffolding(&f, slab, parts, lod, seed, &stem, teamed),
                 Stage::Damaged => {
@@ -596,7 +605,7 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
                     out
                 }
                 Stage::Heavy => heavy(&f, slab, parts, lod, seed, &stem, teamed, cut),
-            };
+            });
             Node {
                 name: format!("{stem}_LOD{}", lod.0),
                 at: [0, 0, 0],
@@ -635,6 +644,11 @@ pub const HOLE_GROWTH: [i32; 4] = [2, 3, 4, 6];
 pub const SCAFFOLD_CUT_PERMILLE: i32 = 600;
 /// The heavily damaged stage breaks off at this share of the roof level (thousandths).
 pub const HEAVY_CUT_PERMILLE: i32 = 500;
+
+/// The tone that marks a fallen roof plank on the heap of a heavily damaged stage (team material,
+/// which ignores the vertex colour, so it shows nothing): the stage test tells the planks from the
+/// walls by it (WP11.6r review).
+pub const PLANK_TONE: crate::kit::Tone = 999;
 
 /// How far round a damage hole the small detail is gone, in thousandths of the hole's radius.
 pub const DETAIL_GONE_PERMILLE: i32 = 8000;
@@ -1385,14 +1399,10 @@ fn heavy(
             for &(dz, q) in &planks[..if lod.has(1) { 3 } else { 1 }] {
                 let len = rr * 8 / 10;
                 let start = if q == 0 { x - len / 2 } else { x + len / 2 };
-                tops.push(fallen_plate(
-                    [start, floor + hh * 9 / 10, z + dz],
-                    len,
-                    280,
-                    180,
-                    q,
-                    TEAM,
-                ));
+                tops.push(
+                    fallen_plate([start, floor + hh * 9 / 10, z + dz], len, 280, 180, q, TEAM)
+                        .toned(PLANK_TONE),
+                );
             }
         }
     }

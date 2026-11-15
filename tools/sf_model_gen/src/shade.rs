@@ -9,8 +9,9 @@
 //!   [`AO_STRENGTH`] (creases, the underside of an overhang, the gap between hull and tracks);
 //! - **grime**: up to [`GRIME`] darker towards the ground, fading out at [`GRIME_HEIGHT_MM`];
 //! - **downward faces** up to [`DOWN`] darker;
-//! - **facet variation**: each triangle ± [`VARIATION`] from a fixed hash of its index, so large
-//!   flat areas do not look like one sheet;
+//! - **facet variation**: each flat triangle ± [`VARIATION`] from a fixed hash of its index, so
+//!   large flat areas do not look like one sheet; a smooth (lathed) triangle gets none, because on a
+//!   round body it would only show the facets again (WP11.6r);
 //! - the triangle's own [`crate::kit::Tone`] (panel lines, recesses);
 //! - **top-edge highlight**: a face that slopes upward (a bevel or chamfer on top, `n.y` between
 //!   [`HIGHLIGHT_MIN_UP`] and [`HIGHLIGHT_MAX_UP`]) is up to [`HIGHLIGHT`] brighter;
@@ -19,6 +20,14 @@
 //!   corner sees open sky (no AO ray blocked), about two thirds of the triangles (fixed hash) are
 //!   lifted [`WEAR`] towards a lighter grey: paint rubbed thin on an exposed edge, lighter and less
 //!   saturated.
+//!
+//! **Normals** (WP11.6r, [`corner_normals`]): a flat triangle keeps its own normal at all three
+//! corners; a triangle of a turned surface ([`crate::kit::Tri::lathed`]) gets at each corner the
+//! mean of the normals of the lathed triangles of the level that share that corner and meet it at
+//! no more than the crease angle [`CREASE_DEG`] (an edge sharper than that, such as a cap on a
+//! drum, stays hard). The highlight and the downward term read the corner normal, so a smooth
+//! dome brightens smoothly instead of facet by facet; the ambient-occlusion rays keep the face's
+//! own hemisphere.
 //!
 //! The vertex colour is RGB: it is the wanted linear colour divided by the material factor the GLB
 //! stores, [`factor`] (a grey: the palette colour's brightest channel over [`NOMINAL`]), so a plain
@@ -54,8 +63,15 @@ pub const WEAR: f32 = 0.35;
 pub const WEAR_WIDTH_MM: f32 = 320.0;
 /// A face pointing straight down loses this share.
 pub const DOWN: f32 = 0.3;
-/// Facet variation, either way.
+/// Facet variation, either way (flat triangles only).
 pub const VARIATION: f32 = 0.035;
+/// The crease angle of the smooth normals, in degrees: lathed triangles that meet at more than
+/// this keep a hard edge ([`corner_normals`]).
+pub const CREASE_DEG: u32 = 40;
+/// `cos(CREASE_DEG)`, as a fixed decimal (no `cos` at run time).
+pub const CREASE_COS: f32 = 0.766_044;
+/// Two corner normals closer than this (about 1.4°) belong to one facet ([`corner_normals`]).
+const SAME_FACET_COS: f32 = 0.9997;
 
 type V = [f32; 3];
 
@@ -93,6 +109,41 @@ pub fn unit_normal(t: &Tri) -> V {
     let f = [n[0] as f64, n[1] as f64, n[2] as f64];
     let l = (f[0] * f[0] + f[1] * f[1] + f[2] * f[2]).sqrt();
     [(f[0] / l) as f32, (f[1] / l) as f32, (f[2] / l) as f32]
+}
+
+/// The normal at each corner of `tris` (one level in model space), three per triangle: flat for a
+/// flat triangle, smoothed over the lathed triangles that share the corner within [`CREASE_DEG`]
+/// for a lathed one. The sums run in triangle order, so the result is the same everywhere.
+pub fn corner_normals(tris: &[Tri]) -> Vec<[V; 3]> {
+    let flat: Vec<V> = tris.iter().map(unit_normal).collect();
+    let mut at: std::collections::BTreeMap<[i32; 3], Vec<usize>> = Default::default();
+    for (i, t) in tris.iter().enumerate().filter(|(_, t)| t.lathed) {
+        for p in t.v {
+            at.entry(p).or_default().push(i);
+        }
+    }
+    tris.iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if !t.lathed {
+                return [flat[i]; 3];
+            }
+            t.v.map(|p| {
+                // Each facet once: the two triangles of one quad lie in (almost) one plane, and
+                // counting both would lean the normal towards the quad that is split at this
+                // corner.
+                let mut seen: Vec<V> = Vec::new();
+                for &j in &at[&p] {
+                    if dot(flat[i], flat[j]) >= CREASE_COS
+                        && seen.iter().all(|s| dot(*s, flat[j]) < SAME_FACET_COS)
+                    {
+                        seen.push(flat[j]);
+                    }
+                }
+                norm(seen.iter().fold([0.0; 3], |a, n| add(a, *n)))
+            })
+        })
+        .collect()
 }
 
 /// Directions of the rays in the frame (tangent, bitangent, normal): `(t, b, n)` components.
@@ -192,6 +243,7 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
             }
         })
         .collect();
+    let normals = corner_normals(tris);
     let mut out = Vec::with_capacity(tris.len() * 3);
     for (i, t) in tris.iter().enumerate() {
         let n = unit_normal(t);
@@ -222,13 +274,18 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
             })
             .map(|(_, o)| o)
             .collect();
-        let variation = 1.0 + VARIATION * (hash(i as u32) as f32 / 500.0 - 1.0);
-        let tone = f32::from(t.tone) / 1000.0;
-        let up = n[1];
-        let highlight = if up > HIGHLIGHT_MIN_UP && up < HIGHLIGHT_MAX_UP {
-            1.0 + HIGHLIGHT
-        } else {
+        let variation = if t.lathed {
             1.0
+        } else {
+            1.0 + VARIATION * (hash(i as u32) as f32 / 500.0 - 1.0)
+        };
+        let tone = f32::from(t.tone) / 1000.0;
+        let highlight = |up: f32| {
+            if up > HIGHLIGHT_MIN_UP && up < HIGHLIGHT_MAX_UP {
+                1.0 + HIGHLIGHT
+            } else {
+                1.0
+            }
         };
         // A bevel strip: no axis-aligned normal and narrow (a big slanted facet, such as a dome
         // segment, is not an edge and gets no wear), and not a segment of a turned surface.
@@ -247,7 +304,8 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
         let worn = bevel && !hash(i as u32 ^ 0x55).is_multiple_of(3);
         let base = lin[usize::from(t.mat.0)];
         let fac = factor(base);
-        for corner in t.v.map(v) {
+        for (k, corner) in t.v.map(v).into_iter().enumerate() {
+            let cn = normals[i][k];
             // Start a little inside the face and off it, so the ray does not hit its own edges.
             let o = add(add(corner, mul(sub(centre, corner), 0.12)), mul(n, 8.0));
             let blocked = dirs
@@ -258,8 +316,8 @@ pub fn bake(tris: &[Tri], lin: &[[f32; 3]]) -> Vec<[f32; 3]> {
             let ao = 1.0 - AO_STRENGTH * share;
             let height = (corner[1] / GRIME_HEIGHT_MM).clamp(0.0, 1.0);
             let grime = 1.0 - GRIME * (1.0 - height);
-            let down = 1.0 - DOWN * (-n[1]).max(0.0);
-            let s = ao * grime * down * variation * tone * highlight;
+            let down = 1.0 - DOWN * (-cn[1]).max(0.0);
+            let s = ao * grime * down * variation * tone * highlight(cn[1]);
             let mut c = base.map(|b| b * s);
             if worn && blocked == 0 {
                 // Lighter and less saturated: towards a grey a quarter above the luminance.
