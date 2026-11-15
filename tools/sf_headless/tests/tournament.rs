@@ -475,7 +475,10 @@ fn the_profiles_flag_refuses_a_profile_that_is_not_shipped_and_is_shown_by_the_c
 /// lower id (seat 0) and B for the higher, whatever the order of the file (WP9.4a, review sweep).
 #[test]
 fn the_profiles_flag_goes_by_player_id_and_not_by_the_order_of_the_file() {
-    let text = std::fs::read_to_string(duel_path()).unwrap();
+    // CRLF on a Windows checkout: the text is cut at line starts, so read it with LF.
+    let text = std::fs::read_to_string(duel_path())
+        .unwrap()
+        .replace("\r\n", "\n");
     let start = text.find("        (\n            id: 0,").unwrap();
     let mid = text.find("        (\n            id: 1,").unwrap();
     let end = text.rfind("    ],").unwrap();
