@@ -90,8 +90,9 @@ the material colour:
 - **grime:** up to 40 % darker at the ground, fading out at 1.3 m (tuning round: about twice the
   first 22 %);
 - **downward faces** up to 30 % darker;
-- **facet variation** of +-3.5 % per triangle from a fixed hash (no randomness), so large flat areas
-  are not one sheet;
+- **facet variation** of +-3.5 % per flat triangle from a fixed hash (no randomness), so large flat
+  areas are not one sheet; a triangle of a turned surface gets none (WP11.6r: on a round body it
+  only showed the facets again; `no_smooth_part_carries_facet_variation`);
 - the **tone** of a detail (panel line 56 %, recess 72 %, track shoe 82 %);
 - **top-edge highlight:** a face that slopes upward (a bevel or chamfer on top, normal `y` between
   0.2 and 0.97) is 16 % brighter;
@@ -108,6 +109,25 @@ the palette colour within the per-facet variation and 8-bit rounding (the test a
 material keeps its own factor and ignores `COLOR_0`. Tests: `tools/sf_model_gen/tests/shade.rs`
 (one per rule: plain colour, highlight, wear, no wear on lathes, crease and grime).
 
+**Normals** (WP11.6r, `shade::corner_normals`, written as glTF `NORMAL`): a flat triangle keeps its
+own normal at all three corners. A triangle of a turned surface (`Tri::lathed`: drums, domes,
+barrels, wheels, tanks) gets at each corner the mean of the distinct facet normals of the lathed
+triangles of the level that share that corner and meet it at no more than the **crease angle of
+40°** (`CREASE_DEG`, `CREASE_COS` 0.766044 as a fixed decimal); an edge sharper than that (the cap of
+a drum, a box marked as turned) stays hard. The top-edge highlight and the downward term read that
+corner normal, so a dome brightens smoothly; the AO rays keep the face's own hemisphere, and AO and
+wear are otherwise unchanged. Test: `smooth_normals_agree_on_a_lathe_and_stay_hard_past_the_crease_angle`.
+
+**Bevel rule** (WP11.6r, `kit::auto_bevel`): in LOD0 every box of the kit (`bevel_box`, `cuboid`,
+`plate`, `closed_box`) whose smallest side is at least 240 mm gets a bevel of 8 % of that side,
+20..=120 mm, unless the recipe asked for more; a closed box is bevelled on its bottom edges too (seen
+at 45°). A smaller box is a detail (a seam, a rail, a post, a bolt row) and stays plain; the far
+levels keep only the recipes' own bevels (so their share of LOD0 does not grow). The recipes'
+explicit bevels (`Lod::bevel`) are half as wide again in LOD0, at most 60 mm more; a value under 10
+is a switch (`v * lod.bevel(1)`) and stays. Lofted hulls with their own outlines (the six WP11.6a
+models, the transports) only get the widened recipe bevels: rebuilding those outlines would be a
+per-model edit, which this round did not do. Test: `every_lod0_block_is_bevelled_by_the_kit_rule`.
+
 Keep colours clean and bright: the AO darkens creases, not whole surfaces; judge it in the engine
 render (contact sheet), not only in numbers.
 
@@ -115,21 +135,32 @@ render (contact sheet), not only in numbers.
 
 One recipe builds all three levels from `kit::Lod`:
 
-- round parts halve their segments per level (`Lod::segs`: 16, 8, 4);
-- bevels halve at LOD1 and go at LOD2 (`Lod::bevel`);
+- round parts have at least 16 segments in LOD0 (WP11.6r, `ROUND_MIN_SEGS`: an eight-sided wheel
+  or barrel showed its facets at 45°) and the recipe's number halved per level after that
+  (`Lod::segs`: 8 gives 16, 4, 4; 16 gives 16, 8, 4);
+- bevels are half as wide again in LOD0 (at most 60 mm more), halve at LOD1 and go at LOD2
+  (`Lod::bevel`), plus the bevel rule of section 5 in LOD0;
 - details drop out: wheels to three per side at LOD1 and none at LOD2, cleats, bolts, seams and
   hatches only at LOD0;
 - the node tree, the anchors and the team panels stay in every level, and the bounds stay within
   10 % of LOD0 (parts that set the height, such as a crane or an antenna, stay in every level).
 
-Budgets (the art brief): units 1500 / 500 / 150, buildings 5000 / 1500 / 300 triangles; LOD1 at
-most 40 % and LOD2 at most 15 % of LOD0 (`every_level_is_inside_its_budget_and_really_reduced`).
+Budgets (WP11.6r, Tijmen 15-11-2026, `sf_asset_check::class::budget`): vehicles and vessels
+4000 / 1200 / 300, buildings 8000 / 2400 / 500 triangles (were 1500 / 500 / 150 and 5000 / 1500 /
+300); infantry (1500 / 250 / 60), decor and wrecks (1500 / 500 / 150) are unchanged. LOD1 at most
+40 % and LOD2 at most 15 % of LOD0 (`every_level_is_inside_its_budget_and_really_reduced`). The
+budget is a ceiling, not a target: after the shape round a vehicle has 1,378-2,046 triangles in
+LOD0 and a finished structure 2,650-3,646. The far levels keep the silhouette: along every axis
+LOD1 and LOD2 span at least 90 % of LOD0 and reach at most 5 % past it (`far_levels_keep_the_silhouette`;
+named exceptions: the rubble heaps, and the ferry and the gunboat in LOD2, which drop the mast:
+746 and 705 per mille of the height, a gap).
 
 **Detail budget** (tuning round 14-11-2026, `buildings_use_their_detail_budget`): a building uses
 **2,500-3,500 triangles in LOD0** on real geometry: vents with louvres, pipe runs with flanges,
 railings (`kit::railing`), roof units with fans, window rows with frames, door frames, bolted panels,
-ladders and walkways; that detail is LOD0 only, so LOD1 and LOD2 stay far below. A vehicle stays
-under 1,500 and spends it where it reads at game distance: capped road wheels with hubs, track
+ladders and walkways; that detail is LOD0 only, so LOD1 and LOD2 stay far below (WP11.6r: now
+2,500-6,000, the bevels and rounder parts on top). A vehicle has 1,200-3,000 (WP11.6r; was under
+1,500) and spends it where it reads at game distance: capped road wheels with hubs, track
 shoes (one raised face each), hatches, smoke dischargers, tools on the fenders, lamps and exhausts.
 
 ## 7. Node tree
@@ -187,8 +218,10 @@ only the Veyran heavy gun team, which had no good figure, is generated.
   recipes mark lanes and stripes with `PAINT3`. Tests: `a_neutral_model_has_no_team_material`, the
   neutral branches of the team tests.
 - **Far levels keep what sets the silhouette**: the height of an antenna or a roll bar, the length
-  of the barrel, the keel and the waterline; they drop details, not extent (`lod-size` stays quiet).
-- **Detail budget of a vehicle: 1,200-1,500 triangles in LOD0** (`buildings_use_their_detail_budget`),
+  of the barrel, the keel and the waterline; they drop details, not extent (`lod-size` stays quiet;
+  since WP11.6r also `far_levels_keep_the_silhouette`, see section 6).
+- **Detail budget of a vehicle: 1,200-3,000 triangles in LOD0** (`buildings_use_their_detail_budget`;
+  WP11.6r, was 1,200-1,500),
   a figure 400-1,500 (60 at most in LOD2, which needs at least 400 in LOD0 to stay under 15 %).
 
 ## 10. Later (style F)
@@ -213,9 +246,18 @@ generated (`tools/sf_model_gen/src/buildings.rs`, `objects.rs`, `stages.rs`; `se
   reaches `TEAM_AIM` (21.6 % on a 400-pixel raster, so `sf_asset_check`'s 512-pixel raster reads
   20-30 %) and the level has at least 12 team triangles; the rest are left out. Every candidate is
   a stripe of at most 350 mm in LOD0 and LOD1.
-- **Detail budget** (`stages::pad_model`): a finished structure has 2,500-3,500 triangles in LOD0;
+- **Detail budget** (`stages::pad_model`): a finished structure has 2,500-6,000 triangles in LOD0
+  (WP11.6r, was 2,500-3,500);
   a recipe that falls short, or whose reduced levels would exceed 38 % / 14 % of LOD0, gets rows
-  of slab-coloured anchor bolts along its platform edges until it does.
+  of slab-coloured anchor bolts along its platform edges until it does. WP11.6r kept this floor
+  (2,650): dropped, the finished small structures fall to 1,244-2,054 triangles and 21 of their
+  stage files break the far-level share rule (the barracks foundation: LOD2 100 of 614, 16.3 %),
+  because a stage's far levels come from the finished far level; lighter stage far levels come
+  first (a gap, not done here).
+- **Team fit** (`stages::fit_team`): when every candidate is used, a share up to `FIT_TOLERANCE`
+  (0.010) under the aim is kept; anything lower stops the generator with an assertion that names
+  the model and the share (WP11.6r: before, it panicked on 0.003 short and needed `SF_FIT_SOFT=1`,
+  which hid the stage tests' own failures).
 - **States from the finished model** (`stages::derive`), for every structure the same way:
   - *foundation*: a poured slab of the finished footprint, formwork boards, footing beams in a grid
     (team candidates: survey markings), rebar stubs and pallets (LOD0), survey stakes; at most 1.5 m;
