@@ -1,51 +1,141 @@
-//! The rules of the kit, per model of set v5 (WP11.6a, docs/art-style.md): budgets per level and
-//! strictly fewer triangles per level, the team share of the top-down view in 20-30 % on many
-//! triangles, the nodes the engine and the checker need, sizes inside the set v4 models they
-//! replace, and `sf_asset_check` with no finding at all. Every check runs on what the generator
-//! itself builds and writes (`models::MODELS`, `glb::write`).
+//! The rules of the kit, per model of set v5 (WP11.6a, WP11.6c, docs/art-style.md): budgets per
+//! level and strictly fewer triangles per level, the team share of the top-down view in 20-30 %
+//! on many triangles, the nodes the engine and the checker need, sizes inside the set v4 models
+//! they replace, and `sf_asset_check` with no finding at all. Every check runs on what the
+//! generator itself builds and writes (`set::all`, `glb::write`); the reports are made once.
 
-use sf_asset_check::Checker;
-use sf_model_gen::glb;
+use std::sync::OnceLock;
+
+use sf_asset_check::{Checker, FileReport};
 use sf_model_gen::kit::{Lod, Model, TEAM};
-use sf_model_gen::models::MODELS;
 use sf_model_gen::palette::{FactionColours, Palette};
+use sf_model_gen::stages::{STAGE_CEIL_PERMILLE, Stage};
+use sf_model_gen::{files, set};
 
-fn models() -> Vec<Model> {
-    MODELS.iter().map(|b| b()).collect()
+fn models() -> &'static [Model] {
+    static M: OnceLock<Vec<Model>> = OnceLock::new();
+    M.get_or_init(set::all)
 }
 
+/// The checker's report of every file, in the order of [`models`].
+fn reports() -> &'static [FileReport] {
+    static R: OnceLock<Vec<FileReport>> = OnceLock::new();
+    R.get_or_init(|| {
+        let checker = Checker::embedded();
+        files()
+            .iter()
+            .map(|(name, bytes)| checker.check_bytes(name, bytes))
+            .collect()
+    })
+}
+
+/// The structure roles (WP11.6c): a `body` with smoke and fire anchors, the building budget.
+const STRUCTURES: [&str; 21] = [
+    "construction_center",
+    "power_plant",
+    "refinery",
+    "barracks",
+    "vehicle_factory",
+    "radar",
+    "defence_tower",
+    "advanced_defences",
+    "shipyard",
+    "decoy_emplacement",
+    "fortified_bunker",
+    "ore_silo",
+    "relay_transmitter",
+    "fuel_depot",
+    "archive_building",
+    "bridge_segment",
+    "rail_spur",
+    "generator",
+    "automated_gun",
+    "unmanned_artillery",
+    "evidence_crate",
+];
+
+/// The suffixes of the states (`build_stages.ron`, `damage.ron`, and the mission objects' own);
+/// `_heavily_damaged` before `_damaged`, which it ends with.
+const STATES: [&str; 9] = [
+    "_foundation",
+    "_scaffolding",
+    "_heavily_damaged",
+    "_damaged",
+    "_rubble",
+    "_burnt_out",
+    "_destroyed",
+    "_off",
+    "_disabled",
+];
+
+/// The role of a stem without its faction and state (`meridian_refinery_damaged` -> `refinery`).
+fn role(stem: &str) -> &str {
+    let mut r = stem.split_once('_').map_or(stem, |(_, r)| r);
+    for s in STATES.iter().chain(&["_no_uplink"]) {
+        r = r.strip_suffix(s).unwrap_or(r);
+    }
+    r
+}
+
+/// A structure, a mission object or a heap: anchors, no hull.
 fn is_building(stem: &str) -> bool {
-    ["construction_center", "power_plant", "defence_tower"]
-        .iter()
-        .any(|b| stem.ends_with(b))
+    STRUCTURES.contains(&role(stem)) || is_heap(stem)
 }
 
-/// A person (or a team of people): the figure nodes instead of hull and turret, the infantry
-/// budget. Only the heavy gun team is generated; the other figures are Tijmen's set v3.
-fn is_infantry(stem: &str) -> bool {
-    stem.ends_with("heavy_gun_team")
+/// A rubble heap of a footprint (`wrecks.ron`): decor.
+fn is_heap(stem: &str) -> bool {
+    stem.starts_with("neutral_rubble_")
 }
 
-/// A neutral object has no player colour: no `team` material (the third slot is `paint3`).
+/// Decor: the budget of a vehicle.
+fn is_decor(stem: &str) -> bool {
+    is_heap(stem) || stem.starts_with("neutral_evidence_crate")
+}
+
+/// A faction's finished structure (not a state, not a mission object).
+fn is_finished_structure(stem: &str) -> bool {
+    is_building(stem)
+        && (stem.starts_with("meridian_") || stem.starts_with("veyran_"))
+        && role(stem) == stem.split_once('_').unwrap().1
+}
+
+/// A neutral object has no player colour (its third slot is `paint3`).
 fn is_neutral(stem: &str) -> bool {
     stem.starts_with("neutral_")
 }
 
-/// A vessel floats: the waterline `Y = 0` lies inside the hull.
+/// A person (or a team of people): the figure nodes instead of hull and turret, the infantry
+/// budget. Only the heavy gun team is generated; the other figures are Tijmen's set v3 (WP11.6b).
+fn is_infantry(stem: &str) -> bool {
+    stem.ends_with("heavy_gun_team")
+}
+
+/// A vessel floats: the waterline `Y = 0` lies inside the hull (WP11.6b).
 fn is_vessel(stem: &str) -> bool {
     stem.ends_with("gunboat") || stem.ends_with("ferry")
 }
 
-/// Vehicles with a gun: they need a muzzle under the barrel.
+/// A model with a gun: a muzzle under its barrel (the heavy tank has two, `muzzle_l`/`_r`).
 fn is_armed(stem: &str) -> bool {
-    ["light_tank", "heavy_tank", "siege_artillery", "gunboat"]
+    let armed = [
+        "light_tank",
+        "siege_artillery",
+        "gunboat",
+        "defence_tower",
+        "advanced_defences",
+        "decoy_emplacement",
+        "automated_gun",
+        "unmanned_artillery",
+    ];
+    let unarmed_state = ["_foundation", "_scaffolding", "_rubble"]
         .iter()
-        .any(|r| stem.ends_with(r))
+        .any(|s| stem.ends_with(s));
+    armed.contains(&role(stem)) && !unarmed_state
 }
 
 /// The art brief's budgets (`sf_asset_check::class::budget`), as literals.
 fn budget(stem: &str) -> [usize; 3] {
-    if is_building(stem) {
+    if is_building(stem) && !is_decor(stem) {
         [5000, 1500, 300]
     } else if is_infantry(stem) {
         [1500, 250, 60]
@@ -76,18 +166,45 @@ fn every_level_is_inside_its_budget_and_really_reduced() {
 
 /// The tuning round (14-11-2026): buildings spend their budget on real detail (vents, pipes,
 /// railings, roof units, window rows, door frames, bolted panels), 2,500-3,500 triangles in LOD0;
-/// vehicles get a little more detail but stay under the unit budget.
+/// vehicles get a little more detail but stay under the unit budget. WP11.6c: a state keeps a
+/// share of its finished model at most ([`STAGE_CEIL_PERMILLE`], WP11.6c review), a mission
+/// object at least 1,000.
 #[test]
 fn buildings_use_their_detail_budget() {
-    for m in models() {
+    let all = models();
+    for m in all {
         let t = m.triangles();
-        if is_building(&m.stem) {
+        if is_finished_structure(&m.stem) {
             assert!(
                 (2500..=3500).contains(&t[0]),
                 "{}: LOD0 {} not in 2500-3500",
                 m.stem,
                 t[0]
             );
+        } else if let Some(stage) = Stage::ALL
+            .into_iter()
+            .rev() // `_heavily_damaged` before `_damaged`
+            .find(|s| m.stem.ends_with(s.suffix()) && !is_neutral(&m.stem))
+        {
+            let base = m.stem.strip_suffix(stage.suffix()).unwrap();
+            let finished = all
+                .iter()
+                .find(|f| f.stem == base)
+                .expect("its finished model");
+            let k = Stage::ALL.iter().position(|s| *s == stage).unwrap();
+            let ceil = finished.triangles()[0] * STAGE_CEIL_PERMILLE[k] / 1000;
+            assert!(t[0] <= ceil, "{}: LOD0 {} > {ceil}", m.stem, t[0]);
+        } else if is_decor(&m.stem) {
+            assert!((100..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+        } else if is_building(&m.stem) {
+            // A mission object at least 1,000 (`objects::OBJECT_FLOOR`); its states (a heavy stage
+            // broken off low, `_destroyed`, `_rubble`) at least 200.
+            let state = STATES
+                .iter()
+                .chain(&["_no_uplink"])
+                .any(|s| m.stem.ends_with(s));
+            let least = if state { 200 } else { 1000 };
+            assert!((least..=3500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else if is_infantry(&m.stem) {
             // A figure is small: 400 triangles in LOD0 keep LOD2 (60 at most) under 15 %.
             assert!((400..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
@@ -97,23 +214,52 @@ fn buildings_use_their_detail_budget() {
     }
 }
 
+/// The stage floors and the state list, as literals (they set what a state may cost).
+#[test]
+fn the_stage_rules_are_pinned() {
+    use sf_model_gen::{buildings, objects, stages};
+    assert_eq!(STAGE_CEIL_PERMILLE, [300, 700, 900, 700]);
+    assert_eq!(stages::SCAFFOLD_CUT_PERMILLE, 600);
+    assert_eq!(stages::HEAVY_CUT_PERMILLE, 500);
+    assert_eq!(stages::DETAIL_GONE_PERMILLE, 8000);
+    assert_eq!(stages::LOD1_MAX_PERMILLE, 380);
+    assert_eq!(stages::LOD2_MAX_PERMILLE, 140);
+    assert_eq!(stages::TEAM_MIN_TRIS, 12);
+    assert_eq!(stages::CHUNK_SIDES, 8);
+    assert_eq!(stages::FIT_RES, 400);
+    assert_eq!(buildings::DETAIL_FLOOR, 2650);
+    assert_eq!(buildings::DETAIL_CEIL, 3400);
+    assert_eq!(objects::OBJECT_FLOOR, 1000);
+    assert_eq!(objects::OBJECT_CEIL, 3400);
+    assert_eq!(objects::DECOR_CEIL, 1450);
+    assert_eq!(
+        Stage::ALL.map(Stage::suffix),
+        [
+            "_foundation",
+            "_scaffolding",
+            "_damaged",
+            "_heavily_damaged"
+        ]
+    );
+    assert_eq!(sf_model_gen::stages::TEAM_AIM, 0.216);
+    assert_eq!(sf_model_gen::stages::FAR_STRIPE_MM, 600);
+}
+
 #[test]
 fn the_checker_finds_nothing_and_the_team_share_is_20_to_30_percent_in_every_level() {
-    let checker = Checker::embedded();
-    for m in models() {
+    for (m, report) in models().iter().zip(reports()) {
         let file = format!("{}.glb", m.stem);
-        let report = checker.check_bytes(&file, &glb::write(&m));
+        assert_eq!(report.file, file);
+        assert!(report.findings.is_empty(), "{file}: {:?}", report.findings);
         let shares = &report.facts.team_share;
         if is_neutral(&m.stem) {
             // No player colour on a neutral object: the checker has nothing to measure.
-            assert!(report.findings.is_empty(), "{file}: {:?}", report.findings);
             assert!(shares.is_empty(), "{file}: {shares:?}");
             continue;
         }
         assert_eq!(shares.len(), 3, "{file}");
         let shares: Vec<f64> = shares.iter().map(|s| s.expect("seen from above")).collect();
         println!("{file}: team share {shares:.3?}");
-        assert!(report.findings.is_empty(), "{file}: {:?}", report.findings);
         for (n, s) in shares.iter().enumerate() {
             // The tuning round (14-11-2026): team is bands and trim, aimed at 20-25 %. The
             // checker's own rule stays at 20-40 % (so 20 is the floor); this test caps it at 30.
@@ -123,11 +269,50 @@ fn the_checker_finds_nothing_and_the_team_share_is_20_to_30_percent_in_every_lev
 }
 
 #[test]
-fn the_team_colour_is_bands_and_panels_never_one_triangle() {
+fn a_neutral_model_has_no_team_material() {
     for m in models() {
-        if is_neutral(&m.stem) {
-            continue;
+        let names: Vec<&str> = m.materials.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(m.team().is_none(), is_neutral(&m.stem), "{}", m.stem);
+        let third = if is_neutral(&m.stem) {
+            "paint3"
+        } else {
+            "team"
+        };
+        assert_eq!(
+            names,
+            ["paint", "paint2", third, "metal", "rubber", "accent"],
+            "{}",
+            m.stem
+        );
+    }
+}
+
+/// A vessel's waterline `Y = 0` lies inside its hull (it has a keel under the water); every
+/// other model stands on the ground with its lowest point at `Y = 0`.
+#[test]
+fn vessels_float_and_everything_else_stands_on_the_ground() {
+    for (m, r) in models().iter().zip(reports()) {
+        let (lo, hi) = r.facts.bounds.expect("bounds");
+        if is_vessel(&m.stem) {
+            assert!(lo.y < 0.0 && hi.y > 0.0, "{}: {lo:?} {hi:?}", m.stem);
+        } else {
+            assert!(lo.y.abs() < 0.005, "{}: lowest point {}", m.stem, lo.y);
         }
+    }
+}
+
+/// The units of set v5 (WP11.6b) are in the set (the wiring is pinned in `sf_data`'s units test).
+#[test]
+fn every_unit_role_has_its_model_in_the_set() {
+    let stems: Vec<&str> = models().iter().map(|m| m.stem.as_str()).collect();
+    for want in UNIT_FOOTPRINTS.iter().map(|f| f.0) {
+        assert!(stems.contains(&want), "{want} is missing");
+    }
+}
+
+#[test]
+fn the_team_colour_is_bands_and_panels_never_one_triangle() {
+    for m in models().iter().filter(|m| !is_neutral(&m.stem)) {
         let team = m.team().expect("a team material");
         assert_eq!(m.materials[team.0 as usize].name, TEAM);
         for (n, level) in m.lods.iter().enumerate() {
@@ -148,15 +333,13 @@ fn the_team_colour_is_bands_and_panels_never_one_triangle() {
 /// [`MAX_BAND_MM`] across: its height over its longest edge (a strip of width `w` split into two
 /// triangles gives at most `w`). The thick roof frames of the tuning round (850 mm) fail this.
 /// LOD0 and LOD1 only: LOD2 is the far view on 150-300 triangles, where the harvester's drum keeps
-/// two wider bands (four narrow ones cost 32 triangles more than its budget allows).
+/// two wider bands (four narrow ones cost 32 triangles more than its budget allows) and a stage's
+/// stripes are 600 mm (`stages::FAR_STRIPE_MM`).
 const MAX_BAND_MM: f64 = 350.0;
 
 #[test]
 fn every_team_band_is_narrow() {
-    for m in models() {
-        if is_neutral(&m.stem) {
-            continue;
-        }
+    for m in models().iter().filter(|m| !is_neutral(&m.stem)) {
         let team = m.team().expect("a team material");
         for (n, level) in m.lods.iter().enumerate().take(2) {
             for t in level.world_tris().iter().filter(|t| t.mat == team) {
@@ -219,7 +402,7 @@ fn every_level_has_the_nodes_of_its_role() {
                     m.stem
                 );
                 assert!(root.find("muzzle").is_none(), "{}", m.stem);
-            } else if is_armed(&m.stem) || m.stem.ends_with("defence_tower") {
+            } else if is_armed(&m.stem) {
                 need.extend(["turret", "barrel", "muzzle"]);
             }
             for name in need {
@@ -241,116 +424,353 @@ fn every_level_has_the_nodes_of_its_role() {
     }
 }
 
-/// Size of LOD0 (x, z) in metres must stay inside the model it replaces: the set v4 file, as
-/// `sf_asset_check` measured it on 14-11-2026 (`size` column), as literals. The heavy gun team has
-/// no v4 file; its bound is the infantry cell it stands in (about 1.7 x 1.2 m, pinned).
-const FOOTPRINTS: &[(&str, f32, f32)] = &[
-    ("meridian_amphibious_transport", 6.33, 3.26),
+/// Size of LOD0 (x, z) in metres must stay inside the set v4 model of its role, and a structure
+/// inside its footprint in `unit_defs.ron` (4 m a cell); the v4 sizes as `sf_asset_check` measured
+/// them on 14-11-2026 (`size` column), as literals. A state shares its role's size.
+const V4_SIZES: [(&str, f32, f32); 30] = [
     ("meridian_construction_center", 15.20, 15.20),
     ("meridian_harvester", 6.46, 3.46),
-    ("meridian_heavy_tank", 7.25, 3.80),
     ("meridian_light_tank", 5.11, 2.90),
+    ("veyran_defence_tower", 3.90, 3.80),
+    ("veyran_light_tank", 5.11, 2.90),
+    ("veyran_power_plant", 7.60, 11.40),
+    ("veyran_construction_center", 15.20, 15.20),
+    ("meridian_power_plant", 7.60, 11.40),
+    ("refinery", 11.40, 15.20),
+    ("barracks", 7.60, 11.40),
+    ("vehicle_factory", 11.40, 15.20),
+    ("radar", 7.60, 7.60),
+    ("meridian_defence_tower", 3.90, 3.80),
+    ("advanced_defences", 7.80, 7.60),
+    ("shipyard", 15.20, 19.00),
+    ("decoy_emplacement", 3.90, 3.80),
+    ("fortified_bunker", 7.60, 7.60),
+    // No set v4 model: as the other two-cell structures of set v4 (radar, bunker).
+    ("ore_silo", 7.60, 7.60),
+    // Mission objects: the smaller of the v4 model and the footprint.
+    ("relay_transmitter", 3.80, 3.80),
+    ("fuel_depot", 7.60, 8.00),
+    ("archive_building", 11.40, 11.40),
+    ("bridge_segment", 4.00, 4.00),
+    ("rail_spur", 4.00, 2.50),
+    ("generator", 3.80, 4.00),
+    ("evidence_crate", 1.01, 0.61),
+    ("automated_gun", 4.00, 4.00),
+    ("unmanned_artillery", 7.80, 7.60),
+    ("rubble_1x1", 2.80, 2.75),
+    ("rubble_2x2", 5.60, 5.50),
+    ("rubble_2x3", 5.60, 8.25),
+];
+/// The units of WP11.6b: the set v4 file they replace (the heavy gun team: its infantry cell).
+const UNIT_FOOTPRINTS: &[(&str, f32, f32)] = &[
+    ("meridian_amphibious_transport", 6.33, 3.26),
+    ("meridian_heavy_tank", 7.25, 3.80),
     ("meridian_light_transport", 3.42, 2.11),
     ("meridian_repair_truck", 4.94, 2.50),
     ("meridian_siege_artillery", 8.60, 3.10),
     ("neutral_ferry", 21.12, 9.00),
     ("neutral_supply_truck", 5.64, 2.50),
-    ("veyran_defence_tower", 3.90, 3.80),
     ("veyran_gunboat", 18.00, 5.00),
     ("veyran_harvester", 6.54, 3.60),
     ("veyran_heavy_gun_team", 1.70, 1.20),
     ("veyran_heavy_tank", 7.25, 3.80),
-    ("veyran_light_tank", 5.11, 2.90),
-    ("veyran_power_plant", 7.60, 11.40),
     ("veyran_repair_truck", 4.94, 2.50),
     ("veyran_siege_artillery", 8.60, 3.10),
     ("veyran_transport_truck", 5.64, 2.50),
 ];
+/// The larger heaps (set v4 sizes).
+const V4_HEAPS: [(&str, f32, f32); 3] = [
+    ("rubble_3x4", 8.40, 11.00),
+    ("rubble_4x4", 11.20, 11.00),
+    ("rubble_4x5", 11.20, 13.75),
+];
 
 #[test]
-fn every_model_stays_inside_the_footprint_it_replaces() {
-    let checker = Checker::embedded();
-    let all = models();
-    for m in &all {
-        let (_, x, z) = *FOOTPRINTS
+fn every_model_stays_inside_the_set_v4_footprint() {
+    let size_of = |stem: &str| -> (f32, f32) {
+        if let Some((_, x, z)) = UNIT_FOOTPRINTS.iter().find(|f| f.0 == stem) {
+            return (*x, *z);
+        }
+        let base = stem.split_once('_').unwrap().1;
+        let by_stem = V4_SIZES.iter().chain(&V4_HEAPS).find(|(s, _, _)| {
+            *s == stem || stem.strip_prefix(s).is_some_and(|r| r.starts_with('_'))
+        });
+        let by_role = V4_SIZES
             .iter()
-            .find(|f| f.0 == m.stem)
-            .unwrap_or_else(|| panic!("{} has no footprint", m.stem));
-        let r = checker.check_bytes(&format!("{}.glb", m.stem), &glb::write(m));
+            .chain(&V4_HEAPS)
+            .find(|(s, _, _)| *s == role(stem) || *s == base);
+        let (_, x, z) = by_stem
+            .or(by_role)
+            .unwrap_or_else(|| panic!("{stem}: no size"));
+        (*x, *z)
+    };
+    for (m, r) in models().iter().zip(reports()) {
+        let (x, z) = size_of(&m.stem);
         let (lo, hi) = r.facts.bounds.expect("bounds");
         let ext = hi - lo;
-        println!("{}: {:.2} x {:.2} (limit {x} x {z})", m.stem, ext.x, ext.z);
-        assert!(ext.x <= x && ext.z <= z, "{}: {ext:?} vs {x} x {z}", m.stem);
+        assert!(
+            ext.x <= x + 1e-3 && ext.z <= z + 1e-3,
+            "{}: {:.2} x {:.2} vs {x} x {z}",
+            m.stem,
+            ext.x,
+            ext.z
+        );
     }
 }
 
-/// A vessel's waterline `Y = 0` lies inside its hull (it has a keel under the water); every
-/// other model stands on the ground with its lowest point at `Y = 0`.
+/// The set holds every role's states (`build_stages.ron`, `damage.ron`): each faction structure
+/// in five files, the mission objects with the states of set v4, the six heaps; 143 in all.
 #[test]
-fn vessels_float_and_everything_else_stands_on_the_ground() {
-    let checker = Checker::embedded();
-    for m in models() {
-        let r = checker.check_bytes(&format!("{}.glb", m.stem), &glb::write(&m));
-        let (lo, hi) = r.facts.bounds.expect("bounds");
-        if is_vessel(&m.stem) {
-            assert!(lo.y < 0.0 && hi.y > 0.0, "{}: {lo:?} {hi:?}", m.stem);
-        } else {
-            assert!(lo.y.abs() < 0.005, "{}: lowest point {}", m.stem, lo.y);
+fn every_structure_has_all_its_states() {
+    let stems: Vec<&str> = models().iter().map(|m| m.stem.as_str()).collect();
+    let factioned: [(&str, &[&str]); 12] = [
+        ("construction_center", &["meridian", "veyran"]),
+        ("power_plant", &["meridian", "veyran"]),
+        ("refinery", &["meridian", "veyran"]),
+        ("barracks", &["meridian", "veyran"]),
+        ("vehicle_factory", &["meridian", "veyran"]),
+        ("radar", &["meridian", "veyran"]),
+        ("defence_tower", &["meridian", "veyran"]),
+        ("advanced_defences", &["meridian", "veyran"]),
+        ("shipyard", &["meridian", "veyran"]),
+        ("ore_silo", &["meridian", "veyran"]),
+        ("decoy_emplacement", &["meridian"]),
+        ("fortified_bunker", &["veyran"]),
+    ];
+    for (role, factions) in factioned {
+        for f in factions {
+            for s in [
+                "",
+                "_foundation",
+                "_scaffolding",
+                "_damaged",
+                "_heavily_damaged",
+            ] {
+                let stem = format!("{f}_{role}{s}");
+                assert!(stems.contains(&stem.as_str()), "{stem} missing");
+            }
         }
     }
-}
-
-/// A neutral model carries `paint3` where a faction model carries `team`, and no triangle of it
-/// uses that slot as a player colour.
-#[test]
-fn a_neutral_model_has_no_team_material() {
-    for m in models() {
-        let names: Vec<&str> = m.materials.iter().map(|x| x.name.as_str()).collect();
-        if is_neutral(&m.stem) {
-            assert_eq!(
-                names,
-                ["paint", "paint2", "paint3", "metal", "rubber", "accent"],
-                "{}",
-                m.stem
-            );
-            assert!(m.team().is_none(), "{}", m.stem);
-        } else {
-            assert_eq!(
-                names,
-                ["paint", "paint2", "team", "metal", "rubber", "accent"],
-                "{}",
-                m.stem
-            );
-        }
-    }
-}
-
-/// The units of set v5 (WP11.6b): the files, in the order of `MODELS`, are the ones the roles of
-/// `unit_defs.ron` name (the wiring itself is pinned in `sf_data`'s units test).
-#[test]
-fn every_unit_role_has_its_model_in_the_set() {
-    let stems: Vec<String> = models().iter().map(|m| m.stem.clone()).collect();
-    for want in [
-        "meridian_amphibious_transport",
-        "meridian_heavy_tank",
-        "meridian_light_transport",
-        "meridian_repair_truck",
-        "meridian_siege_artillery",
-        "neutral_ferry",
-        "neutral_supply_truck",
-        "veyran_gunboat",
-        "veyran_harvester",
-        "veyran_heavy_gun_team",
-        "veyran_heavy_tank",
-        "veyran_repair_truck",
-        "veyran_siege_artillery",
-        "veyran_transport_truck",
+    for stem in [
+        "neutral_relay_transmitter_damaged",
+        "neutral_relay_transmitter_rubble",
+        "neutral_fuel_depot_damaged",
+        "neutral_fuel_depot_burnt_out",
+        "neutral_archive_building_damaged",
+        "neutral_archive_building_heavily_damaged",
+        "neutral_bridge_segment_damaged",
+        "neutral_bridge_segment_destroyed",
+        "neutral_rail_spur_destroyed",
+        "neutral_generator_off",
+        "neutral_generator_rubble",
+        "neutral_evidence_crate",
+        "network_automated_gun_disabled",
+        "network_automated_gun_rubble",
+        "network_unmanned_artillery_no_uplink",
+        "network_unmanned_artillery_rubble",
+        "neutral_rubble_1x1",
+        "neutral_rubble_4x5",
     ] {
-        assert!(stems.iter().any(|s| s == want), "{want} is missing");
+        assert!(stems.contains(&stem), "{stem} missing");
     }
+    // WP11.6a 6, WP11.6b 14 units, WP11.6c the rest.
+    assert_eq!(stems.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6);
     let mut sorted = stems.clone();
-    sorted.sort();
-    assert_eq!(stems, sorted, "MODELS is sorted by file name");
+    sorted.sort_unstable();
+    assert_eq!(stems, sorted, "set::all is sorted by file name");
+}
+
+/// A damaged state has a hole (fewer triangles of the finished roof survive) and the heavy state
+/// is broken off lower than the finished model; the scaffolding stands higher than the cut walls
+/// (the crane); the foundation is a slab under 1.5 m. Measured on LOD0 of every faction structure.
+#[test]
+fn the_states_read_as_their_stage() {
+    use sf_model_gen::stages::{CHAR, RECESS_DEBRIS, SOOT};
+    let all = models();
+    let height = |m: &Model| {
+        m.lods[0]
+            .world_tris()
+            .iter()
+            .flat_map(|t| t.v.map(|p| p[1]))
+            .max()
+            .unwrap()
+    };
+    // The height half the area of the upward faces over 0.6 m lies under (seen from above): the
+    // roof of a building, not its crane or antenna.
+    let roof = |m: &Model| {
+        // The body only: a turret sits on the break, it is no roof.
+        let body = m.lods[0].find("body").expect("body");
+        let mut faces: Vec<(i32, i64)> = body
+            .mesh
+            .tris
+            .iter()
+            .filter_map(|t| {
+                let n = t.normal();
+                let y = t.v.iter().map(|p| p[1]).sum::<i32>() / 3;
+                (n[1] > 0 && y > 600).then_some((y, n[1]))
+            })
+            .collect();
+        faces.sort_unstable();
+        let total: i64 = faces.iter().map(|f| f.1).sum();
+        let mut acc = 0;
+        faces
+            .iter()
+            .find(|f| {
+                acc += f.1;
+                acc * 2 >= total
+            })
+            .map_or(0, |f| f.0)
+    };
+    let anchor = |m: &Model, name: &str| m.lods[0].find(name).expect(name).at;
+    let toned = |m: &Model, tones: &[u16]| {
+        m.lods[0]
+            .world_tris()
+            .iter()
+            .filter(|t| tones.contains(&t.tone))
+            .count()
+    };
+    for m in all.iter().filter(|m| is_finished_structure(&m.stem)) {
+        let get = |s: &str| {
+            all.iter()
+                .find(|x| x.stem == format!("{}{s}", m.stem))
+                .unwrap()
+        };
+        let h = height(m);
+        assert!(height(get("_foundation")) <= 1500, "{} foundation", m.stem);
+        // The scaffolding: its crane stands over the finished model; the cut walls keep under
+        // two thirds of the finished corners.
+        let scaffold = get("_scaffolding");
+        assert!(
+            height(scaffold) > h,
+            "{}: no crane over the cut walls",
+            m.stem
+        );
+        // The heavy stage is broken off: its roof is far under the finished roof.
+        let heavy = get("_heavily_damaged");
+        assert!(height(heavy) < h, "{} heavy", m.stem);
+        assert!(
+            roof(heavy) * 10 < roof(m) * 9,
+            "{}: heavy roof {} vs finished {}",
+            m.stem,
+            roof(heavy),
+            roof(m)
+        );
+        // Broken off at half the roof level (docs/art-style.md §11): the break of the heavy body
+        // lies at most 0.6 of the way from the platform to the finished roof level. The break is
+        // a plane through the model's centre line tilting at most 250 mm/m along X and 120 mm/m
+        // along Z: the mean of the highest wall top left and right of the centre cancels the X
+        // tilt, the Z tilt gets its 120 mm/m over half the depth as margin.
+        let slab = sf_model_gen::stages::slab_of(heavy).expect("slab marker");
+        let finished_roof =
+            sf_model_gen::stages::roof_level(&sf_model_gen::stages::split(&m.lods[0]), slab);
+        let hb = &heavy.lods[0].find("body").expect("body").mesh.tris;
+        let top = |left: bool| {
+            hb.iter()
+                .flat_map(|t| t.v)
+                .filter(|p| (p[0] < 0) == left && p[0] != 0 && p[2].abs() <= 600)
+                .map(|p| p[1])
+                .max()
+                .unwrap_or(slab)
+        };
+        let brk = (top(true) + top(false)) / 2;
+        let bound = slab + (finished_roof - slab) * 6 / 10 + 120 * 600 / 1000;
+        assert!(
+            brk <= bound,
+            "{}: heavy break at {brk} over {bound} (slab {slab}, finished roof {finished_roof})",
+            m.stem
+        );
+        // Its smoke and fire come from the break, never from the finished roof.
+        for a in ["fx_smoke_0", "fx_fire_0"] {
+            assert!(anchor(heavy, a)[1] <= anchor(m, a)[1], "{} {a}", m.stem);
+        }
+        assert!(
+            anchor(heavy, "fx_smoke_0")[1] < anchor(m, "fx_smoke_0")[1],
+            "{}: the smoke anchor stays at the finished height",
+            m.stem
+        );
+        // Soot and debris on both damage stages.
+        for s in [get("_damaged"), heavy] {
+            assert!(toned(s, &[SOOT, CHAR]) > 0, "{}: no soot", s.stem);
+            assert!(
+                toned(s, &[RECESS_DEBRIS, CHAR]) > 0,
+                "{}: no debris",
+                s.stem
+            );
+        }
+        let lod0 = |x: &Model| x.lods[0].world_tris();
+        // The damaged state keeps a good part of the finished model but not all of it (the hole,
+        // the detail round it; the anchor-bolt filler of a small structure is not inherited).
+        // By corners only: soot changes the tone and burns team paint, the hole removes geometry.
+        let finished: std::collections::BTreeSet<_> = lod0(m).iter().map(|t| t.v).collect();
+        let kept = |x: &Model| lod0(x).iter().filter(|t| finished.contains(&t.v)).count();
+        assert!(kept(get("_damaged")) < lod0(m).len(), "{}: no hole", m.stem);
+        // The hole itself (its generator marker): the finished body has roof there, and none of
+        // the finished body's triangles with its centroid inside it is left in the damaged body
+        // (by corners: soot only changes the tone; the burnt chunks in it are new geometry).
+        let damaged = get("_damaged");
+        let (c, r) = sf_model_gen::stages::hole_of(damaged).expect("hole marker");
+        let inside = |t: &&sf_model_gen::kit::Tri| {
+            let d = [0, 1, 2]
+                .map(|k| i64::from(t.v.iter().map(|p| p[k]).sum::<i32>() / 3) - i64::from(c[k]));
+            d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= i64::from(r) * i64::from(r)
+        };
+        let body = |x: &Model| x.lods[0].find("body").expect("body").mesh.tris.clone();
+        let roof_there: std::collections::BTreeSet<_> = body(m)
+            .iter()
+            .filter(inside)
+            .filter(|t| sf_model_gen::stages::faces_up(t))
+            .map(|t| t.v)
+            .collect();
+        assert!(
+            !roof_there.is_empty(),
+            "{}: no roof where the hole is",
+            m.stem
+        );
+        let in_hole: std::collections::BTreeSet<_> =
+            body(m).iter().filter(inside).map(|t| t.v).collect();
+        let left = body(damaged)
+            .iter()
+            .filter(inside)
+            .filter(|t| in_hole.contains(&t.v))
+            .count();
+        assert_eq!(
+            left, 0,
+            "{}: {left} finished body triangles left in the hole",
+            m.stem
+        );
+        assert!(
+            kept(get("_damaged")) * 4 > lod0(m).len(),
+            "{}: too much gone",
+            m.stem
+        );
+        assert!(
+            kept(scaffold) * 3 < lod0(m).len() * 2,
+            "{}: walls not cut",
+            m.stem
+        );
+    }
+}
+
+/// A state is never richer than its finished structure (WP11.6c review): LOD0 of every state
+/// file at most LOD0 of the file it is derived from.
+#[test]
+fn no_state_has_more_triangles_than_its_finished_model() {
+    let all = models();
+    for m in all {
+        let Some(base) = STATES
+            .iter()
+            .chain(&["_no_uplink"])
+            .find_map(|s| m.stem.strip_suffix(s))
+        else {
+            continue;
+        };
+        let Some(finished) = all.iter().find(|f| f.stem == base) else {
+            continue; // a heap or an `_off` variant made by its own recipe
+        };
+        let (t, f) = (m.triangles()[0], finished.triangles()[0]);
+        println!("{}: {t} of {f}", m.stem);
+        assert!(t <= f, "{}: LOD0 {t} > its finished model's {f}", m.stem);
+    }
 }
 
 #[test]
@@ -380,7 +800,7 @@ fn the_shipped_palette_has_the_style_g_values() {
             accent: [160, 32, 48],
         }
     );
-    // Neutral models (the supply truck, the ferry): no accent of a faction, the third slot is paint.
+    // Neutral models (WP11.6b): no faction accent, the third slot is a light paint.
     assert_eq!(
         p.factions["neutral"],
         FactionColours {
@@ -399,6 +819,19 @@ fn the_shipped_palette_has_the_style_g_values() {
         .map(|m| (m.name, m.srgb))
         .collect();
     assert_eq!(neutral[2], ("paint3".to_owned(), [206, 196, 164]));
+    // WP11.6c: the Network defences (graphite with an amber lamp, the player colour).
+    assert_eq!(
+        p.factions["network"],
+        FactionColours {
+            paint: [92, 100, 112],
+            paint_light: [118, 126, 138],
+            paint2: [54, 58, 66],
+            paint2_shade: [70, 74, 84],
+            metal: [36, 36, 40],
+            rubber: [20, 20, 20],
+            accent: [150, 100, 20],
+        }
+    );
     assert_eq!(p.team_base, [235, 235, 235]);
     // The material slots, in their fixed order (a later texture step keys on them).
     let names: Vec<String> = p.materials("veyran").into_iter().map(|m| m.name).collect();

@@ -3287,7 +3287,18 @@ fixed, delete the entry in the same PR.
 ### WP11.3b notes: CC0 fight sounds (11-11-2026)
 
 Audio only: nothing in `sf_sim`, no pin moved. Nobody could listen in the build container; the sounds are checked by
-measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please listen**, the table says what each should sound like.
+measurement (peak, length, silence, the mix below), not by ear. Tijmen: please listen, the table says what each should sound like (done 12-11-2026, next paragraph).
+
+**Listened (12-11-2026).** Tijmen played `sf_game --sandbox --fight` without `--ra-audio` (release build of main `51a43a0`, the
+reference laptop), so every fight sound came from the CC0 bank, and judged them good ("Klinkt goed"). The game's exit summary of
+that run: `summary: fight sounds SoundTotals { requested: 277, silent: 0, inaudible: 35, merged: 1, limited: 0, spaced: 62, played: 179 }`.
+What it does not settle:
+* **`weapon.fire.demolition` and B11.** One Veyran demolition team takes part in the sandbox fight (its `satchel_charge` gives
+  `flash_demolition`, whose sound this is), so the sound can have played; the summary does not count per event, so it does not show
+  whether it did. Its check for a likeness to a Red Alert sound stays open.
+* **The summed-gain limiter** (`positional.max_summed_gain`). The summary's `limited` counts requests the planner dropped
+  (`max_per_batch`, `max_cues_per_frame`), not frames the limiter turned down, and nothing counts those. So this run does not show
+  whether the limiter acted.
 
 * **The generator** `tools/sf_sound_gen` writes 18 mono 16-bit 22.05 kHz WAV files to `assets/audio/sfx/` (571,926 bytes together, budget
   2 MB). Integer maths only, so the bytes are the same on every platform; each file is pinned by length and FNV-1a hash in
@@ -3305,7 +3316,7 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   these) the peak was 0.932 and the test failed; that is how they were set. The mix ignores pan, pitch and voice limits (an upper bound).
   Assumption: a music track is normalised near full scale; the player's Red Alert tracks were not measured.
 * **Sweep of PR #122 (fixed):** a mapped Red Alert sound would have taken the bank entry's volume, pitch and cap (3 to 5 times quieter) because the fight events now have entries; new bank field `original_as_is: true` on the 18 entries keeps the original at volume 1, no pitch, default cap (test: resolved definition and traced gain of all 18 with a fixture mapping). The volume tests now cover every event alone (peaks 0.099 to 0.278), a simultaneous 20-tank volley (0.238, the planner merges it) and four kinds together (0.485); every bank volume, pitch and cap is pinned as literals. Measured gap: eight kinds on one tick at one spot sum to 1.13 and all 18 to 1.37 (would clip). Fog: sounds of hidden events are audible (`fog_look.md`, Tijmen may change it). `*.wav binary` in `.gitattributes`. `weapon.fire.demolition` (two ticks and a rising beep) is the one sound for Tijmen to check for a likeness to a Red Alert sound (B11).
-* **Not done**: a sound for a structure being hit (the sim has no such event); several variant files per event; any listening test.
+* **Not done**: a sound for a structure being hit (the sim has no such event); several variant files per event; any listening test in the build container (Tijmen listened on 12-11-2026, above).
 
 | Event | File | Length | What to listen for |
 |---|---|---|---|
@@ -3479,6 +3490,47 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Pins.** None moved in the end: the first build's re-pins for 4 : 4 : 3 (digest, `m1_ai` timings, goal list 21,097, the third picture) were undone with the mix, and its screenshots removed. No earlier-phase pin moved.
 * **Dropped:** WP9.2b-2 (choice of an economy target), for the measured reasons in PLAN.md; its budget goes to WP9.3a.
 * **Folded in.** Three doc and name nits from the review of #134 (`ai.md` test name and `gather_units`; the test `the_staging_exit_spread_is_pinned_on_both_start_sites`).
+
+### WP11.6c notes: every structure and its states in style G (14-11-2026)
+
+* **Built.** `tools/sf_model_gen/src/buildings.rs` (one recipe per structure role for both factions:
+  construction center (Veyran), power plant (Meridian), refinery, barracks, vehicle factory, radar,
+  defence tower (Meridian), advanced defences, shipyard, decoy emplacement, fortified bunker, ore
+  silo), `objects.rs` (the mission objects, the Network defences, six rubble heaps), `stages.rs`
+  (foundation, scaffolding, damaged and heavily damaged derived from the finished model, the team
+  fit and the detail pad), `set.rs` (all 143 files, sorted). 137 new files in `assets/set_v5`;
+  `unit_defs.ron` and `wrecks.ron` point at them (paths only; the ore silo gets faction models),
+  `models.ron`'s pack lists all 143. Rules in `docs/art-style.md` section 11.
+* **Roster.** The set v4 fallback of `roster::state_file` (WP11.6a) is gone: every set v5 structure
+  has its own stage files. `the_damaged_looks_are_the_art_sets_damaged_files` pins 49 damaged looks
+  (was 45: the ore silo now has art, 2 factions x 2 stages); `NO_ART_YET` is empty.
+* **Kit (shared, output unchanged).** `shade::bake` only tests occluders a ray can reach within
+  1.4 m (an exact filter on an `any`); `files()` writes on up to 8 threads round-robin. The six
+  WP11.6a files keep their pinned bytes (shown by the pin test). A full run: 59 s -> 18 s
+  (release, 4 cores, same machine, other agents building).
+* **Palette.** `neutral` and the `paint3` third slot as on branch WP11.6b (identical text), plus
+  `network` (graphite, amber lamp) for the automated gun and the unmanned artillery.
+* **Checked.** `sf_asset_check --deny-warnings assets/set_v5`: 157 pass (with the units of #142).
+  Contact sheets in `docs/screenshots/wp11.6c/`.
+* **Review sweep (15-11-2026).** No state is richer than its finished structure: states no longer
+  inherit the finished model's anchor-bolt filler and have no detail floor; LOD0 at most 30 / 70 /
+  90 / 70 % of the finished LOD0 (`STAGE_CEIL_PERMILLE`), LOD1/LOD2 built on the finished far
+  level, scaffolding walls bare, damage takes the small detail, team stripes top-face only.
+  `assets/set_v5` 55.3 MB -> 34 MB. New tests: `no_state_has_more_triangles_than_its_finished_model`,
+  a stronger `the_states_read_as_their_stage` (crane, roof under 90 % of the finished roof, anchors
+  down, soot, debris, cut walls), more constants pinned, and
+  `a_missing_set_v5_state_file_is_none_even_with_a_set_v4_one` (roster). The ore silo's size limit
+  is 7.60 m like the other two-cell structures.
+* **Gaps.** The heavily damaged stages read mostly as a heap (a grid of chunks in the cut shell);
+  the scaffolding deck hides the inside of the cut walls; the bolt rows that pad small structures
+  are a filler, not designed detail; the mission objects' special states (`_off`, `_disabled`,
+  `_no_uplink`, `_burnt_out`, `_destroyed`, `_rubble`; 10 files, 1.27 MB) are made but no engine
+  rule shows them yet and nothing outside `models.ron` reads them: they get a reader when a mission
+  can change an object's state, i.e. with the trigger events and actions of WP10.2/WP10.3 (object
+  destroyed, disabled, uplink lost); which work package maps those states to these files is to be
+  fixed there (WP11.6c review, nit 2);
+  the ferry (a vessel) is WP11.6b's; 34 MB of GLB in `assets/set_v5` (non-indexed vertices with RGB
+  vertex colour; the writer was left alone so the WP11.6a pins hold).
 
 ### WP11.6a notes: the model generator and the style proof (14-11-2026)
 

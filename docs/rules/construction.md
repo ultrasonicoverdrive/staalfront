@@ -122,7 +122,9 @@ tick): nothing in `sf_game` counts a tick or decides a stage.
 
 * **Stage models.** `assets/config/build_stages.ron` (checked when it is parsed, `sf_data::build_stages`):
   the stages in order, each with `from_permille` and a `suffix`; the stage's model is the finished model's file
-  with the suffix before `.glb` (`set_v4/meridian_barracks.glb` + `_foundation`). Shipped: **foundation** from
+  with the suffix before `.glb` (`set_v5/meridian_barracks.glb` + `_foundation`; since WP11.6c every set v5
+  structure has its own stage files, made from the finished model by `tools/sf_model_gen/src/stages.rs`,
+  docs/art-style.md section 11). Shipped: **foundation** from
   0, **scaffolding** from 400 thousandths, the finished model from the tick the simulation says the structure
   is complete. The thresholds and the names are data; nothing is in Rust. `Roster` builds one look per stage
   for every structure that can be built, per faction; `Looks::shape_at(view, Some(permille))` picks it.

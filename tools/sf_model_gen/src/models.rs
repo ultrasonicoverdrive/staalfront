@@ -253,7 +253,7 @@ pub(crate) fn wedge(hx: i32, fx: i32, nose: i32, hz: i32) -> Vec<[i32; 2]> {
 
 /// Smoke and fire anchors of a structure. Vehicles have none yet: without them a hurt vehicle smokes by
 /// the engine's rule, as every other vehicle does (`docs/art-style.md` section 7).
-fn anchors(n: Node, smoke: P, fire: P) -> Node {
+pub(crate) fn anchors(n: Node, smoke: P, fire: P) -> Node {
     n.child(Node::empty("fx_smoke_0", smoke))
         .child(Node::empty("fx_fire_0", fire))
 }

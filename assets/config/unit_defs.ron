@@ -41,8 +41,8 @@
 // Veyran heavy gun team; a role of both factions has a model per faction (its `model` stays the
 // fallback for any other owner), a role of one faction or a neutral one names its file in `model`.
 // The infantry is Tijmen's set v3 (assets/set_v3), which is better than the set v4 figures:
-// demolition_team was always on it, WP11.6b put the rest back. The set v4 files
-// (assets/set_v4) are still the structures that WP11.6c has not replaced yet. Decor (trees,
+// demolition_team was always on it, WP11.6b put the rest back. Every structure role and mission
+// object is set v5 too since WP11.6c (with its build and damage states). Decor (trees,
 // rocks, ore stages, wrecks) is not a unit role and is not listed here.
 //
 // Build pictures (WP11.1, docs/rules/sidebar.md): `build_picture: (color: (r, g, b), label: "PWR", order: 10)`
@@ -66,7 +66,7 @@
             model: Shape(Cube), strategic_icon: Square,
             models: {
                 Meridian: Glb("set_v5/meridian_construction_center.glb"),
-                Veyran: Glb("set_v4/veyran_construction_center.glb"),
+                Veyran: Glb("set_v5/veyran_construction_center.glb"),
             },
             icon: "construction_center",
             // placeholder: sight, model. No cost: it is the base anchor, not bought.
@@ -78,7 +78,7 @@
             footprint: (width: 2, height: 3), sight: 5,
             model: Glb("testpack_v1/models/energiecentrale.glb"), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_power_plant.glb"),
+                Meridian: Glb("set_v5/meridian_power_plant.glb"),
                 Veyran: Glb("set_v5/veyran_power_plant.glb"),
             },
             icon: "power_plant",
@@ -93,8 +93,8 @@
             flags: (comes_with: "harvester"),
             model: Glb("testpack_v1/models/raffinaderij.glb"), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_refinery.glb"),
-                Veyran: Glb("set_v4/veyran_refinery.glb"),
+                Meridian: Glb("set_v5/meridian_refinery.glb"),
+                Veyran: Glb("set_v5/veyran_refinery.glb"),
             },
             icon: "refinery",
             build_picture: (color: (200, 140, 60), label: "REF", order: 20),
@@ -107,8 +107,8 @@
             footprint: (width: 2, height: 3), sight: 5,
             model: Shape(Cube), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_barracks.glb"),
-                Veyran: Glb("set_v4/veyran_barracks.glb"),
+                Meridian: Glb("set_v5/meridian_barracks.glb"),
+                Veyran: Glb("set_v5/veyran_barracks.glb"),
             },
             icon: "barracks",
             build_picture: (color: (80, 140, 90), label: "BAR", order: 30),
@@ -121,8 +121,8 @@
             footprint: (width: 3, height: 4), sight: 5,
             model: Glb("testpack_v1/models/voertuigfabriek.glb"), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_vehicle_factory.glb"),
-                Veyran: Glb("set_v4/veyran_vehicle_factory.glb"),
+                Meridian: Glb("set_v5/meridian_vehicle_factory.glb"),
+                Veyran: Glb("set_v5/veyran_vehicle_factory.glb"),
             },
             icon: "vehicle_factory",
             build_picture: (color: (190, 120, 50), label: "VEH", order: 40),
@@ -136,8 +136,8 @@
             flags: (minimap: true),
             model: Shape(Cube), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_radar.glb"),
-                Veyran: Glb("set_v4/veyran_radar.glb"),
+                Meridian: Glb("set_v5/meridian_radar.glb"),
+                Veyran: Glb("set_v5/veyran_radar.glb"),
             },
             icon: "radar",
             build_picture: (color: (90, 160, 200), label: "RDR", order: 50),
@@ -150,7 +150,7 @@
             footprint: (width: 1, height: 1), sight: 7, weapons: ["tower_gun"], turret_rate: 12,
             model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_defence_tower.glb"),
+                Meridian: Glb("set_v5/meridian_defence_tower.glb"),
                 Veyran: Glb("set_v5/veyran_defence_tower.glb"),
             },
             icon: "defence_tower",
@@ -164,8 +164,8 @@
             footprint: (width: 2, height: 2), sight: 8, weapons: ["emplacement_gun"], turret_rate: 8,
             model: Shape(Cube), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_advanced_defences.glb"),
-                Veyran: Glb("set_v4/veyran_advanced_defences.glb"),
+                Meridian: Glb("set_v5/meridian_advanced_defences.glb"),
+                Veyran: Glb("set_v5/veyran_advanced_defences.glb"),
             },
             icon: "advanced_defences",
             build_picture: (color: (150, 60, 110), label: "ADV", order: 70),
@@ -179,8 +179,8 @@
             flags: (needs_water: true),
             model: Shape(Cube), strategic_icon: Square,
             models: {
-                Meridian: Glb("set_v4/meridian_shipyard.glb"),
-                Veyran: Glb("set_v4/veyran_shipyard.glb"),
+                Meridian: Glb("set_v5/meridian_shipyard.glb"),
+                Veyran: Glb("set_v5/veyran_shipyard.glb"),
             },
             icon: "shipyard",
             build_picture: (color: (60, 140, 160), label: "YARD", order: 80),
@@ -192,7 +192,7 @@
             cost: 150, build_seconds: 8, hp: 150, armor: "structure",
             footprint: (width: 1, height: 1), sight: 5,
             flags: (disguise_as: "defence_tower"),
-            model: Glb("set_v4/meridian_decoy_emplacement.glb"), strategic_icon: Square,
+            model: Glb("set_v5/meridian_decoy_emplacement.glb"), strategic_icon: Square,
             icon: "decoy_emplacement",
             build_picture: (color: (130, 130, 150), label: "DECOY", order: 90),
             // placeholder: build_seconds, sight.
@@ -203,7 +203,7 @@
             cost: 600, build_seconds: 25, hp: 1200, armor: "structure",
             footprint: (width: 2, height: 2), sight: 7,
             flags: (garrison: 5),
-            model: Glb("set_v4/veyran_fortified_bunker.glb"), strategic_icon: Square,
+            model: Glb("set_v5/veyran_fortified_bunker.glb"), strategic_icon: Square,
             icon: "fortified_bunker",
             build_picture: (color: (120, 100, 80), label: "BNKR", order: 100),
             // placeholder: build_seconds, sight, model.
@@ -216,7 +216,12 @@
             building: (requires: ["refinery"], storage: 1500),
             cost: 250, build_seconds: 12, hp: 450, armor: "structure", power: -10,
             footprint: (width: 2, height: 2), sight: 4,
-            model: Shape(Cube), strategic_icon: Square,
+            model: Shape(Cube),
+            models: {
+                Meridian: Glb("set_v5/meridian_ore_silo.glb"),
+                Veyran: Glb("set_v5/veyran_ore_silo.glb"),
+            },
+            strategic_icon: Square,
             build_picture: (color: (170, 120, 70), label: "SILO", order: 110),
             // placeholder: all of it (cost, build_seconds, power, footprint, hp, sight, storage,
             // model, the place in the tree: proposed, not approved).
@@ -476,7 +481,7 @@
             kind: 32, id: "relay_transmitter", factions: [Neutral], category: Structure,
             building: (),
             hp: 400, armor: "structure", footprint: (width: 2, height: 2), sight: 5,
-            model: Glb("set_v4/neutral_relay_transmitter.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_relay_transmitter.glb"), strategic_icon: Square,
             icon: "relay_transmitter",
             // placeholder: footprint, sight, model.
         ),
@@ -485,7 +490,7 @@
             building: (),
             hp: 500, armor: "structure", footprint: (width: 2, height: 2), sight: 4,
             flags: (death_blast: (radius: 3, damage: 200)),
-            model: Glb("set_v4/neutral_fuel_depot.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_fuel_depot.glb"), strategic_icon: Square,
             icon: "fuel_depot",
             // placeholder: footprint, sight, model, blast damage. "Explodes, damages radius 3."
         ),
@@ -493,7 +498,7 @@
             kind: 34, id: "archive_building", factions: [Neutral], category: Structure,
             building: (),
             hp: 800, armor: "structure", footprint: (width: 3, height: 3), sight: 5,
-            model: Glb("set_v4/neutral_archive_building.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_archive_building.glb"), strategic_icon: Square,
             icon: "archive_building",
             // placeholder: footprint, sight, model.
         ),
@@ -501,7 +506,7 @@
             kind: 35, id: "evidence_crate", factions: [Neutral], category: Object,
             hp: 100, armor: "light", size: 0.5, sight: 0,
             flags: (pickup: true),
-            model: Glb("set_v4/neutral_evidence_crate.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_evidence_crate.glb"), strategic_icon: Square,
             // placeholder: armor, size, model. "Picked up by infantry walking onto it."
         ),
         (
@@ -516,14 +521,14 @@
             kind: 37, id: "bridge_segment", factions: [Neutral], category: Structure,
             building: (),
             hp: 500, armor: "structure", footprint: (width: 1, height: 1), sight: 3,
-            model: Glb("set_v4/neutral_bridge_segment.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_bridge_segment.glb"), strategic_icon: Square,
             // placeholder: footprint, sight, model. Engineers destroy and repair it.
         ),
         (
             kind: 38, id: "rail_spur", factions: [Neutral], category: Structure,
             building: (),
             hp: 600, armor: "structure", footprint: (width: 1, height: 1), sight: 3,
-            model: Glb("set_v4/neutral_rail_spur.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_rail_spur.glb"), strategic_icon: Square,
             // placeholder: footprint, sight, model. Demolition target.
         ),
         (
@@ -532,7 +537,7 @@
             hp: 700, armor: "structure", footprint: (width: 1, height: 1), sight: 8,
             weapons: ["automated_gun"], turret_rate: 16,
             flags: (fires_at_all: true),
-            model: Glb("set_v4/network_automated_gun.glb"), strategic_icon: Square,
+            model: Glb("set_v5/network_automated_gun.glb"), strategic_icon: Square,
             icon: "automated_gun",
             // placeholder: footprint, sight, model. Range 8 is from units.md.
         ),
@@ -540,7 +545,7 @@
             kind: 40, id: "generator", factions: [Neutral], category: Structure,
             building: (function: PowerPlant),
             hp: 400, armor: "structure", power: 50, footprint: (width: 1, height: 1), sight: 3,
-            model: Glb("set_v4/neutral_generator.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_generator.glb"), strategic_icon: Square,
             icon: "generator",
             // placeholder: power, footprint, sight, model. "Backup power structure."
         ),
@@ -549,7 +554,7 @@
             building: (function: Defence),
             hp: 300, armor: "structure", footprint: (width: 2, height: 2), sight: 6,
             weapons: ["battery_shell"], turret_rate: 6,
-            model: Glb("set_v4/network_unmanned_artillery.glb"), strategic_icon: Square,
+            model: Glb("set_v5/network_unmanned_artillery.glb"), strategic_icon: Square,
             icon: "unmanned_artillery",
             // placeholder: footprint, sight, model, weapon. "Fires when uplink alive" is
             // mission logic (F2-M09), not a field.

@@ -36,7 +36,7 @@ stage model (`the_game_draws_the_stage_model_of_a_damaged_structure`).
 puffs/s per source), heavily damaged smoke (8/s) and fire (7/s), the entries `damage_smoke` and `damage_fire` of
 `effects.ron`. A **structure** (WP6.8b, below) has its own entries and rates. The puffs are in the same particle pool (`max_particles`, the 75 % smoke refusal, the zoom bands) as the fight:
 
-* **Where.** At the drawn model's `fx_smoke*` / `fx_fire*` anchor (set v4 has `fx_smoke_0` and `fx_fire_0` on every
+* **Where.** At the drawn model's `fx_smoke*` / `fx_fire*` anchor (set v4 and set v5 have `fx_smoke_0` and `fx_fire_0` on every
   structure), 1 m above it, in a disc of 0.4 m. Without an anchor (a model of another kind, or none): above the
   middle of the body at 0.6 of its length (at least 1 m), in a disc of 0.15 of its length (at least 0.3 m)
   (`puffs_start_at_the_anchor_a_little_above_it`, `a_model_without_anchors_gets_the_rule_of_damage_ron`).
