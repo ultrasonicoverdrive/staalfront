@@ -596,17 +596,22 @@ pub fn staging_cell(state: &AiState, lens: &Lens<'_>, gather: Cell, target: Cell
     })
 }
 
-/// WP9.3e-1: whether an enemy the AI sees (`obs.visible`, another player's entity of any kind) stands within `radius`
-/// cells (Chebyshev, the radius itself counts) of one of the own units `members` (ascending).
+/// WP9.3e-1: whether an armed unit of another player that the AI sees (`obs.visible`, the filter of [`threat_value`] and the
+/// defence: no structure and no unarmed unit such as a harvester) stands within `radius` cells (Chebyshev, the radius itself
+/// counts) of one of the own units `members` (ascending). A neutral armed unit is not told apart from an enemy (the observation
+/// carries the owner only), as in the other rules.
 fn enemy_near(state: &AiState, obs: &Observation, members: &[EntityId], radius: u32) -> bool {
-    obs.own
+    // The foes are filtered once (the cheap tests first), then each is measured against the member cells.
+    let cells: Vec<Cell> = obs
+        .own
         .iter()
         .filter(|o| members.binary_search(&o.id).is_ok())
-        .any(|o| {
-            obs.visible
-                .iter()
-                .any(|s| s.owner != state.player && cheb(s.cell, o.cell) <= radius)
-        })
+        .map(|o| o.cell)
+        .collect();
+    obs.visible
+        .iter()
+        .filter(|s| s.owner != state.player && s.footprint.is_none() && s.armed)
+        .any(|s| cells.iter().any(|&c| cheb(s.cell, c) <= radius))
 }
 
 /// The middle cell of the own units `members` that are seen; `None` when none is.
