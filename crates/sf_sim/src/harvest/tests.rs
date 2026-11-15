@@ -13,7 +13,7 @@ use crate::{Command, Tick};
 const REFINERY: Kind = Kind(2);
 const HARVESTER: Kind = Kind(11);
 
-const RULES: HarvestRules = HarvestRules {
+pub(crate) const RULES: HarvestRules = HarvestRules {
     capacity: 100,
     mine_amount: 5,
     mine_period: 4,

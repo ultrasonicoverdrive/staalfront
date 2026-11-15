@@ -90,7 +90,7 @@ impl DestructionConfig {
             && self.wreck_min_size <= Fx::from_ratio(MAX_WRECK_MIN_SIZE_TENTHS as i64, 10)
     }
 
-    fn write_hash(&self, h: &mut Fnv1a64) {
+    pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
         h.write_bytes(SETTINGS_TAG);
         h.write_u32(self.wreck_ticks);
         h.write_u32(self.rubble_ticks);
