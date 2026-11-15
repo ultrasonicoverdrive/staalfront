@@ -1,5 +1,5 @@
-// The palette of art set v5 (WP11.6a, style G "semi-realistic, bright", decision Tijmen 14-11-2026;
-// docs/art-style.md). Read by tools/sf_model_gen (the models) and by its cutscene part generator.
+// The palette of art set v5 (WP11.6a; style G "semi-realistic, muted" since WP11.6p, decision
+// Tijmen 15-11-2026; docs/art-style.md). Read by tools/sf_model_gen (the models) and by its cutscene part generator.
 // sRGB 0..255. One entry per surface type, so a later texture step can keep the material slots:
 // `paint` (main hull paint), `paint2` (second paint), `metal` (gun steel, fittings), `rubber`
 // (tracks, tyres, running gear), `accent` (a small fixed faction mark; glass on Meridian).
@@ -7,44 +7,44 @@
 (
     factions: {
         "meridian": (
-            paint: (220, 180, 80),
-            paint_light: (232, 200, 104),
-            paint2: (122, 122, 64),
-            paint2_shade: (80, 80, 60),
-            metal: (40, 40, 20),
-            rubber: (20, 20, 20),
-            accent: (70, 96, 110),
+            paint: (154, 135, 115),
+            paint_light: (172, 160, 136),
+            paint2: (94, 88, 56),
+            paint2_shade: (69, 66, 46),
+            metal: (43, 41, 36),
+            rubber: (26, 26, 24),
+            accent: (62, 74, 82),
         ),
         "veyran": (
-            paint: (120, 148, 178),
-            paint_light: (150, 176, 204),
-            paint2: (74, 78, 104),
-            paint2_shade: (98, 102, 128),
-            metal: (40, 40, 40),
-            rubber: (20, 20, 20),
-            accent: (160, 32, 48),
+            paint: (94, 106, 118),
+            paint_light: (116, 128, 140),
+            paint2: (60, 66, 76),
+            paint2_shade: (78, 83, 90),
+            metal: (42, 44, 48),
+            rubber: (26, 26, 24),
+            accent: (122, 30, 40),
         ),
         // Neutral models (WP11.6b: the supply truck, the ferry) have no team material; the third
         // slot is a second light paint instead (`paint3`, the `paint_light` colour).
         "neutral": (
-            paint: (190, 176, 140),
-            paint_light: (206, 196, 164),
-            paint2: (96, 108, 92),
-            paint2_shade: (70, 80, 70),
-            metal: (44, 44, 40),
-            rubber: (20, 20, 20),
-            accent: (150, 70, 40),
+            paint: (140, 133, 116),
+            paint_light: (160, 154, 136),
+            paint2: (91, 86, 77),
+            paint2_shade: (70, 66, 59),
+            metal: (48, 47, 43),
+            rubber: (26, 26, 24),
+            accent: (122, 74, 48),
         ),
         // The automated Network defences (WP11.6c: the automated gun, the unmanned artillery):
         // graphite plates with an amber lamp; they carry the player colour like a faction.
         "network": (
-            paint: (92, 100, 112),
-            paint_light: (118, 126, 138),
-            paint2: (54, 58, 66),
+            paint: (90, 95, 102),
+            paint_light: (110, 115, 122),
+            paint2: (57, 61, 68),
             paint2_shade: (70, 74, 84),
             metal: (36, 36, 40),
-            rubber: (20, 20, 20),
-            accent: (150, 100, 20),
+            rubber: (26, 26, 24),
+            accent: (138, 100, 32),
         ),
     },
     // The base colour stored in the team material (the engine replaces it with the player colour).
