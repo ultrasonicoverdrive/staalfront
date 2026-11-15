@@ -3604,7 +3604,9 @@ What it does not settle:
   (`tools/sf_headless/tests/save_paths.rs`). No pin moved.
 * Crowd fix: `attempts + 1` with `stuck_attempts = 255` overflowed; now saturating (same value
   below 255, so no checksum moves).
-* Known gap: in-flight search memory is checked for structure, not for consistency with its job.
+* Known gap: in-flight search memory is checked for structure and for fitting the rectangle its stage
+  searches, not for being exactly that search. A formation may list a member that left it this tick
+  (pruned on the next tick); restore accepts that.
 
 ### WP9.3c notes: the defence lock gate (14-11-2026)
 

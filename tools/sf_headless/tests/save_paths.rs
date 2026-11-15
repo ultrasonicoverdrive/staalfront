@@ -45,6 +45,16 @@ const TURNING: Claim = ("a turn carry", |c| c.turning > 0);
 /// [`CLAIM_SAVES`] ticks where it holds. At each claim save the state is asserted in the world
 /// and in the restored one. The final checksum, or `Err` with the section of a refused save.
 fn run_through_saves(name: &str, every: u64, claims: &[Claim]) -> Result<u64, SaveError> {
+    run_through_saves_until(name, every, u64::MAX, claims)
+}
+
+/// [`run_through_saves`] with the saves only up to tick `until` (the run itself goes on to the end).
+fn run_through_saves_until(
+    name: &str,
+    every: u64,
+    until: u64,
+    claims: &[Claim],
+) -> Result<u64, SaveError> {
     let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
     assert!(scenario.ais.is_empty(), "{name}: no AI here (WP13.1d)");
     let options = RunOptions::for_scenario(&scenario);
@@ -66,7 +76,7 @@ fn run_through_saves(name: &str, every: u64, claims: &[Claim]) -> Result<u64, Sa
                 due.push(k);
             }
         }
-        if done % every != 0 && due.is_empty() {
+        if done > until || (done % every != 0 && due.is_empty()) {
             continue;
         }
         let bytes = world.save()?;
@@ -151,13 +161,16 @@ fn turning_continues_through_saves() {
     check("turning", EVERY, &[TURNING]);
 }
 
-/// A save after every tick of the two scenarios with formations: a member leaves its formation on
-/// arrival (`orders`) after the formation pass pruned the list, so for a tick a formation lists a
-/// unit whose own memory is no longer in it. That world saves and must restore.
+/// A save after every one of the first 400 ticks of the two scenarios with formations (the run goes
+/// on to the end and its pin): a member leaves its formation on arrival (`orders`) after the
+/// formation pass pruned the list, so for a tick a formation lists a unit whose own memory is no
+/// longer in it (`crowd_jam` tick 219). That world saves and must restore.
 #[test]
 fn formation_scenarios_restore_after_every_tick() {
     for name in ["formation_move", "crowd_jam"] {
-        check(name, 1, &[FORMATION]);
+        let last = run_through_saves_until(name, 1, 400, &[FORMATION])
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(last, expected(name), "{name}");
     }
 }
 

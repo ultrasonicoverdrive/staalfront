@@ -294,7 +294,7 @@ being built, fields, routes, turn carries; `formation_move` formations, a field 
 carries, routes; `replan` routes, fields, formations and a stuck unit's request with an overlay;
 `crowd_jam` routes, fields and formations; `turning` turn carries. Each claimed state is asserted at
 each of its save ticks, in the world and in the restored one (`save_contents` equal). `formation_move`
-and `crowd_jam` also run with a save after every tick.
+and `crowd_jam` also run with a save after every one of their first 400 ticks.
 `probe_which_scenarios_save` pins which section refuses each of the other non-AI CI scenarios.
 
 ## Guards against a forgotten field
