@@ -288,7 +288,7 @@ pub const CROWD_ARRIVE_ALONE: Fx = Fx::from_int(4);
 pub const WAYPOINT_CROWD: Fx = Fx::ONE;
 
 /// Ticks a sidestep may last at most (it ends when the spot is reached).
-const SIDESTEP_TICKS: u8 = 40;
+pub(crate) const SIDESTEP_TICKS: u8 = 40;
 
 /// The weight of a unit that is moved easily (an idle friend of the mover).
 const W_EASY: i64 = 1000;

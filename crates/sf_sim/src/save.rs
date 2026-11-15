@@ -37,7 +37,7 @@ use sf_math::{Facing, Fx, Rng, RngState, Vec2};
 
 use crate::behavior::{Area, Behavior};
 use crate::command::{Command, CommandQueue};
-use crate::crowd::{Claim, CrowdState};
+use crate::crowd::{Claim, CrowdState, HOME_WAIT, SHOVE_CALM, SHOVE_LIMIT, SIDESTEP_TICKS};
 use crate::entities::{Entities, NO_DEF};
 use crate::formation::Member;
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
@@ -760,6 +760,15 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         Fx::from_i64(i64::from(height)),
     );
     let inside = |p: Vec2| p.x >= Fx::ZERO && p.y >= Fx::ZERO && p.x <= max_x && p.y <= max_y;
+    let replan = world.pathing.replan_config();
+    let limits = CrowdLimits {
+        tick: world.tick,
+        stuck_ticks: world.crowd.config.stuck_ticks,
+        stuck_attempts: world.crowd.config.stuck_attempts,
+        replan_max: replan.max,
+        replan_cooldown: replan.cooldown,
+        retarget_cooldown: replan.retarget_cooldown,
+    };
     let e = &mut world.entities;
     for i in 0..n {
         e.push_free_slot();
@@ -851,8 +860,78 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         e.prev_turret[i] = e.turret[i];
         e.turret_target[i] = get_opt_id(r)?;
         e.crowd[i] = get_crowd(r)?;
+        check_crowd(&e.crowd[i], &limits, &inside)?;
     }
     Ok(())
+}
+
+/// The bounds the crowd pass keeps its counters in (`crowd.rs`, `orders.rs`, `path.rs`): a
+/// counter outside them is no state the simulation reaches, and the next step could overflow it.
+struct CrowdLimits {
+    tick: Tick,
+    stuck_ticks: u16,
+    stuck_attempts: u8,
+    replan_max: u8,
+    replan_cooldown: u16,
+    retarget_cooldown: u16,
+}
+
+/// Refuses crowd memory the simulation cannot reach.
+fn check_crowd(c: &CrowdState, l: &CrowdLimits, inside: &impl Fn(Vec2) -> bool) -> SaveResult<()> {
+    let CrowdState {
+        // `quiet` is set back to zero as soon as it reaches `stuck_ticks`.
+        quiet,
+        attempts,
+        // A distance, or `Fx::MAX` when there is no waypoint.
+        best,
+        mark,
+        side,
+        shoved,
+        calm,
+        // Flags: every value is reachable.
+        replan: _,
+        replans,
+        cool,
+        retarget,
+        give_up: _,
+        gave_up_at,
+        idle_hit: _,
+        // Saturating: every value is reachable.
+        pressed: _,
+        // Looked up with `get`, never indexed: a claim on no field is no claim.
+        claim: _,
+        home,
+        home_wait,
+        home_rest: _,
+        disc,
+        settle: _,
+        fresh: _,
+        walking: _,
+        refused: _,
+        stranded: _,
+    } = c;
+    let counters = *quiet < l.stuck_ticks
+        && *attempts <= l.stuck_attempts
+        && *calm < SHOVE_CALM
+        && *replans <= l.replan_max
+        && *cool <= l.replan_cooldown
+        && *retarget <= l.retarget_cooldown
+        && *home_wait <= HOME_WAIT
+        && side.is_none_or(|(_, n)| (1..=SIDESTEP_TICKS).contains(&n));
+    let amounts = *best >= Fx::ZERO
+        && *shoved >= Fx::ZERO
+        && *shoved <= SHOVE_LIMIT
+        && *disc >= Fx::ZERO
+        && gave_up_at.is_none_or(|t| t <= l.tick);
+    let points =
+        mark.is_none_or(inside) && home.is_none_or(inside) && side.is_none_or(|(p, _)| inside(p));
+    if counters && amounts && points {
+        Ok(())
+    } else {
+        Err(SaveError::Corrupt(
+            "a crowd counter or point the simulation cannot reach",
+        ))
+    }
 }
 
 // ---- the world ----------------------------------------------------------------------------------
@@ -931,17 +1010,43 @@ impl World {
             h.write_u8(player.0);
             h.write_u8(bit);
         }
-        let c = self.crowd.config;
-        h.write_u8(u8::from(c.enabled));
-        h.write_u32(u32::from(c.wait_ticks));
-        h.write_u32(u32::from(c.stuck_ticks));
-        h.write_u32(u32::from(c.stuck_attempts));
-        let f = self.formations.config;
-        h.write_u8(u8::from(f.enabled));
-        h.write_u32(u32::from(f.min_units));
-        h.write_u32(u32::from(f.max_units));
-        h.write_u32(u32::from(f.spacing_permille));
-        h.write_u32(u32::from(f.spread_permille));
+        // Destructured without `..`: a new setting fails to compile until it is hashed.
+        let crate::crowd::CollisionConfig {
+            enabled,
+            wait_ticks,
+            stuck_ticks,
+            stuck_attempts,
+        } = self.crowd.config;
+        h.write_u8(u8::from(enabled));
+        h.write_u32(u32::from(wait_ticks));
+        h.write_u32(u32::from(stuck_ticks));
+        h.write_u32(u32::from(stuck_attempts));
+        let crate::formation::FormationConfig {
+            enabled,
+            min_units,
+            max_units,
+            spacing_permille,
+            spread_permille,
+            pace_permille,
+            catchup_permille,
+            reform_tenths,
+            patience_ticks,
+            ahead_tenths,
+        } = self.formations.config;
+        h.write_u8(u8::from(enabled));
+        for v in [
+            min_units,
+            max_units,
+            spacing_permille,
+            spread_permille,
+            pace_permille,
+            catchup_permille,
+            reform_tenths,
+            patience_ticks,
+            ahead_tenths,
+        ] {
+            h.write_u32(u32::from(v));
+        }
         h.write_u32(self.pathing.budget());
         h.write_u32(self.pathing.flowfield_threshold());
         let rp = self.pathing.replan_config();

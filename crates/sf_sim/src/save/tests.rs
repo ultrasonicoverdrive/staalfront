@@ -8,6 +8,7 @@ use super::*;
 use crate::crowd::CollisionConfig;
 use crate::formation::Member;
 use crate::orders::{GuardTarget, Order};
+use crate::path::ReplanConfig;
 use crate::projectiles::{Projectile, Target};
 use crate::terrain::Cell;
 use crate::units::{Footprint, UnitStats, UnitTable};
@@ -512,6 +513,36 @@ fn other_assets_or_settings_are_refused() {
         })
         .unwrap();
     assert_eq!(World::restore(other, &bytes), Err(SaveError::Rules));
+    // Every formation setting is a rule, also those that only count once a group forms.
+    let base = crate::formation::FormationConfig::DEFAULT;
+    let others = [
+        crate::formation::FormationConfig {
+            patience_ticks: base.patience_ticks + 7,
+            ..base
+        },
+        crate::formation::FormationConfig {
+            pace_permille: base.pace_permille - 10,
+            ..base
+        },
+        crate::formation::FormationConfig {
+            catchup_permille: base.catchup_permille - 10,
+            ..base
+        },
+        crate::formation::FormationConfig {
+            reform_tenths: base.reform_tenths + 1,
+            ..base
+        },
+        crate::formation::FormationConfig {
+            ahead_tenths: base.ahead_tenths + 1,
+            ..base
+        },
+    ];
+    for f in others {
+        assert!(f.is_valid(), "{f:?}");
+        let mut w = fresh();
+        w.formations.config = f;
+        assert_eq!(World::restore(w, &bytes), Err(SaveError::Rules), "{f:?}");
+    }
     assert_ne!(
         fresh().rules_digest(),
         fresh_with(501, false).rules_digest()
@@ -1128,4 +1159,137 @@ fn other_ore_money_or_repair_numbers_are_other_rules() {
     let bytes = repair(20).save().unwrap();
     assert!(World::restore(repair(20), &bytes).is_ok());
     assert_eq!(World::restore(repair(21), &bytes), Err(SaveError::Rules));
+}
+
+/// A block of idle units and three units ordered one by one (no group, so no formation) straight
+/// into it: a jam, with blocked and sidestep memory on the walkers and shove memory on the block.
+fn jam(mut w: World) -> World {
+    let s = |w: &mut World, t: u64, c: Command| w.schedule(Tick(t), PlayerId(0), c).unwrap();
+    for n in 0..3 {
+        s(
+            &mut w,
+            0,
+            Command::SpawnUnit {
+                kind: MOBILE,
+                pos: p(20, 19 + 2 * n),
+                owner: PlayerId(0),
+            },
+        );
+        s(
+            &mut w,
+            1,
+            Command::Order {
+                ids: vec![EntityId::new(n as u32, 0)],
+                order: Order::Move(p(44, 20 + n)),
+                queued: false,
+            },
+        );
+    }
+    for x in 0..3 {
+        for y in 0..6 {
+            s(
+                &mut w,
+                0,
+                Command::SpawnUnit {
+                    kind: MOBILE,
+                    pos: p(28 + x, 18 + y),
+                    owner: PlayerId(0),
+                },
+            );
+        }
+    }
+    w
+}
+
+/// With the crowd pass on, a save in the middle of a jam carries the blocked, sidestep and shove
+/// memory over: the restored run goes on like the uninterrupted one.
+#[test]
+fn a_restored_jam_continues_like_the_original() {
+    let total = 160;
+    let mut straight = jam(fresh_with(500, true));
+    for _ in 0..total {
+        straight.step();
+    }
+    for n in [36u64, 45, 60, 72, 84] {
+        let mut w = jam(fresh_with(500, true));
+        for _ in 0..n {
+            w.step();
+        }
+        assert!(
+            crate::crowd::any_state(&w.entities),
+            "no crowd memory after {n} ticks"
+        );
+        let mut back = World::restore(fresh_with(500, true), &w.save().unwrap()).unwrap();
+        for _ in n..total {
+            back.step();
+        }
+        assert_eq!(
+            back.checksum_history(),
+            &straight.checksum_history()[n as usize..],
+            "saved after {n} ticks"
+        );
+    }
+}
+
+/// Every crowd counter at the most the simulation reaches: saved, restored and stepped with the
+/// crowd pass on, without an overflow. One past it is refused as corrupt.
+#[test]
+fn crowd_counters_at_their_maximum_restore_and_step() {
+    let w = busy(fresh_with(500, true), 5);
+    let cfg = w.crowd.config;
+    let rp = w.pathing.replan_config();
+    let tick = w.tick;
+    let set_max = |c: &mut CrowdState| {
+        c.quiet = cfg.stuck_ticks - 1;
+        c.attempts = cfg.stuck_attempts;
+        c.shoved = crate::crowd::SHOVE_LIMIT;
+        c.calm = crate::crowd::SHOVE_CALM - 1;
+        c.replans = rp.max;
+        c.cool = rp.cooldown;
+        c.retarget = rp.retarget_cooldown;
+        c.home_wait = crate::crowd::HOME_WAIT;
+        c.side = Some((p(30, 30), crate::crowd::SIDESTEP_TICKS));
+        c.gave_up_at = Some(tick);
+        c.pressed = u16::MAX;
+        c.home = Some(p(30, 30));
+    };
+    let mut top = w.clone();
+    for i in 0..top.entities.len() {
+        if top.entities.alive[i] {
+            set_max(&mut top.entities.crowd[i]);
+        }
+    }
+    let mut back = World::restore(fresh_with(500, true), &top.save().unwrap()).unwrap();
+    for _ in 0..80 {
+        back.step();
+    }
+    let past: [(&str, fn(&mut CrowdState, CollisionConfig, ReplanConfig)); 9] = [
+        ("quiet", |c, f, _| c.quiet = f.stuck_ticks),
+        ("attempts", |c, f, _| c.attempts = f.stuck_attempts + 1),
+        ("calm", |c, _, _| c.calm = crate::crowd::SHOVE_CALM),
+        ("replans", |c, _, r| c.replans = r.max + 1),
+        ("cool", |c, _, r| c.cool = r.cooldown + 1),
+        ("retarget", |c, _, r| c.retarget = r.retarget_cooldown + 1),
+        ("home_wait", |c, _, _| {
+            c.home_wait = crate::crowd::HOME_WAIT + 1
+        }),
+        ("side", |c, _, _| {
+            c.side = Some((Vec2::ZERO, crate::crowd::SIDESTEP_TICKS + 1))
+        }),
+        ("shoved", |c, _, _| {
+            c.shoved = crate::crowd::SHOVE_LIMIT + Fx::from_ratio(1, 64)
+        }),
+    ];
+    for (what, edit) in past {
+        let mut bad = w.clone();
+        set_max(&mut bad.entities.crowd[5]);
+        edit(&mut bad.entities.crowd[5], cfg, rp);
+        assert!(
+            matches!(
+                World::restore(fresh_with(500, true), &bad.save().unwrap()),
+                Err(SaveError::Corrupt(_))
+            ),
+            "{what}"
+        );
+    }
 }
