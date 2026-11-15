@@ -2139,3 +2139,276 @@ fn a_raider_that_is_not_seen_changes_nothing_until_it_is() {
     assert_eq!(sc.threat.unwrap().0, Cell::new(19, 81));
     assert_ne!(sc.threat, sb.threat);
 }
+
+// ---- WP9.3e-1: the formation march and the staging search ---------------------------------------------------------
+
+/// The orders of the `Order` commands in `out`: ids (indexes) and the order.
+fn orders(out: &[Command]) -> Vec<(Vec<u32>, Order)> {
+    out.iter()
+        .filter_map(|c| match c {
+            Command::Order { ids, order, .. } => {
+                Some((ids.iter().map(|i| i.index()).collect(), *order))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The launch of `n` riflemen with staging on (distance 14, patience 600) and the formation march with the break
+/// radius `radius` (0: off). Returns the world, the state after the launch turn, the launch turn's commands, the own
+/// units and the staging cell.
+fn marching(n: u32, radius: u8) -> (World, AiState, Vec<Command>, Vec<Own>, Cell) {
+    let (world, s, out, own) = launched(n, 1, |a| {
+        a.stage_distance = 14;
+        a.stage_patience = 600;
+        a.march_break_radius = radius;
+    });
+    let stage = s.groups[0].staging.expect("a staging cell");
+    (world, s, out, own, stage)
+}
+
+/// `own` with the first member of the strike at `near` and the other members further away, all on a `Move` to the
+/// staging cell.
+fn on_the_move(own: &[Own], members: &[EntityId], stage: Cell, near: Cell) -> Vec<Own> {
+    own.iter()
+        .cloned()
+        .map(|mut o| {
+            if let Some(i) = members.iter().position(|&m| m == o.id) {
+                o.cell = if i == 0 {
+                    near
+                } else {
+                    Cell::new(30, 60 + i as u32)
+                };
+                o.order = Order::Move(middle(stage));
+            }
+            o
+        })
+        .collect()
+}
+
+/// One army turn at `tick` on `own` with `seen` in `obs.visible`; returns the state after it and the commands.
+fn turn_seeing(
+    world: &World,
+    s0: &AiState,
+    tick: u64,
+    own: Vec<Own>,
+    seen: Vec<Seen>,
+) -> (AiState, Vec<Command>) {
+    let mut s = s0.clone();
+    let mut obs = observation(world, tick, own);
+    obs.visible = seen;
+    let out = army_turn(world, &mut s, &obs);
+    (s, out)
+}
+
+#[test]
+fn the_staging_leg_is_one_move_with_the_march_on_and_an_attack_move_with_it_off() {
+    let (_, s, out, _, stage) = marching(6, 8);
+    assert_eq!(s.groups[0].stage, GroupStage::Staging);
+    let sent = orders(&out);
+    assert_eq!(sent.len(), 1, "{out:?}");
+    assert_eq!(sent[0].0.len(), 6);
+    assert_eq!(sent[0].1, Order::Move(middle(stage)), "{out:?}");
+    let (_, _, out, _, stage) = marching(6, 0);
+    let sent = orders(&out);
+    assert_eq!(sent.len(), 1, "{out:?}");
+    assert_eq!(sent[0].1, Order::AttackMove(middle(stage)), "{out:?}");
+}
+
+#[test]
+fn the_group_breaks_to_the_attack_move_at_exactly_the_radius_and_not_one_cell_further() {
+    let (world, s0, _, own, stage) = marching(6, 8);
+    let members = s0.groups[0].members.clone();
+    let walking = on_the_move(&own, &members, stage, Cell::new(40, 50));
+    let goal = s0.groups[0].goal;
+    // An enemy 8 cells from the first member (Chebyshev): the radius counts. Every member is on a `Move`, so all
+    // six are given the `AttackMove` on the goal, in one command, and the stage is Advancing from now on.
+    let (s, out) = turn_seeing(
+        &world,
+        &s0,
+        3040,
+        walking.clone(),
+        vec![seen_raider(90, 48, 44, true)],
+    );
+    assert_eq!(s.groups[0].stage, GroupStage::Advancing);
+    assert_eq!(s.groups[0].since, Tick(3040));
+    let sent = orders(&out);
+    assert_eq!(sent.len(), 1, "{out:?}");
+    assert_eq!(sent[0].0.len(), 6);
+    assert_eq!(sent[0].1, Order::AttackMove(middle(goal)));
+    // One cell further (9): nothing happens, the group stays on its `Move`.
+    let (s, out) = turn_seeing(
+        &world,
+        &s0,
+        3040,
+        walking.clone(),
+        vec![seen_raider(90, 49, 44, true)],
+    );
+    assert_eq!(s.groups[0].stage, GroupStage::Staging);
+    assert!(out.is_empty(), "{out:?}");
+    // Distance counts on the larger axis, not the sum: 8 east and 8 south is still 8.
+    let (s, _) = turn_seeing(
+        &world,
+        &s0,
+        3040,
+        walking.clone(),
+        vec![seen_raider(90, 48, 58, false)],
+    );
+    assert_eq!(s.groups[0].stage, GroupStage::Advancing);
+    // An own unit in `visible` is no enemy.
+    let mut mine = seen_raider(90, 41, 50, true);
+    mine.owner = P0;
+    let (s, out) = turn_seeing(&world, &s0, 3040, walking, vec![mine]);
+    assert_eq!(s.groups[0].stage, GroupStage::Staging);
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn a_unit_still_on_the_move_is_ordered_on_once_after_the_break_and_not_again() {
+    let (world, s0, _, own, stage) = marching(6, 8);
+    let members = s0.groups[0].members.clone();
+    let walking = on_the_move(&own, &members, stage, Cell::new(40, 50));
+    let raider = vec![seen_raider(90, 44, 50, true)];
+    let (s1, out) = turn_seeing(&world, &s0, 3040, walking.clone(), raider.clone());
+    assert_eq!(orders(&out).len(), 1, "{out:?}");
+    // The next turn the observation still shows them on the `Move` (the order has not been carried out yet): the
+    // order sent at the break is later than the group's `since`, so nothing is sent again.
+    let (s2, out) = turn_seeing(&world, &s1, 3080, walking.clone(), raider.clone());
+    assert!(out.is_empty(), "{out:?}");
+    assert_eq!(s2.groups[0].stage, GroupStage::Advancing);
+    // A unit that is on an `AttackMove` is left alone as ever.
+    let marching_on: Vec<Own> = walking
+        .iter()
+        .cloned()
+        .map(|mut o| {
+            if members.contains(&o.id) {
+                o.order = Order::AttackMove(middle(s1.groups[0].goal));
+            }
+            o
+        })
+        .collect();
+    let (_, out) = turn_seeing(&world, &s1, 3200, marching_on, raider);
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn an_enemy_that_is_not_in_the_observation_breaks_nothing() {
+    // The fog twin: the same turn with the enemy 3 cells from a member in `obs.visible`, and with it left out (it
+    // stands in the world but the AI does not see it): the second is the turn of a game with no enemy at all.
+    let (world, s0, _, own, stage) = marching(6, 8);
+    let members = s0.groups[0].members.clone();
+    let walking = on_the_move(&own, &members, stage, Cell::new(40, 50));
+    let (seen_state, seen_out) = turn_seeing(
+        &world,
+        &s0,
+        3040,
+        walking.clone(),
+        vec![seen_raider(90, 43, 50, true)],
+    );
+    assert_eq!(seen_state.groups[0].stage, GroupStage::Advancing);
+    assert!(!seen_out.is_empty());
+    let (fog_state, fog_out) = turn_seeing(&world, &s0, 3040, walking.clone(), Vec::new());
+    let (none_state, none_out) = turn_seeing(&world, &s0, 3040, walking, Vec::new());
+    assert!(fog_out.is_empty(), "{fog_out:?}");
+    assert_eq!(fog_out, none_out);
+    assert_eq!(fog_state.groups[0].stage, GroupStage::Staging);
+    assert_eq!(fog_state.digest(), none_state.digest());
+    assert_ne!(fog_state.digest(), seen_state.digest());
+}
+
+#[test]
+fn with_the_march_off_an_enemy_beside_the_group_changes_nothing() {
+    let (world, s0, _, own, stage) = marching(6, 0);
+    let members = s0.groups[0].members.clone();
+    let walking: Vec<Own> = on_the_move(&own, &members, stage, Cell::new(40, 50))
+        .into_iter()
+        .map(|mut o| {
+            if members.contains(&o.id) {
+                o.order = Order::AttackMove(middle(stage));
+            }
+            o
+        })
+        .collect();
+    let (s, out) = turn_seeing(
+        &world,
+        &s0,
+        3040,
+        walking.clone(),
+        vec![seen_raider(90, 41, 50, true)],
+    );
+    let (c, out_c) = turn_seeing(&world, &s0, 3040, walking, Vec::new());
+    assert_eq!(s.groups[0].stage, GroupStage::Staging);
+    assert!(out.is_empty());
+    assert_eq!(out, out_c);
+    assert_eq!(s.digest(), c.digest());
+}
+
+#[test]
+fn the_group_that_leaves_the_staging_cell_on_its_own_is_ordered_on_from_its_move() {
+    // No enemy in sight: the patience (600 ticks) ends the staging with some members still on the `Move`; they get
+    // the `AttackMove` on the goal at that turn, once.
+    let (world, s0, _, own, stage) = marching(6, 8);
+    let members = s0.groups[0].members.clone();
+    let walking = on_the_move(&own, &members, stage, Cell::new(40, 50));
+    let (s, out) = turn_seeing(&world, &s0, 3599, walking.clone(), Vec::new());
+    assert_eq!(s.groups[0].stage, GroupStage::Staging);
+    assert!(out.is_empty(), "{out:?}");
+    let (s, out) = turn_seeing(&world, &s0, 3600, walking, Vec::new());
+    assert_eq!(s.groups[0].stage, GroupStage::Advancing);
+    let sent = orders(&out);
+    assert_eq!(sent.len(), 1, "{out:?}");
+    assert_eq!(sent[0].1, Order::AttackMove(middle(s.groups[0].goal)));
+}
+
+/// The cell the search finds for the lake case: line index 15 of 47, six cells back from the point (the lake runs on to
+/// index 30 toward the target, nine cells); pinned so that a change of the search order shows.
+const SEARCH_CELL_SW: (u32, u32) = (39, 50);
+
+#[test]
+fn the_staging_search_finds_open_ground_on_the_line_where_the_lake_is() {
+    let (world, mut s) = army_state();
+    let lens = Lens::new(&world, P0);
+    // The south-west site to the north-east start, 26 cells short: the point (45, 44) lies in the central lake and so
+    // do the three rings round it.
+    let target = Cell::new(71, 18);
+    s.profile.army.stage_distance = 26;
+    assert!(!lens.ground(Cell::new(45, 44)));
+    assert_eq!(army::staging_cell(&s, &lens, gather(), target), None);
+    s.profile.army.stage_search = true;
+    let cell = army::staging_cell(&s, &lens, gather(), target).expect("a cell on the line");
+    assert!(lens.ground(cell));
+    // On the line (the integer line of the rule).
+    let on_line = (0..=47i64)
+        .any(|i| (24 + 47 * i / 47, 64 - 46 * i / 47) == (i64::from(cell.x), i64::from(cell.y)));
+    assert!(on_line, "{cell:?}");
+    assert_eq!((cell.x, cell.y), SEARCH_CELL_SW, "pinned");
+    // The nearest: the point is index 21 of 47 on that line and no index within five of it, either way, is ground.
+    let at = |i: i64| Cell::new((24 + 47 * i / 47) as u32, (64 - 46 * i / 47) as u32);
+    assert!((16..=26).all(|i| !lens.ground(at(i))));
+    assert!(lens.ground(at(15)));
+    // A target that is no further than the distance still gets no cell, search or not.
+    assert_eq!(
+        army::staging_cell(&s, &lens, gather(), Cell::new(24 + 26, 64)),
+        None
+    );
+}
+
+#[test]
+fn the_search_changes_nothing_where_the_old_rule_finds_a_cell() {
+    let (world, mut s) = army_state();
+    let lens = Lens::new(&world, P0);
+    s.profile.army.stage_distance = 14;
+    let target = Cell::new(72, 17);
+    let before = army::staging_cell(&s, &lens, gather(), target);
+    s.profile.army.stage_search = true;
+    assert_eq!(army::staging_cell(&s, &lens, gather(), target), before);
+    // The north-east site (68, 28) to the south-west start, 26 short: the point is in the lake but ring 3 has ground.
+    s.profile.army.stage_distance = 26;
+    let ne = Cell::new(68, 28);
+    let sw = Cell::new(16, 67);
+    s.profile.army.stage_search = false;
+    let old = army::staging_cell(&s, &lens, ne, sw);
+    assert!(old.is_some());
+    s.profile.army.stage_search = true;
+    assert_eq!(army::staging_cell(&s, &lens, ne, sw), old);
+}
