@@ -14,14 +14,14 @@
         (id: "wreck_medium_vehicle", model: "set_v3/neutral_wreck_medium_vehicle.glb", size_tenths: 13, up_to_tenths: Some(13)),
         (id: "wreck_heavy_vehicle", model: "set_v3/neutral_wreck_heavy_vehicle.glb", size_tenths: 15, up_to_tenths: None),
     ],
-    // The rubble models of art set v4 by footprint (cells wide, cells deep). A structure of another
+    // The rubble models of art set v5 (WP11.6c) by footprint (cells wide, cells deep). A structure of another
     // footprint takes the nearest by area (the smaller on a tie), scaled to fit its footprint.
     rubble: [
-        (footprint: (1, 1), model: "set_v4/neutral_rubble_1x1.glb"),
-        (footprint: (2, 2), model: "set_v4/neutral_rubble_2x2.glb"),
-        (footprint: (2, 3), model: "set_v4/neutral_rubble_2x3.glb"),
-        (footprint: (3, 4), model: "set_v4/neutral_rubble_3x4.glb"),
-        (footprint: (4, 4), model: "set_v4/neutral_rubble_4x4.glb"),
-        (footprint: (4, 5), model: "set_v4/neutral_rubble_4x5.glb"),
+        (footprint: (1, 1), model: "set_v5/neutral_rubble_1x1.glb"),
+        (footprint: (2, 2), model: "set_v5/neutral_rubble_2x2.glb"),
+        (footprint: (2, 3), model: "set_v5/neutral_rubble_2x3.glb"),
+        (footprint: (3, 4), model: "set_v5/neutral_rubble_3x4.glb"),
+        (footprint: (4, 4), model: "set_v5/neutral_rubble_4x4.glb"),
+        (footprint: (4, 5), model: "set_v5/neutral_rubble_4x5.glb"),
     ],
 )

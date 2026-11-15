@@ -204,12 +204,12 @@ mod tests {
         assert_eq!(
             rubble,
             [
-                ((1, 1), "set_v4/neutral_rubble_1x1.glb"),
-                ((2, 2), "set_v4/neutral_rubble_2x2.glb"),
-                ((2, 3), "set_v4/neutral_rubble_2x3.glb"),
-                ((3, 4), "set_v4/neutral_rubble_3x4.glb"),
-                ((4, 4), "set_v4/neutral_rubble_4x4.glb"),
-                ((4, 5), "set_v4/neutral_rubble_4x5.glb"),
+                ((1, 1), "set_v5/neutral_rubble_1x1.glb"),
+                ((2, 2), "set_v5/neutral_rubble_2x2.glb"),
+                ((2, 3), "set_v5/neutral_rubble_2x3.glb"),
+                ((3, 4), "set_v5/neutral_rubble_3x4.glb"),
+                ((4, 4), "set_v5/neutral_rubble_4x4.glb"),
+                ((4, 5), "set_v5/neutral_rubble_4x5.glb"),
             ]
         );
         // Every model the file names is on disk.
@@ -231,9 +231,9 @@ mod tests {
             [10, 12, 13, 14, 40].map(|t| w.vehicle_class(t)),
             [0, 0, 1, 2, 2]
         );
-        assert_eq!(w.rubble_file(1, 1), "set_v4/neutral_rubble_1x1.glb");
-        assert_eq!(w.rubble_file(3, 3), "set_v4/neutral_rubble_2x3.glb"); // 9: 6 and 12 tie, smaller wins
-        assert_eq!(w.rubble_file(6, 6), "set_v4/neutral_rubble_4x5.glb");
+        assert_eq!(w.rubble_file(1, 1), "set_v5/neutral_rubble_1x1.glb");
+        assert_eq!(w.rubble_file(3, 3), "set_v5/neutral_rubble_2x3.glb"); // 9: 6 and 12 tie, smaller wins
+        assert_eq!(w.rubble_file(6, 6), "set_v5/neutral_rubble_4x5.glb");
     }
 
     /// Each broken edit of the shipped file is refused when it is parsed.

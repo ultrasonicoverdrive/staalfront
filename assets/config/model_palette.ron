@@ -35,6 +35,17 @@
             rubber: (20, 20, 20),
             accent: (150, 70, 40),
         ),
+        // The automated Network defences (WP11.6c: the automated gun, the unmanned artillery):
+        // graphite plates with an amber lamp; they carry the player colour like a faction.
+        "network": (
+            paint: (92, 100, 112),
+            paint_light: (118, 126, 138),
+            paint2: (54, 58, 66),
+            paint2_shade: (70, 74, 84),
+            metal: (36, 36, 40),
+            rubber: (20, 20, 20),
+            accent: (150, 100, 20),
+        ),
     },
     // The base colour stored in the team material (the engine replaces it with the player colour).
     team_base: (235, 235, 235),

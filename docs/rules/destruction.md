@@ -192,7 +192,7 @@ across, or with the `--fight` option of `sf_game` (every armed mobile unit attac
 base), which `--shots-tick N` waits for before taking the screenshots of `--shots`.
 
 The wrecks and rubble are drawn from the models of the art sets (the vehicle wrecks `neutral_wreck_light_vehicle`,
-`..._medium_...` and `..._heavy_...` of set v3, which has them, and `neutral_rubble_1x1` to `4x5` of set v4): a
+`..._medium_...` and `..._heavy_...` of set v3, which has them, and `neutral_rubble_1x1` to `4x5` of set v5 since WP11.6c, set v4 before): a
 vehicle's by its size (in the shipped data up to 1.2 cells light, up to 1.3 medium, the rest heavy), rubble by the nearest footprint
 area, scaled to fit the structure's real footprint; a dark primitive of the right size stands in if a model does
 not load (with a warning). The model files, the size bounds and the colour are data in
