@@ -56,7 +56,8 @@
     //   mood.min_hold_ticks, calm_after_ticks   combat turns back to calm only after at least min_hold_ticks
     //                  in combat and calm_after_ticks without a counted event (so it does not flip back and forth)
     //   fallback       the default music of a mood when no original Red Alert track is available: the name of
-    //                  a sound of bank.ron (a CC0 track), or None for silence. There is no music in the bank yet.
+    //                  a sound of bank.ron (a CC0 track), or None for silence. Shipped: our own generated music.calm and
+    //                  music.combat (WP11.4b, tools/sf_music_gen), so the game has music without the player's Red Alert files.
     // Which Red Alert tracks play: assets/audio/ra_mapping.ron (`music`), only with ra_audio on.
     music: (
         crossfade_ms: 2500,
@@ -68,7 +69,7 @@
             calm_after_ticks: 300,
             weights: (fire: 1, impact: 1, death: 3),
         ),
-        fallback: (calm: None, combat: None),
+        fallback: (calm: Some("music.calm"), combat: Some("music.combat")),
     ),
 
     // Unit voices (WP11.2): the replies of the player's own units to selecting, moving and attacking
