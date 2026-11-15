@@ -158,7 +158,6 @@ impl Ore {
             .sum()
     }
 
-    /// Counts the changes of any amount (a take, a growth). Equal versions mean equal amounts.
     /// Whether no amount ever changed: the ore is as the world was given it (WP13.1a saves a
     /// world only then). Destructured without `..`: a new field fails to compile until it is
     /// placed here.
@@ -177,6 +176,7 @@ impl Ore {
         *version == 0
     }
 
+    /// Counts the changes of any amount (a take, a growth). Equal versions mean equal amounts.
     pub fn version(&self) -> u64 {
         self.version
     }

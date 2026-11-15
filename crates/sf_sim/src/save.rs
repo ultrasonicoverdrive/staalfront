@@ -759,6 +759,7 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         Fx::from_i64(i64::from(width)),
         Fx::from_i64(i64::from(height)),
     );
+    // The closed rectangle: the far corner of a wander area is the map corner itself.
     let inside = |p: Vec2| p.x >= Fx::ZERO && p.y >= Fx::ZERO && p.x <= max_x && p.y <= max_y;
     let replan = world.pathing.replan_config();
     let limits = CrowdLimits {
@@ -829,6 +830,13 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
             ));
         }
         e.order[i] = get_order(r)?;
+        // `begin` turns a scatter into a move, and a pursuit is current only with an engagement,
+        // which a save never holds: neither can be the current order of a saved unit.
+        if matches!(e.order[i], Order::Scatter | Order::Pursue(_)) {
+            return Err(SaveError::Corrupt(
+                "a current order the simulation never holds",
+            ));
+        }
         let queued = usize::from(r.u8()?);
         if queued > ORDER_QUEUE_CAP {
             return Err(SaveError::Corrupt("an order queue is longer than the ring"));
@@ -920,7 +928,9 @@ fn check_crowd(c: &CrowdState, l: &CrowdLimits, inside: &impl Fn(Vec2) -> bool) 
         && side.is_none_or(|(_, n)| (1..=SIDESTEP_TICKS).contains(&n));
     let amounts = *best >= Fx::ZERO
         && *shoved >= Fx::ZERO
-        && *shoved <= SHOVE_LIMIT
+        // `apply` clamps a push to the room left, but `clamp_length` rounds each component, so the
+        // length it adds can be one raw unit over: the most `shoved` reaches is the limit plus that.
+        && *shoved <= SHOVE_LIMIT + Fx::EPSILON
         && *disc >= Fx::ZERO
         && gave_up_at.is_none_or(|t| t <= l.tick);
     let points =

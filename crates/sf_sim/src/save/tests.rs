@@ -675,6 +675,16 @@ fn corruptions() -> Vec<Corruption> {
             no_edit,
         ),
         (
+            "a current order the simulation never holds",
+            |w| w.entities.order[5] = Order::Scatter,
+            no_edit,
+        ),
+        (
+            "a current order the simulation never holds",
+            |w| w.entities.order[5] = Order::Pursue(EntityId::new(2, 0)),
+            no_edit,
+        ),
+        (
             "an entity occupies a cell outside the map",
             |w| w.entities.cell[9] = 64 * 48,
             no_edit,
@@ -1245,7 +1255,7 @@ fn crowd_counters_at_their_maximum_restore_and_step() {
     let set_max = |c: &mut CrowdState| {
         c.quiet = cfg.stuck_ticks - 1;
         c.attempts = cfg.stuck_attempts;
-        c.shoved = crate::crowd::SHOVE_LIMIT;
+        c.shoved = crate::crowd::SHOVE_LIMIT + Fx::EPSILON;
         c.calm = crate::crowd::SHOVE_CALM - 1;
         c.replans = rp.max;
         c.cool = rp.cooldown;
@@ -1280,7 +1290,7 @@ fn crowd_counters_at_their_maximum_restore_and_step() {
             c.side = Some((Vec2::ZERO, crate::crowd::SIDESTEP_TICKS + 1))
         }),
         ("shoved", |c, _, _| {
-            c.shoved = crate::crowd::SHOVE_LIMIT + Fx::from_ratio(1, 64)
+            c.shoved = crate::crowd::SHOVE_LIMIT + Fx::EPSILON + Fx::EPSILON
         }),
     ];
     for (what, edit) in past {
