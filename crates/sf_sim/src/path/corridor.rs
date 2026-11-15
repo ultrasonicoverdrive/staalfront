@@ -24,6 +24,10 @@ use crate::path::graph::{
 };
 use crate::path::grid::opposite;
 use crate::path::heap::IndexedHeap;
+use crate::save::{
+    SaveResult, ensure, get_bools, get_u32s, get_u64s, parents_end, put_bools, put_u32s, put_u64s,
+};
+use sf_math::bytes::{ByteError, ByteReader, ByteWriter};
 
 /// The parent of a node reached straight from the goal.
 pub(crate) const FROM_GOAL: u32 = u32::MAX;
@@ -160,6 +164,93 @@ impl Corridor {
     pub fn toward_goal(&self, n: u32) -> Option<u32> {
         let p = self.parent[n as usize];
         (p != FROM_GOAL).then_some(p)
+    }
+}
+
+impl Corridor {
+    /// Writes the whole search (WP13.1b). Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        let Corridor {
+            heap,
+            g,
+            parent,
+            seen,
+            generation,
+            targets,
+            reached,
+            remaining,
+        } = self;
+        heap.save(w)?;
+        put_u64s(w, g)?;
+        put_u32s(w, parent)?;
+        put_u32s(w, seen)?;
+        w.u32(*generation);
+        put_bools(w, targets)?;
+        put_u32s(w, reached)?;
+        w.u32(*remaining);
+        Ok(())
+    }
+
+    /// Reads what [`Corridor::save`] wrote, for graphs of `sectors` sectors. Refused as the
+    /// abstract search is ([`crate::path::abstract_search::AbstractSearch::restore`]), and a
+    /// reached node outside its sector or more targets left than there are sectors.
+    pub(crate) fn restore(r: &mut ByteReader<'_>, sectors: usize) -> SaveResult<Corridor> {
+        let nodes = sectors * SLOTS;
+        let heap = IndexedHeap::restore(r, nodes)?;
+        let g = get_u64s(r)?;
+        let parent = get_u32s(r)?;
+        let seen = get_u32s(r)?;
+        let generation = r.u32()?;
+        let targets = get_bools(r)?;
+        let reached = get_u32s(r)?;
+        let remaining = r.u32()?;
+        ensure(
+            g.len() == nodes
+                && parent.len() == nodes
+                && seen.len() == nodes
+                && targets.len() == sectors
+                && reached.len() == sectors,
+            "a corridor search has another size",
+        )?;
+        ensure(
+            remaining as usize <= sectors
+                && reached.iter().enumerate().all(|(s, &n)| {
+                    n == NO_NODE || ((n as usize) < nodes && node_sector(n) as usize == s)
+                }),
+            "a corridor search node",
+        )?;
+        let most = (nodes as u64 + 2) * u64::from(u32::MAX);
+        let current = |n: usize| seen[n] == generation && generation != 0;
+        for n in 0..nodes {
+            ensure(seen[n] <= generation, "a corridor search mark")?;
+            if current(n) {
+                ensure(g[n] <= most, "a corridor search cost")?;
+                let p = parent[n];
+                ensure(
+                    p == FROM_GOAL || ((p as usize) < nodes && current(p as usize)),
+                    "a corridor search parent",
+                )?;
+            }
+        }
+        ensure(
+            heap.elements().iter().all(|&e| current(e as usize))
+                && reached.iter().all(|&n| n == NO_NODE || current(n as usize)),
+            "a corridor search node",
+        )?;
+        let chain: Vec<Option<usize>> = (0..nodes)
+            .map(|n| (current(n) && parent[n] != FROM_GOAL).then_some(parent[n] as usize))
+            .collect();
+        ensure(parents_end(&chain, |p| p), "a corridor search parent")?;
+        Ok(Corridor {
+            heap,
+            g,
+            parent,
+            seen,
+            generation,
+            targets,
+            reached,
+            remaining,
+        })
     }
 }
 

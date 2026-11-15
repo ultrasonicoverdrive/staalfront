@@ -22,6 +22,10 @@ use crate::path::graph::{
 };
 use crate::path::grid::opposite;
 use crate::path::heap::IndexedHeap;
+use crate::save::{
+    SaveResult, ensure, get_links, get_u32s, get_u64s, parents_end, put_links, put_u32s, put_u64s,
+};
+use sf_math::bytes::{ByteError, ByteReader, ByteWriter};
 
 /// The parent of a node reached from the start.
 pub(crate) const FROM_START: u32 = u32::MAX;
@@ -230,6 +234,139 @@ impl AbstractSearch {
             at = self.parent[at as usize];
         }
         out[from..].reverse();
+    }
+}
+
+impl AbstractSearch {
+    /// Writes the whole search (WP13.1b): a search in flight goes on next tick from here.
+    /// Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        let AbstractSearch {
+            heap,
+            g,
+            parent,
+            seen,
+            generation,
+            nodes,
+            goal_cell,
+            goal_sector,
+            goal_links,
+            nearest,
+            banned,
+            banned_len,
+        } = self;
+        heap.save(w)?;
+        put_u64s(w, g)?;
+        put_u32s(w, parent)?;
+        put_u32s(w, seen)?;
+        w.u32(*generation);
+        w.u32(*nodes);
+        w.u32(goal_cell.0);
+        w.u32(goal_cell.1);
+        w.u32(*goal_sector);
+        put_links(w, goal_links)?;
+        w.bool(nearest.is_some());
+        if let Some((a, b, c)) = nearest {
+            w.u64(*a);
+            w.u64(*b);
+            w.u32(*c);
+        }
+        w.usize(*banned_len)?;
+        for &b in &banned[..*banned_len] {
+            w.u32(b);
+        }
+        Ok(())
+    }
+
+    /// Reads what [`AbstractSearch::save`] wrote, for graphs of `sectors` sectors on a map of
+    /// `width` by `height` cells. Refused: arrays of another size, a node out of range, a node
+    /// of this search whose parent is not of this search or whose chain of parents goes round,
+    /// a cost no path reaches (more than the dearest edge times the nodes), a mark from a
+    /// later search than the one going on, a goal off the map.
+    pub(crate) fn restore(
+        r: &mut ByteReader<'_>,
+        sectors: usize,
+        width: u32,
+        height: u32,
+    ) -> SaveResult<AbstractSearch> {
+        let nodes = sectors * SLOTS;
+        let heap = IndexedHeap::restore(r, nodes + 1)?;
+        let g = get_u64s(r)?;
+        let parent = get_u32s(r)?;
+        let seen = get_u32s(r)?;
+        ensure(
+            g.len() == nodes + 1 && parent.len() == nodes + 1 && seen.len() == nodes + 1,
+            "an abstract search has another size",
+        )?;
+        let generation = r.u32()?;
+        ensure(
+            r.u32()? as usize == nodes,
+            "an abstract search has another size",
+        )?;
+        let goal_cell = (r.u32()?, r.u32()?);
+        let goal_sector = r.u32()?;
+        let goal_links = get_links(r)?;
+        let nearest = if r.bool()? {
+            Some((r.u64()?, r.u64()?, r.u32()?))
+        } else {
+            None
+        };
+        let banned_len = r.usize()?;
+        ensure(
+            banned_len <= BAN_CAP,
+            "an abstract search bans too many sectors",
+        )?;
+        let mut banned = [0; BAN_CAP];
+        for b in banned.iter_mut().take(banned_len) {
+            *b = r.u32()?;
+        }
+        ensure(
+            goal_cell.0 < width.max(1) && goal_cell.1 < height.max(1),
+            "an abstract search goal",
+        )?;
+        ensure(
+            (goal_sector as usize) < sectors.max(1)
+                && goal_links.iter().all(|&(n, _)| (n as usize) < nodes)
+                && nearest.is_none_or(|(_, _, n)| (n as usize) < nodes)
+                && banned[..banned_len].iter().all(|&b| (b as usize) < sectors),
+            "an abstract search node or sector",
+        )?;
+        // Every path is at most one edge per node; an edge costs at most `u32::MAX`.
+        let most = (nodes as u64 + 2) * u64::from(u32::MAX);
+        let current = |n: usize| seen[n] == generation && generation != 0;
+        for n in 0..=nodes {
+            ensure(seen[n] <= generation, "an abstract search mark")?;
+            if current(n) {
+                ensure(g[n] <= most, "an abstract search cost")?;
+                let p = parent[n];
+                ensure(
+                    p == FROM_START || ((p as usize) < nodes && current(p as usize)),
+                    "an abstract search parent",
+                )?;
+            }
+        }
+        ensure(
+            heap.elements().iter().all(|&e| current(e as usize)),
+            "an abstract search heap element",
+        )?;
+        let chain: Vec<Option<usize>> = (0..=nodes)
+            .map(|n| (current(n) && parent[n] != FROM_START).then_some(parent[n] as usize))
+            .collect();
+        ensure(parents_end(&chain, |p| p), "an abstract search parent")?;
+        Ok(AbstractSearch {
+            heap,
+            g,
+            parent,
+            seen,
+            generation,
+            nodes: nodes as u32,
+            goal_cell,
+            goal_sector,
+            goal_links,
+            nearest,
+            banned,
+            banned_len,
+        })
     }
 }
 

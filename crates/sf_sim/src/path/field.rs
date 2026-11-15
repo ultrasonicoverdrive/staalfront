@@ -985,3 +985,311 @@ pub(crate) fn centre_xy(x: u32, y: u32) -> Vec2 {
         Fx::from_i64(i64::from(y)) + Fx::HALF,
     )
 }
+
+// ---- saving (WP13.1b, `docs/rules/save.md`) ---------------------------------------------------
+
+use crate::path::job::Bounds;
+use crate::save::{
+    SaveError, SaveResult, ensure, get_fx, get_u8s, get_u32s, get_vec2, put_fx, put_u8s, put_u32s,
+    put_vec2,
+};
+use sf_math::bytes::{ByteError, ByteReader, ByteWriter};
+
+impl Field {
+    /// Writes the field whole. `sector_slot` is not written: it is the places of `sectors`
+    /// (`set_region` and `clear_build` keep it so) and is rebuilt. Destructured without `..`.
+    fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        let Field {
+            serial,
+            version,
+            born,
+            state,
+            graph,
+            goal,
+            want_goal,
+            layout,
+            members,
+            last_used,
+            region_ready,
+            slots_ready,
+            sectors,
+            sector_slot: _,
+            cost,
+            dir,
+            slots,
+            taken,
+            reach,
+            finalized,
+            digest,
+        } = self;
+        w.u32(*serial);
+        w.u32(*version);
+        w.u32(*born);
+        w.u8(state.tag());
+        w.u32(*graph as u32);
+        w.u32(*goal);
+        w.u32(*want_goal);
+        let Layout {
+            order,
+            rank,
+            spacing,
+            inner,
+            turn,
+        } = layout;
+        w.u32(*order);
+        w.u8(*rank);
+        put_fx(w, *spacing);
+        put_fx(w, *inner);
+        w.u8(turn.raw());
+        w.u32(*members);
+        w.u32(*last_used);
+        w.bool(*region_ready);
+        w.bool(*slots_ready);
+        put_u32s(w, sectors)?;
+        put_u32s(w, cost)?;
+        put_u8s(w, dir)?;
+        w.usize(slots.len())?;
+        for &p in slots {
+            put_vec2(w, p);
+        }
+        put_u32s(w, taken)?;
+        put_fx(w, *reach);
+        w.u32(*finalized);
+        w.u64(digest.finish());
+        Ok(())
+    }
+
+    /// Reads what [`Field::save`] wrote. Refused: an unknown state, a graph, cell or sector out
+    /// of range, sectors not strictly ascending or more than a region holds, arrays that are not
+    /// the size of the region (or not empty without one), an unknown direction, more slots or
+    /// holders than a field hands out, more cells integrated than the region has.
+    fn restore(r: &mut ByteReader<'_>, b: &Bounds) -> SaveResult<Field> {
+        let mut f = Field::empty(b.sectors);
+        f.serial = r.u32()?;
+        f.version = r.u32()?;
+        f.born = r.u32()?;
+        f.state = match r.u8()? {
+            0 => FieldState::Queued,
+            1 => FieldState::Building,
+            2 => FieldState::Ready,
+            _ => return Err(SaveError::Corrupt("unknown field state")),
+        };
+        f.graph = r.u32()? as usize;
+        f.goal = r.u32()?;
+        f.want_goal = r.u32()?;
+        f.layout = Layout {
+            order: r.u32()?,
+            rank: r.u8()?,
+            spacing: get_fx(r)?,
+            inner: get_fx(r)?,
+            turn: Facing::new(r.u8()?),
+        };
+        f.members = r.u32()?;
+        f.last_used = r.u32()?;
+        f.region_ready = r.bool()?;
+        f.slots_ready = r.bool()?;
+        f.sectors = get_u32s(r)?;
+        f.cost = get_u32s(r)?;
+        f.dir = get_u8s(r)?;
+        let n = r.count(16)?;
+        f.slots = (0..n).map(|_| get_vec2(r)).collect::<SaveResult<_>>()?;
+        f.taken = get_u32s(r)?;
+        f.reach = get_fx(r)?;
+        f.finalized = r.u32()?;
+        f.digest = Fnv1a64::from_state(r.u64()?);
+        ensure(
+            f.graph < b.graphs && b.cell(f.goal) && b.cell(f.want_goal),
+            "a field names a graph or cell that does not exist",
+        )?;
+        ensure(
+            f.sectors.len() <= FIELD_SECTORS
+                && f.sectors.iter().all(|&s| (s as usize) < b.sectors)
+                && f.sectors.windows(2).all(|p| p[0] < p[1]),
+            "a field region",
+        )?;
+        let cells = if f.region_ready {
+            f.sectors.len() * SECTOR_CELLS
+        } else {
+            0
+        };
+        ensure(
+            (f.region_ready || f.sectors.is_empty())
+                && f.cost.len() == cells
+                && f.dir.len() == cells
+                && (f.finalized as usize) <= cells,
+            "a field's arrays are not the size of its region",
+        )?;
+        ensure(
+            f.dir.iter().all(|&d| d <= GOAL || d == UNSET),
+            "a field direction",
+        )?;
+        ensure(
+            f.slots.len() <= MAX_SLOTS && f.taken.len() <= MAX_SLOTS,
+            "a field has more slots than it hands out",
+        )?;
+        for (place, &s) in f.sectors.iter().enumerate() {
+            f.sector_slot[s as usize] = place as u8;
+        }
+        Ok(f)
+    }
+}
+
+impl Stage {
+    fn from_tag(tag: u8) -> SaveResult<Stage> {
+        Ok(match tag {
+            0 => Stage::Gather,
+            1 => Stage::GoalLinks,
+            2 => Stage::Corridor,
+            3 => Stage::Collect,
+            4 => Stage::Region,
+            5 => Stage::Slots,
+            6 => Stage::Integrate,
+            _ => return Err(SaveError::Corrupt("unknown field build stage")),
+        })
+    }
+}
+
+impl Fields {
+    /// Writes the pool, the build in flight and the builder's memory (WP13.1b). The threshold is
+    /// a rule (in the rules digest), the spiral is a constant table and the held slots are
+    /// scratch of one claim (any two are equal). Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        let Fields {
+            threshold: _,
+            entries,
+            cur,
+            scratch,
+            spiral: _,
+            next_serial,
+            next_born,
+            next_order,
+            clock,
+            claims_left,
+            looks_left,
+            look_from,
+            look_denied,
+            held: _,
+            built,
+            nodes_last_tick,
+        } = self;
+        w.usize(entries.len())?;
+        for f in entries {
+            f.save(w)?;
+        }
+        w.bool(cur.is_some());
+        if let Some(c) = cur {
+            let Cur {
+                entry,
+                born,
+                stage,
+                cursor,
+                chain,
+                started,
+                searching,
+                found,
+            } = c;
+            w.u32(*entry as u32);
+            w.u32(*born);
+            w.u8(stage.tag());
+            w.u32(*cursor as u32);
+            w.bool(chain.is_some());
+            w.u32(chain.unwrap_or(0));
+            w.bool(*started);
+            w.bool(*searching);
+            w.u32(*found);
+        }
+        w.bool(scratch.is_some());
+        if let Some(s) = scratch {
+            s.save(w)?;
+        }
+        w.u32(*next_serial);
+        w.u32(*next_born);
+        w.u32(*next_order);
+        w.u32(*clock);
+        w.u32(*claims_left);
+        w.u32(*looks_left);
+        w.u32(*look_from);
+        w.u32(*look_denied);
+        w.u64(*built);
+        w.u32(*nodes_last_tick);
+        Ok(())
+    }
+
+    /// Reads what [`Fields::save`] wrote into `self` (a fresh pool with the world's threshold).
+    /// Refused: more entries than the pool holds, a build of an entry that does not exist, a
+    /// cursor past what its stage walks, a node out of range, a serial counter at zero (they
+    /// skip it), more claims or looks left than a tick gives, and an integration heap that
+    /// names a cell outside the region of the field being built.
+    pub(crate) fn restore(&mut self, r: &mut ByteReader<'_>, b: &Bounds) -> SaveResult<()> {
+        let n = r.count(60)?;
+        ensure(n <= FIELD_POOL, "more fields than the pool holds")?;
+        self.entries = (0..n)
+            .map(|_| Field::restore(r, b))
+            .collect::<SaveResult<_>>()?;
+        self.cur = if r.bool()? {
+            let c = Cur {
+                entry: r.u32()? as usize,
+                born: r.u32()?,
+                stage: Stage::from_tag(r.u8()?)?,
+                cursor: r.u32()? as usize,
+                chain: {
+                    let some = r.bool()?;
+                    let n = r.u32()?;
+                    some.then_some(n)
+                },
+                started: r.bool()?,
+                searching: r.bool()?,
+                found: r.u32()?,
+            };
+            let most = match c.stage {
+                Stage::Gather => b.slots,
+                Stage::Collect => b.sectors,
+                Stage::Slots => self.spiral.len(),
+                _ => usize::MAX,
+            };
+            ensure(
+                c.entry < self.entries.len()
+                    && c.cursor <= most
+                    && c.chain.is_none_or(|n| b.node(n)),
+                "a field build out of range",
+            )?;
+            Some(c)
+        } else {
+            None
+        };
+        self.scratch = if r.bool()? {
+            Some(Box::new(crate::path::field_build::Scratch::restore(r, b)?))
+        } else {
+            None
+        };
+        self.next_serial = r.u32()?;
+        self.next_born = r.u32()?;
+        self.next_order = r.u32()?;
+        self.clock = r.u32()?;
+        self.claims_left = r.u32()?;
+        self.looks_left = r.u32()?;
+        self.look_from = r.u32()?;
+        self.look_denied = r.u32()?;
+        self.built = r.u64()?;
+        self.nodes_last_tick = r.u32()?;
+        ensure(
+            self.next_serial != 0 && self.next_born != 0 && self.next_order != 0,
+            "a field counter at zero",
+        )?;
+        ensure(
+            self.claims_left <= claim::CLAIMS_PER_TICK && self.looks_left <= claim::LOOKS_PER_TICK,
+            "more claims or looks left than a tick gives",
+        )?;
+        if let (Some(c), Some(s)) = (&self.cur, &self.scratch)
+            && c.stage == Stage::Integrate
+            && c.started
+        {
+            let cells = self.entries[c.entry].cost.len();
+            ensure(
+                s.heap_within(cells),
+                "a field build heap outside its region",
+            )?;
+        }
+        Ok(())
+    }
+}

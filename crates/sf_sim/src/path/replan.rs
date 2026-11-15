@@ -123,6 +123,15 @@ impl Overlay {
         self.len = 0;
     }
 
+    /// An overlay of the given cells, which must be ascending and at most [`OVERLAY_CAP`]
+    /// (restoring a save).
+    pub(crate) fn from_cells(cells: &[u32]) -> Overlay {
+        let mut out = Overlay::EMPTY;
+        out.cells[..cells.len()].copy_from_slice(cells);
+        out.len = cells.len() as u8;
+        out
+    }
+
     /// Whether `cell` is in the overlay.
     #[cfg(test)]
     pub fn contains(&self, cell: u32) -> bool {

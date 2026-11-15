@@ -477,22 +477,138 @@ impl Formations {
         }
     }
 
-    /// Whether the formations are as a fresh world has them: none made yet (WP13.1a saves a world
-    /// only then). The settings and the stats do not count. Destructured without `..`.
-    pub(crate) fn at_start(&self) -> bool {
+    /// Writes the formations (WP13.1b, `docs/rules/save.md`): every formation and the serial
+    /// counter. The members' own memory is the entity column `form`, written with the entities.
+    /// The settings are rules (in the rules digest), the stats a report. Destructured without
+    /// `..`.
+    pub(crate) fn save(
+        &self,
+        w: &mut sf_math::bytes::ByteWriter,
+    ) -> Result<(), sf_math::bytes::ByteError> {
         let Formations {
             config: _,
             list,
             next_serial,
             stats: _,
         } = self;
-        list.is_empty() && *next_serial == Formations::new().next_serial
+        w.u32(*next_serial);
+        w.usize(list.len())?;
+        for f in list {
+            let Formation {
+                serial,
+                goal,
+                leader,
+                heading,
+                turn_wait,
+                state,
+                patience,
+                waiting,
+                age,
+                calm,
+                loose,
+                members,
+                extent,
+                pace,
+            } = f;
+            w.u32(*serial);
+            crate::save::put_vec2(w, *goal);
+            w.u32(*leader);
+            w.u8(heading.raw());
+            w.u8(*turn_wait);
+            w.u8(match state {
+                FormationState::Whole => 0,
+                FormationState::Broken => 1,
+            });
+            w.u16(*patience);
+            w.bool(*waiting);
+            w.u32(*age);
+            w.u16(*calm);
+            w.u8(*loose);
+            crate::save::put_u32s(w, members)?;
+            crate::save::put_fx(w, *extent);
+            crate::save::put_fx(w, *pace);
+        }
+        Ok(())
     }
 
-    /// Moves the serial counter as making a formation would (save tests).
-    #[cfg(test)]
-    pub(crate) fn bump_serial_for_test(&mut self) {
-        self.next_serial += 1;
+    /// Reads what [`Formations::save`] wrote, onto restored entities. Refused: a serial counter
+    /// at zero (it skips zero), a formation numbered zero or twice, an unknown state, counters
+    /// past what the update leaves (`turn_wait` below the longest turn period, `patience` at
+    /// most the setting, `loose` at most [`LOOSE_TICKS`]), members not strictly ascending or not
+    /// slots, a leader that is not a member, and memberships that do not match the formations:
+    /// every member's `form` names its formation and every slot that names one is in it.
+    pub(crate) fn restore(
+        &mut self,
+        r: &mut sf_math::bytes::ByteReader<'_>,
+        e: &Entities,
+    ) -> crate::save::SaveResult<()> {
+        use crate::save::{SaveError, ensure};
+        self.next_serial = r.u32()?;
+        ensure(self.next_serial != 0, "the formation counter at zero")?;
+        let n = r.count(40)?;
+        let mut list = Vec::with_capacity(n);
+        for _ in 0..n {
+            let f = Formation {
+                serial: r.u32()?,
+                goal: crate::save::get_vec2(r)?,
+                leader: r.u32()?,
+                heading: Facing::new(r.u8()?),
+                turn_wait: r.u8()?,
+                state: match r.u8()? {
+                    0 => FormationState::Whole,
+                    1 => FormationState::Broken,
+                    _ => return Err(SaveError::Corrupt("unknown formation state")),
+                },
+                patience: r.u16()?,
+                waiting: r.bool()?,
+                age: r.u32()?,
+                calm: r.u16()?,
+                loose: r.u8()?,
+                members: crate::save::get_u32s(r)?,
+                extent: crate::save::get_fx(r)?,
+                pace: crate::save::get_fx(r)?,
+            };
+            ensure(
+                i64::from(f.turn_wait) < MAX_TURN_PERIOD
+                    && f.patience <= self.config.patience_ticks
+                    && f.loose <= LOOSE_TICKS,
+                "a formation counter the update never reaches",
+            )?;
+            ensure(
+                f.members.windows(2).all(|p| p[0] < p[1])
+                    && f.members.iter().all(|&m| (m as usize) < e.len())
+                    && f.members.contains(&f.leader),
+                "a formation's members",
+            )?;
+            ensure(
+                f.serial != 0 && list.iter().all(|o: &Formation| o.serial != f.serial),
+                "a formation number",
+            )?;
+            list.push(f);
+        }
+        for i in 0..e.len() {
+            let serial = e.form[i].serial;
+            let listed = list
+                .iter()
+                .find(|f| f.serial == serial)
+                .is_some_and(|f| f.members.binary_search(&(i as u32)).is_ok());
+            ensure(serial == 0 || listed, "a membership of no formation")?;
+        }
+        for f in &list {
+            ensure(
+                f.members
+                    .iter()
+                    .all(|&m| e.form[m as usize].serial == f.serial),
+                "a member that is not in its formation",
+            )?;
+        }
+        self.list = list;
+        Ok(())
+    }
+
+    /// The formations alive (save tests and [`crate::save::SaveContents`]).
+    pub(crate) fn count(&self) -> usize {
+        self.list.len()
     }
 
     /// Whether the world has a formation (the checksum has a section then).

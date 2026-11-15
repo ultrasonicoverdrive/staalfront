@@ -39,6 +39,10 @@ use crate::path::grid::INF;
 use crate::path::local::{Local, Outcome, Query, Rect, union};
 use crate::path::los;
 use crate::path::route::{ABS_CAP, RING_CAP, Route, RouteState};
+use crate::save::{
+    SaveError, SaveResult, ensure, get_links, get_u32s, get_vec2, put_links, put_u32s, put_vec2,
+};
+use sf_math::bytes::{ByteError, ByteReader};
 
 /// Legs (a sector, or two sectors side by side) refined per job.
 pub(crate) const REFINE_LEGS: u8 = 3;
@@ -289,11 +293,7 @@ impl Job {
     pub fn write_hash(&self, h: &mut sf_math::hash::Fnv1a64) {
         h.write_u32(self.slot);
         h.write_u32(self.ticket);
-        h.write_u8(match self.mode {
-            Mode::Fresh => 0,
-            Mode::Refill => 1,
-            Mode::Continue => 2,
-        });
+        h.write_u8(self.mode.tag());
         h.write_u8(self.phase.tag());
         if self.overlay_on {
             h.write_u8(0x5E | u8::from(self.strict) << 7);
@@ -1135,6 +1135,273 @@ impl Job {
             self.sm_from = self.sm_lo;
             self.sm_active = false;
         }
+    }
+}
+
+/// The sizes a restored job and its memory are checked against.
+pub(crate) struct Bounds {
+    /// Map cells across and down (every graph has the map's size).
+    pub width: u32,
+    pub height: u32,
+    /// Sectors of the map's graphs (zero for a world without graphs).
+    pub sectors: usize,
+    /// Class graphs.
+    pub graphs: usize,
+    /// Entity slots.
+    pub slots: usize,
+}
+
+impl Bounds {
+    pub fn cells(&self) -> u64 {
+        u64::from(self.width) * u64::from(self.height)
+    }
+
+    pub fn cell(&self, c: u32) -> bool {
+        u64::from(c) < self.cells()
+    }
+
+    pub fn node(&self, n: u32) -> bool {
+        (n as usize) < self.sectors * SLOTS
+    }
+
+    pub fn inside(&self, p: Vec2) -> bool {
+        p.x >= Fx::ZERO
+            && p.y >= Fx::ZERO
+            && p.x <= Fx::from_i64(i64::from(self.width))
+            && p.y <= Fx::from_i64(i64::from(self.height))
+    }
+}
+
+impl Work {
+    /// Writes the planner's memory whole (WP13.1b): a job in flight goes on from it next tick.
+    /// Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut sf_math::bytes::ByteWriter) -> Result<(), ByteError> {
+        let Work {
+            local,
+            search,
+            start_links,
+            goal_links,
+            cells,
+            nodes,
+            raw,
+        } = self;
+        local.save(w)?;
+        search.save(w)?;
+        put_links(w, start_links)?;
+        put_links(w, goal_links)?;
+        put_u32s(w, cells)?;
+        put_u32s(w, nodes)?;
+        w.usize(raw.len())?;
+        for &(p, c) in raw {
+            put_vec2(w, p);
+            w.u32(c);
+        }
+        Ok(())
+    }
+
+    /// Reads what [`Work::save`] wrote. Refused: a node or cell out of range, a point off the map.
+    pub(crate) fn restore(r: &mut ByteReader<'_>, b: &Bounds) -> SaveResult<Work> {
+        let mut out = Work::new(b.sectors);
+        out.local = Local::restore(r, b.width, b.height)?;
+        out.search = AbstractSearch::restore(r, b.sectors, b.width, b.height)?;
+        out.start_links = get_links(r)?;
+        out.goal_links = get_links(r)?;
+        out.cells = get_u32s(r)?;
+        out.nodes = get_u32s(r)?;
+        let n = r.count(20)?;
+        out.raw = (0..n)
+            .map(|_| Ok((get_vec2(r)?, r.u32()?)))
+            .collect::<SaveResult<_>>()?;
+        ensure(
+            out.start_links
+                .iter()
+                .chain(&out.goal_links)
+                .all(|&(n, _)| b.node(n))
+                && out.nodes.iter().all(|&n| b.node(n)),
+            "the planner's memory names a node out of range",
+        )?;
+        ensure(
+            out.cells.iter().all(|&c| b.cell(c))
+                && out.raw.iter().all(|&(p, c)| b.cell(c) && b.inside(p)),
+            "the planner's memory names a cell off the map",
+        )?;
+        Ok(out)
+    }
+}
+
+impl Mode {
+    const fn tag(self) -> u8 {
+        match self {
+            Mode::Fresh => 0,
+            Mode::Refill => 1,
+            Mode::Continue => 2,
+        }
+    }
+}
+
+impl Job {
+    /// Writes the job (WP13.1b). Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut sf_math::bytes::ByteWriter) {
+        let Job {
+            slot,
+            ticket,
+            graph,
+            mode,
+            strict,
+            overlay_on,
+            banned,
+            banned_len,
+            epoch,
+            phase,
+            pos,
+            start_cell,
+            abs_started,
+            legs,
+            leg_ready,
+            pop_after,
+            sm_from,
+            sm_lo,
+            sm_hi,
+            sm_active,
+            sm_far_tried,
+            searching,
+            near_stage,
+            near_node,
+        } = self;
+        w.u32(*slot);
+        w.u32(*ticket);
+        w.u32(*graph as u32);
+        w.u8(mode.tag());
+        w.bool(*strict);
+        w.bool(*overlay_on);
+        w.u8(*banned_len);
+        for &s in &banned[..usize::from(*banned_len)] {
+            w.u32(s);
+        }
+        w.u32(*epoch);
+        w.u8(phase.tag());
+        put_vec2(w, *pos);
+        w.u32(*start_cell);
+        w.bool(*abs_started);
+        w.u8(*legs);
+        w.bool(*leg_ready);
+        w.u8(*pop_after);
+        w.u32(*sm_from as u32);
+        w.u32(*sm_lo as u32);
+        w.u32(*sm_hi as u32);
+        w.bool(*sm_active);
+        w.bool(*sm_far_tried);
+        w.bool(*searching);
+        w.u8(*near_stage);
+        w.bool(near_node.is_some());
+        if let Some(((a, bb, c), cell)) = near_node {
+            w.u64(*a);
+            w.u64(*bb);
+            w.u32(*c);
+            w.u32(*cell);
+        }
+    }
+
+    /// Reads what [`Job::save`] wrote, with the planner's memory `work` already read. Refused:
+    /// a slot, graph, sector or cell out of range, an unknown mode or stage, more legs than a job
+    /// refines, a smoothing cursor past the raw route, a leg said to be ready that has no cells.
+    pub(crate) fn restore(r: &mut ByteReader<'_>, b: &Bounds, work: &Work) -> SaveResult<Job> {
+        let slot = r.u32()?;
+        let ticket = r.u32()?;
+        let graph = r.u32()? as usize;
+        let mode = match r.u8()? {
+            0 => Mode::Fresh,
+            1 => Mode::Refill,
+            2 => Mode::Continue,
+            _ => return Err(SaveError::Corrupt("unknown job mode")),
+        };
+        let strict = r.bool()?;
+        let overlay_on = r.bool()?;
+        let banned_len = r.u8()?;
+        ensure(
+            usize::from(banned_len) <= BAN_CAP,
+            "a job bans too many sectors",
+        )?;
+        let mut banned = [0; BAN_CAP];
+        for s in banned.iter_mut().take(usize::from(banned_len)) {
+            *s = r.u32()?;
+        }
+        let epoch = r.u32()?;
+        let phase = match r.u8()? {
+            0 => Phase::Begin,
+            1 => Phase::Direct,
+            2 => Phase::ConnectStart,
+            3 => Phase::ConnectGoal,
+            4 => Phase::Abstract,
+            5 => Phase::Nearest,
+            6 => Phase::Refine,
+            7 => Phase::Smooth,
+            8 => Phase::Finish,
+            _ => return Err(SaveError::Corrupt("unknown job stage")),
+        };
+        let job = Job {
+            slot,
+            ticket,
+            graph,
+            mode,
+            strict,
+            overlay_on,
+            banned,
+            banned_len,
+            epoch,
+            phase,
+            pos: get_vec2(r)?,
+            start_cell: r.u32()?,
+            abs_started: r.bool()?,
+            legs: r.u8()?,
+            leg_ready: r.bool()?,
+            pop_after: r.u8()?,
+            sm_from: r.u32()? as usize,
+            sm_lo: r.u32()? as usize,
+            sm_hi: r.u32()? as usize,
+            sm_active: r.bool()?,
+            sm_far_tried: r.bool()?,
+            searching: r.bool()?,
+            near_stage: r.u8()?,
+            near_node: if r.bool()? {
+                Some(((r.u64()?, r.u64()?, r.u32()?), r.u32()?))
+            } else {
+                None
+            },
+        };
+        ensure(
+            (job.slot as usize) < b.slots && job.graph < b.graphs,
+            "a job for a slot or graph that does not exist",
+        )?;
+        ensure(
+            job.banned[..usize::from(banned_len)]
+                .iter()
+                .all(|&s| (s as usize) < b.sectors),
+            "a job bans a sector that does not exist",
+        )?;
+        ensure(
+            b.inside(job.pos)
+                && b.cell(job.start_cell)
+                && job.near_node.is_none_or(|(_, c)| b.cell(c)),
+            "a job names a point or cell off the map",
+        )?;
+        ensure(
+            job.legs <= REFINE_LEGS && job.near_stage <= 1,
+            "a job counter the planner never reaches",
+        )?;
+        ensure(
+            !job.leg_ready || !work.cells.is_empty(),
+            "a job's ready leg has no cells",
+        )?;
+        let n = work.raw.len();
+        ensure(
+            job.phase != Phase::Smooth
+                || (n > 0
+                    && job.sm_from < n
+                    && (!job.sm_active || (job.sm_lo < n && job.sm_hi < n))),
+            "a job's smoothing is past its route",
+        )?;
+        Ok(job)
     }
 }
 

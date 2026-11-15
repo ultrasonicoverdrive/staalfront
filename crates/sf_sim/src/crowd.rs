@@ -1473,7 +1473,7 @@ impl Work<'_, '_> {
                     // runs, when the attempts stay at their limit so that the next
                     // stuck period asks.
                     let c = &mut e.crowd[u];
-                    c.attempts = (c.attempts + 1).min(cfg.stuck_attempts);
+                    c.attempts = c.attempts.saturating_add(1).min(cfg.stuck_attempts);
                     self.stats.sidesteps += 1;
                     // The slot it was going to is walled off: it takes another one
                     // when it can (WP4.4b, `path/claim.rs`).

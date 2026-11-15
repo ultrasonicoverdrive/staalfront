@@ -54,6 +54,7 @@ mod field_tests;
 #[cfg(test)]
 mod tests;
 
+use sf_math::bytes::{ByteError, ByteWriter};
 use sf_math::hash::Fnv1a64;
 use sf_math::{Facing, Fx, Vec2};
 
@@ -284,62 +285,146 @@ impl Pathing {
         p
     }
 
-    /// The section whose state is not what a fresh world has, if any: `"pathing"` once a route
-    /// was served or a sector rebuilt, `"flowfields"` once a field was made (WP13.1a saves a
-    /// world only without either). Destructured without `..`: the graphs, the budget and the
-    /// replan settings are rules, the stats a report, the work memory scratch while no job runs.
-    /// The flowfield clock goes up by one in every step (`serve` ages the fields first thing), so
-    /// without fields it is the tick (modulo 2^32) and is rebuilt by
-    /// [`Pathing::restore_clock`].
-    pub(crate) fn unsaved_section(&self, tick: crate::ids::Tick) -> Option<&'static str> {
+    /// Writes the state of the service (WP13.1b, `docs/rules/save.md`): the counters, the job in
+    /// flight, the planner's memory and every slot's route. The graphs are not written: they are
+    /// rebuilt from the terrain and the structures ([`Pathing::rebuild_graphs`]). The budget and
+    /// the replan settings are rules (in the rules digest), the stats a report. The flowfields
+    /// are a section of their own ([`Pathing::save_fields`]). Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter, e: &Entities) -> Result<(), ByteError> {
         let Pathing {
+            // Derived: rebuilt on restore.
             graphs: _,
-            work: _,
+            work,
             job,
             epoch,
             sector_epoch,
+            // Rules.
             budget: _,
             next_ticket,
             next_slot,
             scan,
-            fields,
+            // Its own section.
+            fields: _,
+            // Rules.
             replan: _,
+            // A report: not hashed, and nothing reads it.
             stats: _,
         } = self;
-        if job.is_some()
-            || *epoch != 0
-            || sector_epoch.iter().any(|&s| s != 0)
-            || *next_ticket != 0
-            || *next_slot != 0
-            || *scan
-        {
-            return Some("pathing");
+        w.u32(*epoch);
+        crate::save::put_u32s(w, sector_epoch)?;
+        w.u32(*next_ticket);
+        w.u32(*next_slot);
+        w.bool(*scan);
+        work.save(w)?;
+        w.bool(job.is_some());
+        if let Some(j) = job {
+            j.save(w);
         }
-        let mut at_rest = Fields::new(fields.threshold);
-        at_rest.clock = tick.0 as u32;
-        if *fields != at_rest {
-            return Some("flowfields");
-        }
-        None
+        e.route.save(w)
     }
 
-    /// Sets the flowfield clock of a restored world (see [`Pathing::unsaved_section`]).
-    pub(crate) fn restore_clock(&mut self, tick: crate::ids::Tick) {
-        self.fields.clock = tick.0 as u32;
+    /// The sizes a restored world's pathing state is checked against.
+    pub(crate) fn bounds(&self, e: &Entities, width: u32, height: u32) -> job::Bounds {
+        job::Bounds {
+            width,
+            height,
+            sectors: self.sector_epoch.len(),
+            graphs: self.graphs.len(),
+            slots: e.len(),
+        }
     }
 
-    /// Leaves one piece of the tick-0 state of the service (save tests): 0 epoch, 1 a sector
-    /// epoch, 2 the ticket, 3 the start slot, 4 the scan flag, 5 the flowfield counters.
-    #[cfg(test)]
-    pub(crate) fn dirty_for_test(&mut self, what: u8) {
-        match what {
-            0 => self.epoch += 1,
-            1 => self.sector_epoch.push(1),
-            2 => self.next_ticket += 1,
-            3 => self.next_slot += 1,
-            4 => self.scan = true,
-            _ => self.fields.next_order += 1,
+    /// Reads what [`Pathing::save`] wrote into the pathing of a fresh world, whose entities are
+    /// restored already. Refused: sector epochs of another count, a start slot the service could
+    /// not have left (it is the slot after one it looked at, modulo the slots it looks at), a
+    /// job in a world without graphs, and whatever the parts refuse.
+    pub(crate) fn restore(
+        &mut self,
+        r: &mut sf_math::bytes::ByteReader<'_>,
+        e: &mut Entities,
+        b: &job::Bounds,
+    ) -> crate::save::SaveResult<()> {
+        use crate::save::ensure;
+        self.epoch = r.u32()?;
+        let sector_epoch = crate::save::get_u32s(r)?;
+        ensure(
+            sector_epoch.len() == self.sector_epoch.len(),
+            "sector epochs of another map",
+        )?;
+        self.sector_epoch = sector_epoch;
+        self.next_ticket = r.u32()?;
+        self.next_slot = r.u32()?;
+        self.scan = r.bool()?;
+        self.work = Work::restore(r, b)?;
+        self.job = if r.bool()? {
+            Some(Job::restore(r, b, &self.work)?)
+        } else {
+            None
+        };
+        let nodes = (b.sectors * graph::SLOTS) as u64;
+        e.route = Routes::restore(r, e.len(), b.cells(), nodes)?;
+        let looked = e.route.len().min(e.len());
+        ensure(
+            self.next_slot == 0 || (self.next_slot as usize) < looked,
+            "the path service starts at a slot it never looked at",
+        )?;
+        Ok(())
+    }
+
+    /// Writes the flowfields (WP13.1b): the whole pool, saved whole, because the checksum sees
+    /// their arrays only through a running hash.
+    pub(crate) fn save_fields(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        self.fields.save(w)
+    }
+
+    /// Reads what [`Pathing::save_fields`] wrote.
+    pub(crate) fn restore_fields(
+        &mut self,
+        r: &mut sf_math::bytes::ByteReader<'_>,
+        b: &job::Bounds,
+    ) -> crate::save::SaveResult<()> {
+        self.fields.restore(r, b)
+    }
+
+    /// Makes the graphs of a restored world: every cell of every class graph read again from the
+    /// terrain and the structures, and every sector rebuilt, as a placement rebuilds the sectors
+    /// it touches. The heuristic floor is the one the graph was made with at the start, as in the
+    /// saved world. `save::tests::rebuilt_graphs_equal_the_ones_placements_made` shows the result
+    /// equals graphs that were changed one placement at a time. The planner's memory is not used
+    /// (a scratch local search is), so a restored search in flight stays as it was.
+    pub(crate) fn rebuild_graphs(
+        &mut self,
+        terrain: &Terrain,
+        movement: &MovementTable,
+        occupancy: &Occupancy,
+    ) {
+        let ground = Ground {
+            terrain,
+            movement,
+            occupancy: Some(occupancy),
+        };
+        let mut local = local::Local::new();
+        for g in &mut self.graphs {
+            for y in 0..g.grid.height() {
+                for x in 0..g.grid.width() {
+                    let speed = cell_speed(&ground, g.class, x, y);
+                    let i = g.grid.index(x, y);
+                    g.grid.set(i, speed);
+                }
+            }
+            let all: Vec<u32> = (0..g.sectors.count() as u32).collect();
+            g.rebuild(&all, &mut local);
         }
+    }
+
+    /// Whether a job is in flight (save tests and [`crate::save::SaveContents`]).
+    pub(crate) fn has_job(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// The flowfields in the pool, and whether one is being built.
+    pub(crate) fn field_counts(&self) -> (u32, bool) {
+        (self.fields.live(), self.fields.cur.is_some())
     }
 
     /// Resets the stats, which a restored world does not bring back (save tests).

@@ -13,13 +13,13 @@
 //! * Header: the magic `SFSV`, `format_version` ([`FORMAT_VERSION`]), the rules digest, the tick
 //!   and the number of sections.
 //! * Sections, each a tag byte and a `u32` length: `W` the world scalars, `E` the entities, `Q` the
-//!   command queue, in that order.
+//!   command queue, `P` the path service (WP13.1b), `F` the flowfields, `M` the formations, in that
+//!   order.
 //!
 //! # Not yet saved
 //!
-//! Pathing, flowfields, formations, turning, weapons, projectiles, targeting, destruction,
-//! buildings (construction), economy, production, power, repair, vision and outcome come in WP13.1b
-//! and WP13.1c. Until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
+//! Weapons, projectiles, targeting, destruction, buildings (construction), economy, production,
+//! power, repair, vision and outcome come in WP13.1c. Until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
 //! section, any world in which one of them holds something that is not its tick-0 state; the exact
 //! test per section is in `docs/rules/save.md`. A world that saves therefore restores whole.
 //!
@@ -39,10 +39,9 @@ use crate::behavior::{Area, Behavior};
 use crate::command::{Command, CommandQueue};
 use crate::crowd::{Claim, CrowdState, HOME_WAIT, SHOVE_CALM, SHOVE_LIMIT, SIDESTEP_TICKS};
 use crate::entities::{Entities, NO_DEF};
-use crate::formation::Member;
+use crate::formation::{Member, MemberMode};
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
 use crate::orders::{GuardTarget, ORDER_QUEUE_CAP, Order, OrderQueue};
-use crate::path::Routes;
 use crate::targeting::Engage;
 use crate::terrain::{Cell, NO_CELL, Occupancy};
 use crate::weapons::REST;
@@ -53,13 +52,66 @@ pub const MAGIC: [u8; 4] = *b"SFSV";
 
 /// The layout of the bytes after the magic. Raised whenever that layout changes; an older save is
 /// refused with [`SaveError::Version`] (no migration yet).
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 
 const SECTION_WORLD: u8 = b'W';
 const SECTION_ENTITIES: u8 = b'E';
 const SECTION_QUEUE: u8 = b'Q';
+const SECTION_PATHING: u8 = b'P';
+const SECTION_FIELDS: u8 = b'F';
+const SECTION_FORMATIONS: u8 = b'M';
 /// The sections of this format, in file order.
-const SECTIONS: [u8; 3] = [SECTION_WORLD, SECTION_ENTITIES, SECTION_QUEUE];
+const SECTIONS: [u8; 6] = [
+    SECTION_WORLD,
+    SECTION_ENTITIES,
+    SECTION_QUEUE,
+    SECTION_PATHING,
+    SECTION_FIELDS,
+    SECTION_FORMATIONS,
+];
+
+/// What a world holds of the sections WP13.1b saves: for tests that save in the middle of a run
+/// and want to show the state they claim to carry across is there (a route being planned, a
+/// flowfield, a formation, a unit half way through a turn).
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub struct SaveContents {
+    /// A route is being planned and is not finished: the path service's job is in flight.
+    pub path_job: bool,
+    /// Live slots whose route is not idle.
+    pub routes: u32,
+    /// Flowfields in the pool.
+    pub fields: u32,
+    /// A flowfield is being built.
+    pub field_building: bool,
+    /// Formations alive.
+    pub formations: u32,
+    /// Live units that carry part of a turn step to the next tick (`turn_carry != 0`).
+    pub turning: u32,
+}
+
+impl World {
+    /// What the world holds of the pathing, flowfield, formation and turning state
+    /// ([`SaveContents`]).
+    pub fn save_contents(&self) -> SaveContents {
+        let e = &self.entities;
+        let live = |i: &usize| e.alive[*i];
+        let (fields, field_building) = self.pathing.field_counts();
+        SaveContents {
+            path_job: self.pathing.has_job(),
+            routes: (0..e.len())
+                .filter(live)
+                .filter(|&i| e.route[i].state != crate::path::RouteState::Idle)
+                .count() as u32,
+            fields,
+            field_building,
+            formations: self.formations.count() as u32,
+            turning: (0..e.len())
+                .filter(live)
+                .filter(|&i| e.turn_carry[i] != 0)
+                .count() as u32,
+        }
+    }
+}
 
 /// Why a world could not be saved or restored.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -112,58 +164,163 @@ impl From<ByteError> for SaveError {
     }
 }
 
-type SaveResult<T> = Result<T, SaveError>;
+pub(crate) type SaveResult<T> = Result<T, SaveError>;
+
+/// `Ok` when `ok`, else [`SaveError::Corrupt`] with `what`.
+pub(crate) fn ensure(ok: bool, what: &'static str) -> SaveResult<()> {
+    if ok {
+        Ok(())
+    } else {
+        Err(SaveError::Corrupt(what))
+    }
+}
+
+/// Whether every chain of parents ends: following `next` from any element reaches an element
+/// with none (`None`) without going round. `next` returns indices into `parent`.
+pub(crate) fn parents_end<T: Copy>(parent: &[T], next: impl Fn(T) -> Option<usize>) -> bool {
+    // 0 not looked at, 1 on the chain being followed, 2 known to end.
+    let mut mark = vec![0u8; parent.len()];
+    let mut chain = Vec::new();
+    for start in 0..parent.len() {
+        let mut at = start;
+        loop {
+            match mark[at] {
+                2 => break,
+                1 => return false,
+                _ => {}
+            }
+            mark[at] = 1;
+            chain.push(at);
+            match next(parent[at]) {
+                Some(n) if n < parent.len() => at = n,
+                Some(_) => return false,
+                None => break,
+            }
+        }
+        for &c in &chain {
+            mark[c] = 2;
+        }
+        chain.clear();
+    }
+    true
+}
+
+/// A slice of `u32`s: the count, then each.
+pub(crate) fn put_u32s(w: &mut ByteWriter, v: &[u32]) -> Result<(), ByteError> {
+    w.usize(v.len())?;
+    for &x in v {
+        w.u32(x);
+    }
+    Ok(())
+}
+
+pub(crate) fn get_u32s(r: &mut ByteReader<'_>) -> SaveResult<Vec<u32>> {
+    let n = r.count(4)?;
+    (0..n).map(|_| Ok(r.u32()?)).collect()
+}
+
+/// A slice of `u64`s: the count, then each.
+pub(crate) fn put_u64s(w: &mut ByteWriter, v: &[u64]) -> Result<(), ByteError> {
+    w.usize(v.len())?;
+    for &x in v {
+        w.u64(x);
+    }
+    Ok(())
+}
+
+pub(crate) fn get_u64s(r: &mut ByteReader<'_>) -> SaveResult<Vec<u64>> {
+    let n = r.count(8)?;
+    (0..n).map(|_| Ok(r.u64()?)).collect()
+}
+
+/// Pairs of `u32`s (a node and a cost): the count, then each.
+pub(crate) fn put_links(w: &mut ByteWriter, v: &[(u32, u32)]) -> Result<(), ByteError> {
+    w.usize(v.len())?;
+    for &(a, b) in v {
+        w.u32(a);
+        w.u32(b);
+    }
+    Ok(())
+}
+
+pub(crate) fn get_links(r: &mut ByteReader<'_>) -> SaveResult<Vec<(u32, u32)>> {
+    let n = r.count(8)?;
+    (0..n).map(|_| Ok((r.u32()?, r.u32()?))).collect()
+}
+
+/// A slice of bytes: the count, then each.
+pub(crate) fn put_u8s(w: &mut ByteWriter, v: &[u8]) -> Result<(), ByteError> {
+    w.bytes(v)
+}
+
+pub(crate) fn get_u8s(r: &mut ByteReader<'_>) -> SaveResult<Vec<u8>> {
+    Ok(r.bytes()?.to_vec())
+}
+
+/// A slice of flags, one byte each.
+pub(crate) fn put_bools(w: &mut ByteWriter, v: &[bool]) -> Result<(), ByteError> {
+    w.usize(v.len())?;
+    for &x in v {
+        w.bool(x);
+    }
+    Ok(())
+}
+
+pub(crate) fn get_bools(r: &mut ByteReader<'_>) -> SaveResult<Vec<bool>> {
+    let n = r.count(1)?;
+    (0..n).map(|_| Ok(r.bool()?)).collect()
+}
 
 // ---- primitives of the simulation ---------------------------------------------------------------
 
-fn put_fx(w: &mut ByteWriter, v: Fx) {
+pub(crate) fn put_fx(w: &mut ByteWriter, v: Fx) {
     w.i64(v.raw());
 }
 
-fn get_fx(r: &mut ByteReader<'_>) -> SaveResult<Fx> {
+pub(crate) fn get_fx(r: &mut ByteReader<'_>) -> SaveResult<Fx> {
     Ok(Fx::from_raw(r.i64()?))
 }
 
-fn put_vec2(w: &mut ByteWriter, v: Vec2) {
+pub(crate) fn put_vec2(w: &mut ByteWriter, v: Vec2) {
     put_fx(w, v.x);
     put_fx(w, v.y);
 }
 
-fn get_vec2(r: &mut ByteReader<'_>) -> SaveResult<Vec2> {
+pub(crate) fn get_vec2(r: &mut ByteReader<'_>) -> SaveResult<Vec2> {
     Ok(Vec2 {
         x: get_fx(r)?,
         y: get_fx(r)?,
     })
 }
 
-fn put_opt_vec2(w: &mut ByteWriter, v: Option<Vec2>) {
+pub(crate) fn put_opt_vec2(w: &mut ByteWriter, v: Option<Vec2>) {
     w.bool(v.is_some());
     if let Some(v) = v {
         put_vec2(w, v);
     }
 }
 
-fn get_opt_vec2(r: &mut ByteReader<'_>) -> SaveResult<Option<Vec2>> {
+pub(crate) fn get_opt_vec2(r: &mut ByteReader<'_>) -> SaveResult<Option<Vec2>> {
     Ok(if r.bool()? { Some(get_vec2(r)?) } else { None })
 }
 
-fn put_id(w: &mut ByteWriter, id: EntityId) {
+pub(crate) fn put_id(w: &mut ByteWriter, id: EntityId) {
     w.u32(id.index());
     w.u32(id.generation());
 }
 
-fn get_id(r: &mut ByteReader<'_>) -> SaveResult<EntityId> {
+pub(crate) fn get_id(r: &mut ByteReader<'_>) -> SaveResult<EntityId> {
     Ok(EntityId::new(r.u32()?, r.u32()?))
 }
 
-fn put_opt_id(w: &mut ByteWriter, id: Option<EntityId>) {
+pub(crate) fn put_opt_id(w: &mut ByteWriter, id: Option<EntityId>) {
     w.bool(id.is_some());
     if let Some(id) = id {
         put_id(w, id);
     }
 }
 
-fn get_opt_id(r: &mut ByteReader<'_>) -> SaveResult<Option<EntityId>> {
+pub(crate) fn get_opt_id(r: &mut ByteReader<'_>) -> SaveResult<Option<EntityId>> {
     Ok(if r.bool()? { Some(get_id(r)?) } else { None })
 }
 
@@ -635,20 +792,53 @@ fn get_crowd(r: &mut ByteReader<'_>) -> SaveResult<CrowdState> {
     })
 }
 
+/// A unit's formation memory, every field (the "worked out each tick" ones too, so that a
+/// restored world is equal by `PartialEq` and a resave byte-equal). Destructured without `..`.
+fn put_member(w: &mut ByteWriter, m: &Member) {
+    let Member {
+        serial,
+        off,
+        lag,
+        far,
+        mode,
+        slot,
+        step,
+        heading,
+    } = m;
+    w.u32(*serial);
+    put_vec2(w, *off);
+    w.u16(*lag);
+    put_fx(w, *far);
+    w.u8(*mode as u8);
+    put_vec2(w, *slot);
+    put_fx(w, *step);
+    w.u8(heading.raw());
+}
+
+fn get_member(r: &mut ByteReader<'_>) -> SaveResult<Member> {
+    Ok(Member {
+        serial: r.u32()?,
+        off: get_vec2(r)?,
+        lag: r.u16()?,
+        far: get_fx(r)?,
+        mode: match r.u8()? {
+            0 => MemberMode::None,
+            1 => MemberMode::Lead,
+            2 => MemberMode::Direct,
+            3 => MemberMode::Flow,
+            4 => MemberMode::Wait,
+            _ => return Err(SaveError::Corrupt("unknown formation member mode")),
+        },
+        slot: get_vec2(r)?,
+        step: get_fx(r)?,
+        heading: Facing::new(r.u8()?),
+    })
+}
+
 /// Refuses a world in which a column of a section this format does not save yet holds anything
 /// that a freshly spawned (or freed) entity does not.
 fn check_unsaved_columns(e: &Entities) -> SaveResult<()> {
-    let idle_route = Routes::default();
     for i in 0..e.len() {
-        if e.route[i] != idle_route[i] {
-            return Err(SaveError::Unsupported("pathing"));
-        }
-        if e.turn_carry[i] != 0 {
-            return Err(SaveError::Unsupported("turning"));
-        }
-        if e.form[i] != Member::NONE {
-            return Err(SaveError::Unsupported("formations"));
-        }
         if e.weapon[i] != REST {
             return Err(SaveError::Unsupported("weapons"));
         }
@@ -695,17 +885,15 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         order,
         queue,
         guard_walking,
-        // Gated (pathing, WP13.1b): idle on every slot of a world that saves.
+        // Saved in the pathing section (the length of the column is state of the service).
         route: _,
         crowd,
-        // Gated (turning, WP13.1b): zero.
-        turn_carry: _,
+        turn_carry,
         turret,
         // Derived like `prev_pos`.
         prev_turret: _,
         turret_target,
-        // Gated (formations, WP13.1b): `Member::NONE`.
-        form: _,
+        form,
         // Gated (weapons, WP13.1c): at rest.
         weapon: _,
         // Gated (targeting, WP13.1c): at rest.
@@ -747,6 +935,8 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         w.u8(turret[i].raw());
         put_opt_id(w, turret_target[i]);
         put_crowd(w, &crowd[i]);
+        w.u16(turn_carry[i]);
+        put_member(w, &form[i]);
     }
     Ok(())
 }
@@ -869,9 +1059,18 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         e.turret_target[i] = get_opt_id(r)?;
         e.crowd[i] = get_crowd(r)?;
         check_crowd(&e.crowd[i], &limits, &inside)?;
+        // Thousandths of a turn step: `turn_carrying` keeps the rest of a division by 1000.
+        e.turn_carry[i] = r.u16()?;
+        if e.turn_carry[i] >= TURN_CARRY_LIMIT {
+            return Err(SaveError::Corrupt("a turn carry of a whole step or more"));
+        }
+        e.form[i] = get_member(r)?;
     }
     Ok(())
 }
+
+/// The turn carry stays below one step, in thousandths (`turning::turn_carrying`).
+const TURN_CARRY_LIMIT: u16 = 1000;
 
 /// The bounds the crowd pass keeps its counters in (`crowd.rs`, `orders.rs`, `path.rs`): a
 /// counter outside them is no state the simulation reaches, and the next step could overflow it.
@@ -948,12 +1147,6 @@ fn check_crowd(c: &CrowdState, l: &CrowdLimits, inside: &impl Fn(Vec2) -> bool) 
 
 /// Refuses a world whose subsystem state outside the entity columns is not its tick-0 state.
 fn check_unsaved_sections(w: &World) -> SaveResult<()> {
-    if let Some(section) = w.pathing.unsaved_section(w.tick) {
-        return Err(SaveError::Unsupported(section));
-    }
-    if !w.formations.at_start() {
-        return Err(SaveError::Unsupported("formations"));
-    }
     if let Some(section) = w.arsenal.unsaved_section() {
         return Err(SaveError::Unsupported(section));
     }
@@ -1177,13 +1370,14 @@ impl World {
             // Rules.
             units: _,
             movement: _,
-            // Gated in `check_unsaved_sections` (the graphs are rules).
-            pathing: _,
+            // Saved in sections `P` and `F`; the graphs are derived (rebuilt from the structures)
+            // and the settings rules. Its fields are named in `Pathing::save`.
+            pathing,
             // Rules (settings and shapes) and scratch; the state is the entity column. Its fields
             // are named in `Crowd::has_state`.
             crowd: _,
-            // Gated.
-            formations: _,
+            // Saved in section `M`; the settings are rules. Fields named in `Formations::save`.
+            formations,
             // Rules (the table and what is derived from it) and the reports of the last tick;
             // projectiles gated. Its fields are named in `Arsenal::unsaved_section`.
             arsenal: _,
@@ -1238,6 +1432,9 @@ impl World {
         })?;
         w.section(SECTION_ENTITIES, |s| save_entities(s, entities))?;
         w.section(SECTION_QUEUE, |s| save_queue(s, queue))?;
+        w.section(SECTION_PATHING, |s| pathing.save(s, entities))?;
+        w.section(SECTION_FIELDS, |s| pathing.save_fields(s))?;
+        w.section(SECTION_FORMATIONS, |s| formations.save(s))?;
         Ok(w.finish())
     }
 
@@ -1277,7 +1474,6 @@ impl World {
         let mut world = fresh;
         world.tick = tick;
         world.history_base = tick;
-        world.pathing.restore_clock(tick);
 
         let mut s = r.section(SECTION_WORLD)?;
         world.spawn_serial = s.u64()?;
@@ -1295,6 +1491,23 @@ impl World {
 
         let mut s = r.section(SECTION_QUEUE)?;
         world.queue = restore_queue(&mut s, tick)?;
+        s.end()?;
+
+        let bounds = world
+            .pathing
+            .bounds(&world.entities, world.config.width, world.config.height);
+        let mut s = r.section(SECTION_PATHING)?;
+        world
+            .pathing
+            .restore(&mut s, &mut world.entities, &bounds)?;
+        s.end()?;
+
+        let mut s = r.section(SECTION_FIELDS)?;
+        world.pathing.restore_fields(&mut s, &bounds)?;
+        s.end()?;
+
+        let mut s = r.section(SECTION_FORMATIONS)?;
+        world.formations.restore(&mut s, &world.entities)?;
         s.end()?;
         r.end()?;
 
@@ -1322,6 +1535,14 @@ impl World {
         if world.occupancy.count() != occupied {
             return Err(SaveError::Corrupt("the occupied cells do not add up"));
         }
+        let World {
+            terrain,
+            movement,
+            occupancy,
+            pathing,
+            ..
+        } = &mut world;
+        pathing.rebuild_graphs(terrain, movement, occupancy);
         Ok(world)
     }
 }
