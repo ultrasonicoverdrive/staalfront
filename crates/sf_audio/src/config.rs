@@ -385,8 +385,8 @@ mod tests {
                 repeat_gap_ms: 1200
             }
         );
-        assert_eq!(c.music.fallback.calm, None);
-        assert_eq!(c.music.fallback.combat, None);
+        assert_eq!(c.music.fallback.calm.as_deref(), Some("music.calm"));
+        assert_eq!(c.music.fallback.combat.as_deref(), Some("music.combat"));
         let p = &c.positional;
         assert_eq!(p.max_cues_per_frame, 16);
         assert_eq!(p.max_summed_gain, 1.2);

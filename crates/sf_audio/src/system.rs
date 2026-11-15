@@ -1594,6 +1594,47 @@ mod tests {
         std::fs::remove_dir_all(d).ok();
     }
 
+    /// WP11.4b: the shipped `audio.ron` and the shipped bank, with no Red Alert files: the calm mood plays our own
+    /// `music.calm` and the combat mood `music.combat`, looped, in the Music category, and the first decode of
+    /// the real FLAC file on the calling thread is timed (printed).
+    #[test]
+    fn the_shipped_fallback_music_plays_per_mood_without_red_alert_files() {
+        let mut s = mock_system();
+        s.set_music_config(&shipped_music());
+        s.set_music_trace(true);
+        let t = Instant::now();
+        s.set_music_mood(Mood::Calm);
+        let calm_load = t.elapsed();
+        assert_eq!(s.current_music(), Some("music.calm"));
+        let t = Instant::now();
+        s.set_music_mood(Mood::Combat);
+        let combat_load = t.elapsed();
+        assert_eq!(s.current_music(), Some("music.combat"));
+        println!(
+            "WP11.4b: first start of music.calm {calm_load:?}, of music.combat {combat_load:?} (decode on the calling thread)"
+        );
+        assert_eq!(s.stats().failed, 0);
+        assert_eq!(
+            s.take_music_trace(),
+            vec![
+                MusicTrace {
+                    mood: Mood::Calm,
+                    track: "music.calm".into()
+                },
+                MusicTrace {
+                    mood: Mood::Combat,
+                    track: "music.combat".into()
+                },
+            ]
+        );
+        for name in ["music.calm", "music.combat"] {
+            let def = s.bank.get(name).expect("in the shipped bank");
+            assert_eq!(def.category, Category::Music, "{name}");
+            assert!(def.looped, "{name}");
+            assert_eq!(def.max_instances, 1, "{name}");
+        }
+    }
+
     #[test]
     fn red_alert_music_shuffles_the_archive_tracks_and_switches_on_the_mood() {
         let (d, install) = music_root("music_ra", "(sounds: {})", 3, false);
