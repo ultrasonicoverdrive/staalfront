@@ -44,15 +44,17 @@ pub struct Built {
     pub smoke: P,
     pub fire: P,
     /// `(hx, hz, y)` of the platform top: [`structure`] pads LOD0 with bolt rows along its edges
-    /// only where the far levels would otherwise be more than their share of it (WP11.6r: no
-    /// detail floor any more; the budget is a ceiling, not a target).
+    /// up to [`DETAIL_FLOOR`] triangles.
     pub pad: (i32, i32, i32),
 }
 
+/// A finished structure's LOD0 has at least this many triangles (docs/art-style.md section 6:
+/// 2,500-3,500); short recipes get bolt rows along their platform edges.
+pub const DETAIL_FLOOR: usize = 2650;
 /// Bolt rows stop before this many triangles.
 pub const DETAIL_CEIL: usize = 3400;
 
-/// Build a structure of `f` from `recipe`: keep the far levels' share of LOD0, fit the team share, put the
+/// Build a structure of `f` from `recipe`: pad the detail of LOD0, fit the team share, put the
 /// node tree together (`body` -> `turret` -> ..., the anchors under the body).
 pub fn structure(stem: &str, f: F, recipe: impl Fn(Lod) -> Built) -> Model {
     let pal = Palette::shipped();
@@ -67,7 +69,7 @@ pub fn structure(stem: &str, f: F, recipe: impl Fn(Lod) -> Built) -> Model {
         }
         vec![anchors(body, b.smoke, b.fire)]
     });
-    pad_model(&mut m, 0, DETAIL_CEIL, pad);
+    pad_model(&mut m, DETAIL_FLOOR, DETAIL_CEIL, pad);
     m
 }
 

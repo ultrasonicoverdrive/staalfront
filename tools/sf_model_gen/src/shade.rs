@@ -70,6 +70,8 @@ pub const VARIATION: f32 = 0.035;
 pub const CREASE_DEG: u32 = 40;
 /// `cos(CREASE_DEG)`, as a fixed decimal (no `cos` at run time).
 pub const CREASE_COS: f32 = 0.766_044;
+/// Two corner normals closer than this (about 1.4°) belong to one facet ([`corner_normals`]).
+const SAME_FACET_COS: f32 = 0.9997;
 
 type V = [f32; 3];
 
@@ -127,13 +129,18 @@ pub fn corner_normals(tris: &[Tri]) -> Vec<[V; 3]> {
                 return [flat[i]; 3];
             }
             t.v.map(|p| {
-                let mut sum = [0.0_f32; 3];
+                // Each facet once: the two triangles of one quad lie in (almost) one plane, and
+                // counting both would lean the normal towards the quad that is split at this
+                // corner.
+                let mut seen: Vec<V> = Vec::new();
                 for &j in &at[&p] {
-                    if dot(flat[i], flat[j]) >= CREASE_COS {
-                        sum = add(sum, flat[j]);
+                    if dot(flat[i], flat[j]) >= CREASE_COS
+                        && seen.iter().all(|s| dot(*s, flat[j]) < SAME_FACET_COS)
+                    {
+                        seen.push(flat[j]);
                     }
                 }
-                norm(sum)
+                norm(seen.iter().fold([0.0; 3], |a, n| add(a, *n)))
             })
         })
         .collect()
