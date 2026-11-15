@@ -470,3 +470,30 @@ fn the_profiles_flag_refuses_a_profile_that_is_not_shipped_and_is_shown_by_the_c
     );
     assert!(out.contains("tournament: m1_duel, 1 games"), "{out}");
 }
+
+/// m1_duel with the two players listed in descending id order (id 1 first): `--profiles A,B` still means A for the
+/// lower id (seat 0) and B for the higher, whatever the order of the file (WP9.4a, review sweep).
+#[test]
+fn the_profiles_flag_goes_by_player_id_and_not_by_the_order_of_the_file() {
+    let text = std::fs::read_to_string(duel_path()).unwrap();
+    let start = text.find("        (\n            id: 0,").unwrap();
+    let mid = text.find("        (\n            id: 1,").unwrap();
+    let end = text.rfind("    ],").unwrap();
+    let reversed = format!(
+        "{}{}{}{}",
+        &text[..start],
+        &text[mid..end],
+        &text[start..mid],
+        &text[end..]
+    );
+    assert!(reversed.find("id: 1,").unwrap() < reversed.find("id: 0,").unwrap());
+    let dir = TempDir::new("tournament_reversed");
+    std::fs::write(dir.join("rev.ron"), reversed).unwrap();
+    let names = ["easy".to_string(), "hard".to_string()];
+    let setup = load_setup_with(&assets(), &dir.join("rev.ron"), Some(&names)).unwrap();
+    assert_eq!(setup.profile_names(), names);
+    // The AIs come ascending by player: player 0 plays easy, player 1 hard.
+    let r = play_game(&setup, 1, 0, 200, STALEMATE_WINDOW).unwrap();
+    assert_eq!(played_profiles(&r), ["easy", "hard"]);
+    assert_eq!(r.ais.iter().map(|a| a.player).collect::<Vec<_>>(), [0, 1]);
+}

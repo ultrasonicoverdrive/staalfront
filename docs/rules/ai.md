@@ -1622,6 +1622,10 @@ Per seat (upper's wins of 144 as seat 0 / as seat 1): normal v easy 135 / 134, h
 
 **Mirror** (each profile against itself, 3 x 100 games, games decided of 300 and SW : NE wins): easy **170** (59 : 111; per seed 56, 56, 58), normal **290** (140 : 150; per seed 97, 96, 97; the same numbers as WP9.3c), hard **298** (110 : 188; per seed 100, 99, 99). Hard keeps its floor (>= normal's 290 - 15 = 275). Easy is report-only: 130 of 300 games are not decided inside 60,000 ticks.
 
+### Ablation (informational, not a tuning step, nothing ships from it)
+
+Hard with `harvesters_per_refinery` 2 instead of 3 (every other number as hard; a scratch profile outside `assets/ai`), against normal, the same ladder (3 seeds x 96, both seats, both sites): **SW 144 of 144 (100 %), NE 142 of 144 (98.6 %), mean 99.3 %**, normal 0 wins; per seat 143 / 143; per cell 72:0:0, 71:0:1, 72:0:0, 71:0:1; per seed SW 48:0 and NE 47:0 / 47:0 / 48:0. These win counts are identical to hard's with three harvesters; the median win tick is **19,836** against hard's 22,234. So the third harvester does not explain hard's margin over normal in these games (income is not the limit; the other rows of hard, two builds at once and the 9,000-tick clock, were not separated: one row measured).
+
 ### What the player notices
 
 * **easy**: a manager acts every 160 ticks (8 s) instead of every 40, so it answers a raid late and builds slowly; one harvester per refinery and one refinery (the list stops at the power plant), one scout, no second group and no staging (the strike walks straight at the target), the first attack not before tick 6,000 and at most every 18,000, leaves damage unrepaired below 40 %, defends with 1.0 times the visible enemy value. It still finishes a game against a passive opponent (13,256) and loses to normal in 93 % of the games.
@@ -1630,6 +1634,7 @@ Per seat (upper's wins of 144 as seat 0 / as seat 1): normal v easy 135 / 134, h
 ### Not done / gaps
 
 * The ladder pairs are separated by a very wide margin; whether easy is *fun* for a beginner (it takes normal a median 31,317 ticks, about 26 minutes at 20 ticks a second, to win) and hard *fair* is not measured; nobody has played them. `sf_game --ai` (9.4c) and the unfair level (9.4b) are not here.
+* Hard's mirror splits 110 SW : 188 NE, the reverse of normal's lean (140 : 150 is nearly even, and the older profiles leaned SW): not traced.
 * Why hard wins without a loss is not traced (more income and two builds at once are the likely causes, not separated: the memo's rows were not measured one by one).
 * The escalation of hard (250 / 8000) was measured to do nothing for the mean in WP9.3a-1; it is in hard because the memo has it and was not tested alone here.
 * Time split: see the progress entry.

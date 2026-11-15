@@ -402,14 +402,18 @@ mod tests {
                 hard.digest()
             );
         }
-        let m = Faction::Meridian;
-        assert_eq!(
-            level(include_str!("../../../assets/ai/easy.ron"), m).digest(),
-            0x4b32_4f6b_7e34_7a26
-        );
-        assert_eq!(
-            level(include_str!("../../../assets/ai/hard.ron"), m).digest(),
-            0xfce3_b027_f725_bb13
-        );
+        // The digests, for both factions (their lists are the same since WP9.3c, so the digests are equal).
+        for faction in [Faction::Meridian, Faction::Veyran] {
+            assert_eq!(
+                level(include_str!("../../../assets/ai/easy.ron"), faction).digest(),
+                0x4b32_4f6b_7e34_7a26,
+                "easy {faction:?}"
+            );
+            assert_eq!(
+                level(include_str!("../../../assets/ai/hard.ron"), faction).digest(),
+                0xfce3_b027_f725_bb13,
+                "hard {faction:?}"
+            );
+        }
     }
 }
