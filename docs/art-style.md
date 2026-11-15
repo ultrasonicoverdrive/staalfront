@@ -196,3 +196,56 @@ only the Veyran heavy gun team, which had no good figure, is generated.
 Style F ("realistic, bright") is the later target once the engine gets textures and shadows (an
 engine WP, not WP11.6). The kit keeps a material slot per surface type for that: a texture step can
 add UVs and generated maps per slot without rewriting the recipes.
+
+## 11. Structures and their states (WP11.6c)
+
+Every structure role of both factions, the ore silo, the mission objects and the rubble heaps are
+generated (`tools/sf_model_gen/src/buildings.rs`, `objects.rs`, `stages.rs`; `set.rs` lists them).
+
+- **One recipe per role, both factions.** The parts carry the shape language (`slab`, `hall`,
+  `tank`, `stack`, `door`, `dish`, `turret`, `pad`, `bags`): Meridian rounded (big chamfers, round
+  tanks, domes, a rounded lintel), Veyran angular (a dark skirt, upright walls to 55 % and sloped
+  walls above, octagonal tanks and stacks, wedge gun heads, a sloped door hood, the crimson accent
+  on stacks and slits). The three finished structures of WP11.6a keep their own recipes.
+- **Team colour by fitting** (`stages::fit_team`): a recipe gives the fixed team parts (two roof
+  bands, flanges, a pad marking) plus an ordered list of candidate stripes (platform-edge rings,
+  lane stripes, crane-arm stripes); candidates are added one by one until the top-down share
+  reaches `TEAM_AIM` (21.6 % on a 400-pixel raster, so `sf_asset_check`'s 512-pixel raster reads
+  20-30 %) and the level has at least 12 team triangles; the rest are left out. Every candidate is
+  a stripe of at most 350 mm in LOD0 and LOD1.
+- **Detail budget** (`stages::pad_model`): a finished structure has 2,500-3,500 triangles in LOD0;
+  a recipe that falls short, or whose reduced levels would exceed 38 % / 14 % of LOD0, gets rows
+  of slab-coloured anchor bolts along its platform edges until it does.
+- **States from the finished model** (`stages::derive`), for every structure the same way:
+  - *foundation*: a poured slab of the finished footprint, formwork boards, footing beams in a grid
+    (team candidates: survey markings), rebar stubs and pallets (LOD0), survey stakes; at most 1.5 m;
+  - *scaffolding*: the finished model cut at 60 % of its roof level (`stages::roof_level`: the
+    height under which half the top-down area of the body lies, so a crane or an antenna does not
+    set it; triangles across the cut are clipped, `stages::clip`), a light deck over the open
+    walls, poles, ledgers, planks with team toe boards and a crane on one corner; the cut walls are
+    bare (no panel lines, bolts, glass or steel fittings yet);
+  - *damaged*: a hole blown in the roof at the one of four fixed places that takes the least team
+    colour with it and then the most geometry, soot round it (team at the hole's rim burnt to the
+    second paint), the small detail gone within 8 hole radii, debris on the free platform; the
+    hole grows (1, 1.5, 2, 3 times, `HOLE_GROWTH`) until the stage is inside its ceiling;
+  - *heavily damaged*: broken off along a slanted plane at half the roof level (slope at most
+    250 mm/m), soot and char along the break, a heap of chunks inside the shell with fallen band
+    pieces (team candidates) on top, debris, no small detail; a turret sinks onto the break and the
+    smoke and fire anchors move down to it (a heap broken off under 30 % has lost its turret);
+  - **no state is richer than its finished structure** (WP11.6c review): a state takes nothing of
+    the finished model's anchor-bolt filler and has no detail floor; its LOD0 is at most a share of
+    the finished LOD0 (`STAGE_CEIL_PERMILLE`: 30 / 70 / 90 / 70 %), its LOD1 and LOD2 are built on
+    the finished far level, and anchor bolts are added only where a reduced level would otherwise
+    exceed its share, never past the ceiling (tests `buildings_use_their_detail_budget`,
+    `no_state_has_more_triangles_than_its_finished_model`); it stays inside the finished
+    footprint; its team stripes are their top face only, up to 600 mm wide at LOD2 and never
+    wider than a fifteenth of their length (`FAR_STRIPE_MM`).
+- **Mission objects** are neutral (no player colour; the third slot is `paint3`, as the neutral
+  units of WP11.6b) and keep the state names of set v4: `_damaged`, `_heavily_damaged`, `_rubble`,
+  `_burnt_out`, `_destroyed` (heavy stages broken off lower), `_off`, `_disabled`, `_no_uplink`
+  (lamps dark, a dish gone). The automated gun and the unmanned artillery are `network_`: they
+  carry the player colour, palette entry `network` (graphite, amber lamp).
+- **Rubble heaps** (`neutral_rubble_<w>x<h>`, `wrecks.ron`): a dusty spread of chunks, bent plates
+  and rebar inside the set v4 heap's size, decor budget.
+- **Far levels keep the height**: antennas, crane masts, stakes and posts stay in every level;
+  an outer octagon stays eight-sided at LOD2 where it sets the bounds (the automated gun).

@@ -48,7 +48,11 @@ fn flatten(node: &Node, nodes: &mut Vec<Flat>, meshes: &mut Vec<Vec<Tri>>) -> us
         nodes[at].mesh = Some(meshes.len());
         meshes.push(node.mesh.tris.clone());
     }
-    for c in &node.children {
+    for c in node
+        .children
+        .iter()
+        .filter(|c| !c.name.starts_with(crate::stages::GEN_PREFIX))
+    {
         let i = flatten(c, nodes, meshes);
         nodes[at].children.push(i);
     }

@@ -354,14 +354,10 @@ impl Loader<'_> {
 }
 
 /// The file of a structure state (a build stage or a damage stage) as it lies under `assets`: `file` if it
-/// exists; for a set v5 model, whose generator has made only the finished look so far (WP11.6a; the states
-/// are WP11.6c), the set v4 file of the same name; else none. Remove the fallback in WP11.6c.
+/// exists, else none. (WP11.6a took a set v5 structure's states from set v4 of the same name; WP11.6c
+/// made every set v5 structure its own state files and removed that fallback.)
 pub(crate) fn state_file(assets: &Path, file: &str) -> Option<String> {
-    if assets.join(file).is_file() {
-        return Some(file.to_owned());
-    }
-    let v4 = format!("set_v4/{}", file.strip_prefix("set_v5/")?);
-    assets.join(&v4).is_file().then_some(v4)
+    assets.join(file).is_file().then(|| file.to_owned())
 }
 
 impl Roster {
@@ -1053,7 +1049,7 @@ mod tests {
         // transport truck the repair truck's (the testpack ones they had).
         let (defs, roster) = built_with(|text| {
             text.replace(
-                "set_v4/meridian_decoy_emplacement.glb",
+                "set_v5/meridian_decoy_emplacement.glb",
                 "testpack_v1/models/verdedigingstoren.glb",
             )
             .replace(
@@ -1396,7 +1392,8 @@ mod tests {
             .filter(|d| !d.models.is_empty())
             .map(|d| d.id.as_str())
             .collect();
-        assert_eq!(dual.len(), 18, "{dual:?}");
+        // WP11.6c: 19, the ore silo got a model per faction.
+        assert_eq!(dual.len(), 19, "{dual:?}");
         for id in ["rifleman", "light_tank", "power_plant", "harvester"] {
             assert!(dual.contains(&id), "{id}");
         }
@@ -1466,7 +1463,10 @@ mod tests {
             assert_eq!(style.shape(look.shape).icon, want, "{}", def.id);
             seen += 1;
         }
-        assert_eq!(seen, 36, "eighteen roles, two factions");
+        assert_eq!(
+            seen, 38,
+            "nineteen roles (WP11.6c: the ore silo), two factions"
+        );
     }
 
     /// With models off, or a faction's file missing, its units get the generic
@@ -1547,8 +1547,9 @@ mod tests {
     /// different shapes (WP6.3).
     #[test]
     fn every_buildable_structure_has_stage_models_from_the_art_set() {
-        /// Buildable structures that have no art yet and are drawn as boxes.
-        const NO_ART_YET: [&str; 1] = ["ore_silo"];
+        /// Buildable structures that have no art yet and are drawn as boxes (WP11.6c gave the ore
+        /// silo its models, so none is left).
+        const NO_ART_YET: [&str; 0] = [];
         let (defs, roster) = built(true);
         let mut checked = 0;
         for def in defs.units() {
@@ -1591,8 +1592,8 @@ mod tests {
             }
         }
         // Eight structures with a model per faction (the shared tree) and the decoy and the bunker with
-        // one generic model each: 8 * 2 + 2.
-        assert_eq!(checked, 18);
+        // one generic model each: 8 * 2 + 2; WP11.6c added the ore silo (a model per faction): 20.
+        assert_eq!(checked, 20);
         assert!(roster.warnings.is_empty(), "{:?}", roster.warnings);
     }
 
@@ -1656,6 +1657,26 @@ mod tests {
         assert!((scaffolding[1] - 2.75).abs() < 0.01, "{scaffolding:?}");
     }
 
+    /// WP11.6c removed the set v4 fallback of WP11.6a: a set v5 state file that does not exist is no state
+    /// file, even when set v4 has one of the same name (restoring the fallback fails this).
+    #[test]
+    fn a_missing_set_v5_state_file_is_none_even_with_a_set_v4_one() {
+        let dir = std::env::temp_dir().join(format!("sf_roster_state_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("set_v4")).unwrap();
+        std::fs::create_dir_all(dir.join("set_v5")).unwrap();
+        std::fs::write(dir.join("set_v5/meridian_barracks.glb"), b"x").unwrap();
+        std::fs::write(dir.join("set_v4/meridian_barracks_damaged.glb"), b"x").unwrap();
+        assert_eq!(
+            super::state_file(&dir, "set_v5/meridian_barracks_damaged.glb"),
+            None
+        );
+        assert_eq!(
+            super::state_file(&dir, "set_v5/meridian_barracks.glb").as_deref(),
+            Some("set_v5/meridian_barracks.glb")
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// The damaged and heavily damaged models of the art set are the roster's damaged looks: every role and
     /// look whose finished file has a `_damaged` / `_heavily_damaged` sibling on disk has that look, nothing
     /// else has one, and the list is pinned (WP6.8).
@@ -1711,10 +1732,12 @@ mod tests {
             .collect();
         from_disk.retain(|e| !generic_of_factioned.contains(e));
         assert_eq!(sorted, from_disk);
-        // And the pinned numbers: nine structures with a model per faction (damaged and heavy), the decoy
-        // and the bunker with one generic model (damaged and heavy), and four mission objects (the
-        // archive both stages, the relay transmitter, the fuel depot and the bridge segment damaged only).
-        assert_eq!(got.len(), 9 * 2 * 2 + 2 * 2 + 2 + 1 + 1 + 1);
+        // And the pinned numbers: ten structures with a model per faction (damaged and heavy; WP11.6c
+        // added the ore silo, 45 -> 49), the decoy and the bunker with one generic model (damaged and
+        // heavy), and four mission objects (the archive both stages, the relay transmitter, the fuel
+        // depot and the bridge segment damaged only).
+        assert_eq!(got.len(), 10 * 2 * 2 + 2 * 2 + 2 + 1 + 1 + 1);
+        assert!(has_silo(&got));
         let has = |id: &str, f: Option<Faction>, s: DamageStage| {
             got.iter().any(|g| g.0 == id && g.1 == f && g.2 == s)
         };
@@ -1735,6 +1758,16 @@ mod tests {
             "no such file"
         );
         assert!(roster.warnings.is_empty(), "{:?}", roster.warnings);
+    }
+
+    /// The ore silo of WP11.6c has its damaged looks for both factions.
+    fn has_silo(got: &[(String, Option<Faction>, DamageStage)]) -> bool {
+        [Faction::Meridian, Faction::Veyran].iter().all(|f| {
+            DamageStage::DAMAGED.iter().all(|s| {
+                got.iter()
+                    .any(|g| g.0 == "ore_silo" && g.1 == Some(*f) && g.2 == *s)
+            })
+        })
     }
 
     /// The three looks of a structure are three different shapes, and a faction's damaged look is its own,

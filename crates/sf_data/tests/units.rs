@@ -799,9 +799,21 @@ fn every_role_is_wired_to_its_art_set() {
     ] {
         let def = get(id);
         let set = |faction: &str| {
+            // WP11.6c: every structure role is set v5.
+            let structure = [
+                "construction_center",
+                "power_plant",
+                "refinery",
+                "barracks",
+                "vehicle_factory",
+                "radar",
+                "defence_tower",
+                "advanced_defences",
+                "shipyard",
+            ];
             if infantry.contains(&id) {
                 "set_v3"
-            } else if v5_pairs.contains(&(faction, id)) {
+            } else if v5_pairs.contains(&(faction, id)) || structure.contains(&id) {
                 "set_v5"
             } else {
                 "set_v4"
@@ -826,8 +838,8 @@ fn every_role_is_wired_to_its_art_set() {
 
     // A role of one faction, or a neutral one: its file is the model.
     for (id, file) in [
-        ("decoy_emplacement", "set_v4/meridian_decoy_emplacement"),
-        ("fortified_bunker", "set_v4/veyran_fortified_bunker"),
+        ("decoy_emplacement", "set_v5/meridian_decoy_emplacement"),
+        ("fortified_bunker", "set_v5/veyran_fortified_bunker"),
         ("sniper", "set_v3/meridian_sniper"),
         ("medic", "set_v3/veyran_medic"),
         ("combat_engineer", "set_v3/veyran_combat_engineer"),
@@ -844,15 +856,15 @@ fn every_role_is_wired_to_its_art_set() {
         ("ferry", "set_v5/neutral_ferry"),
         ("civilian", "set_v3/neutral_civilian"),
         ("technician", "set_v3/neutral_technician"),
-        ("relay_transmitter", "set_v4/neutral_relay_transmitter"),
-        ("fuel_depot", "set_v4/neutral_fuel_depot"),
-        ("archive_building", "set_v4/neutral_archive_building"),
-        ("evidence_crate", "set_v4/neutral_evidence_crate"),
-        ("bridge_segment", "set_v4/neutral_bridge_segment"),
-        ("rail_spur", "set_v4/neutral_rail_spur"),
-        ("automated_gun", "set_v4/network_automated_gun"),
-        ("generator", "set_v4/neutral_generator"),
-        ("unmanned_artillery", "set_v4/network_unmanned_artillery"),
+        ("relay_transmitter", "set_v5/neutral_relay_transmitter"),
+        ("fuel_depot", "set_v5/neutral_fuel_depot"),
+        ("archive_building", "set_v5/neutral_archive_building"),
+        ("evidence_crate", "set_v5/neutral_evidence_crate"),
+        ("bridge_segment", "set_v5/neutral_bridge_segment"),
+        ("rail_spur", "set_v5/neutral_rail_spur"),
+        ("automated_gun", "set_v5/network_automated_gun"),
+        ("generator", "set_v5/neutral_generator"),
+        ("unmanned_artillery", "set_v5/network_unmanned_artillery"),
         ("ore_field", "set_v4/neutral_ore_field"),
     ] {
         let def = get(id);
@@ -888,9 +900,15 @@ fn every_role_is_wired_to_its_art_set() {
     }
     // The v3 infantry: four roles of two factions and six single files; the v5 files: 13
     // faction files of the pairs and 7 single files (transport truck, light transport,
-    // amphibious transport, gunboat, supply truck, ferry, heavy gun team).
+    // amphibious transport, gunboat, supply truck, ferry, heavy gun team); WP11.6c: the other 15
+    // structure looks of both factions, the ore silo (2), the decoy, the bunker and nine mission
+    // objects (11).
     assert_eq!(counted[0], 8 + 6, "the set v3 infantry files");
-    assert_eq!(counted[2], v5_pairs.len() + 7, "the set v5 files");
+    assert_eq!(
+        counted[2],
+        v5_pairs.len() + 7 + 15 + 2 + 11,
+        "the set v5 files"
+    );
 }
 
 #[test]

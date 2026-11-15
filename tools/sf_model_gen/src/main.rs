@@ -24,8 +24,7 @@ fn main() -> ExitCode {
         }
     }
     if table {
-        for build in sf_model_gen::models::MODELS {
-            let m = build();
+        for m in sf_model_gen::set::all() {
             let t = m.triangles();
             println!("| `{}.glb` | {} | {} | {} |", m.stem, t[0], t[1], t[2]);
         }
