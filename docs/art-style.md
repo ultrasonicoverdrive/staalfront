@@ -1,8 +1,9 @@
 # Art style: set v5 (WP11.6a)
 
 The rules every generated model and cutscene part follows from WP11.6a on, so that WP11.6b-d and
-the Phase 12 restyle look like one game. Style **G, "semi-realistic, bright"** (decision Tijmen
-14-11-2026). The reference was a small concept sheet generated with Canva at the project owner's
+the Phase 12 restyle look like one game. Style **G, "semi-realistic, muted"** (decision Tijmen
+14-11-2026; made realistic in colour by WP11.6p, decision Tijmen 15-11-2026: "the images must be much
+more realistic in colour"; the bright palette of WP11.6a is gone). The reference was a small concept sheet generated with Canva at the project owner's
 request; it is a style reference only and is not in the repo. A later, more realistic target
 (style F) needs textures and shadows in the engine: that is a separate engine WP, see "Later" below.
 
@@ -16,21 +17,26 @@ sRGB. One slot per surface type, the same six material slots in every model and 
 later texture step can key on them: `paint` (main hull paint), `paint2` (second paint), `team`,
 `metal` (gun steel, fittings), `rubber` (tracks, tyres, running gear), `accent`.
 
-| Slot | Meridian | Veyran |
-|---|---|---|
-| `paint` | bright sand yellow `#dcb450` (220, 180, 80); highlight `#e8c868` | cool steel blue-grey `#7894b2` (120, 148, 178); highlight `#96b0cc` |
-| `paint2` | lively olive `#7a7a40` (122, 122, 64); shade `#50503c` | blue gunmetal `#4a4e68` (74, 78, 104); shade `#626680` |
-| `metal` | dark olive `#282814` | `#282828` |
-| `rubber` | `#141414` | `#141414` |
-| `accent` | glass, weathered blue `#46606e` | fixed crimson `#a02030` (160, 32, 48) |
-| `team` | the player colour (the file stores a neutral `#ebebeb`; the engine replaces it) | same |
+| Slot | Meridian | Veyran | Neutral | Network |
+|---|---|---|---|---|
+| `paint` | warm sand `#9a8773` (154, 135, 115) | cool grey-blue `#5e6a76` (94, 106, 118) | `#8c8574` (140, 133, 116) | `#5a5f66` (90, 95, 102) |
+| paint light (highlight, `paint3` of neutral) | `#aca088` (172, 160, 136) | `#74808c` (116, 128, 140) | `#a09a88` (160, 154, 136) | `#6e737a` (110, 115, 122) |
+| `paint2` | olive `#5e5838` (94, 88, 56) | dark slate `#3c424c` (60, 66, 76) | `#5b564d` (91, 86, 77) | `#393d44` (57, 61, 68) |
+| paint2 shade | `#45422e` (69, 66, 46) | `#4e535a` (78, 83, 90) | `#46423b` (70, 66, 59) | `#464a54` (70, 74, 84) |
+| `metal` | `#2b2924` (43, 41, 36) | `#2a2c30` (42, 44, 48) | `#302f2b` (48, 47, 43) | `#242428` (36, 36, 40) |
+| `rubber` | `#1a1a18` (26, 26, 24) | same | same | same |
+| `accent` | glass `#3e4a52` (62, 74, 82) | dull crimson `#7a1e28` (122, 30, 40) | `#7a4a30` (122, 74, 48) | amber `#8a6420` (138, 100, 32) |
+| `team` | the player colour (the file stores a neutral `#ebebeb`; the engine replaces it, at full strength) | same | none (third slot is `paint3`) | same as Veyran |
 
-Refinement round 2 (14-11-2026): Veyran's two steel tones are about 25 % lighter and a little
-cooler (was `#64788c` / `#3c3c50`), so it reads on dark terrain next to Meridian; the crimson accent
-stays darker than any player colour.
+WP11.6p (15-11-2026): the realistic palette. The first sample of the Canva restyle of the M1 shot
+(reference only, not in the repo) gave a grey-green Veyran (`#6b6f71`); it was set slightly bluer
+(`#5e6a76`) so the factions stay apart at distance: Meridian reads warm tan and olive, Veyran cool
+grey-blue, at the in-game zoom of 0.12 too (`docs/screenshots/wp11.6p/`). Previous values (style G
+bright): Meridian paint `#dcb450`, Veyran paint `#7894b2`. No channel of any paint or accent is
+above 175, and the Veyran accent stays darker than any player colour (no channel above 160).
 
 A test pins the shipped values (`tools/sf_model_gen/tests/models.rs`,
-`the_shipped_palette_has_the_style_g_values`).
+`the_shipped_palette_has_the_realistic_values`).
 
 ## 2. Shape language
 
@@ -87,18 +93,25 @@ the material colour:
 - **ambient occlusion:** 17 rays per corner over the face's hemisphere, 1.4 m reach; the blocked
   share times 2 (`AO_GAIN`, tuning round: twice as visible), up to 60 % darker (so half the rays
   blocked is already the full darkening: creases, under overhangs, between hull and tracks);
-- **grime:** up to 40 % darker at the ground, fading out at 1.3 m (tuning round: about twice the
-  first 22 %);
+- **grime:** up to 30 % darker at the ground, fading out at 1.3 m (WP11.6p; 40 % in the bright
+  style, which was about twice the first 22 %);
+- **dust** (WP11.6p, `DUST`, `DUST_HEIGHT_MM`, `DUST_TINT`): on the lowest 0.6 m (hulls, tracks and
+  the lower walls of structures) up to 70 % of the way towards the colour times (0.78, 0.66, 0.50):
+  darker and warmer, and a black material stays black. A triangle of the team material gets neither
+  grime nor dust (`shade::bake_team`; the loader ignores its vertex colour, so this only makes the
+  bytes say what the engine does). Fixed numbers, no randomness
+  (`dust_darkens_and_warms_the_foot_and_a_team_triangle_has_none`);
 - **downward faces** up to 30 % darker;
 - **facet variation** of +-3.5 % per flat triangle from a fixed hash (no randomness), so large flat
   areas are not one sheet; a triangle of a turned surface gets none (WP11.6r: on a round body it
   only showed the facets again; `no_smooth_part_carries_facet_variation`);
-- the **tone** of a detail (panel line 56 %, recess 72 %, track shoe 82 %);
+- the **tone** of a detail (panel line 50 %, was 56 % before WP11.6p; recess 72 %, track shoe 82 %);
 - **top-edge highlight:** a face that slopes upward (a bevel or chamfer on top, normal `y` between
-  0.2 and 0.97) is 16 % brighter;
+  0.2 and 0.97) is 5 % brighter (a few per cent since WP11.6p, was 16 %);
 - **edge wear:** a bevel strip (no axis-aligned normal, narrower than 320 mm) whose corner sees open
-  sky (no AO ray blocked) is, on about two thirds of its triangles (fixed hash), moved 35 % towards a
-  grey a quarter above its luminance: lighter and less saturated, as paint rubbed thin. Big slanted
+  sky (no AO ray blocked) is, on about two thirds of its triangles (fixed hash), moved 25 % (was 35 %) towards a
+  grey 12 % above its luminance (was 25 %): lighter and less saturated, as paint rubbed thin, not
+  bright metal. Big slanted
   facets (a dome segment) are not edges and get none, and neither does any triangle of a turned
   surface (`kit::lathe`, marked `Tri::lathed`; refinement round 2: the narrow segments of the
   Meridian dome showed as light streaks; `a_lathed_dome_gets_no_edge_wear`).
@@ -131,7 +144,7 @@ also scans every LOD0 for sharp block corners (three axis faces of at least 240 
 extruded profiles that still have them are a pinned list (the fortified bunker's buttresses, a few on
 the Veyran vehicle factory and the amphibious transport).
 
-Keep colours clean and bright: the AO darkens creases, not whole surfaces; judge it in the engine
+Keep colours muted and clean: the AO darkens creases, not whole surfaces; judge it in the engine
 render (contact sheet), not only in numbers.
 
 ## 6. Levels of detail

@@ -8,10 +8,9 @@
 //!   other geometry within [`AO_REACH_MM`], times [`AO_GAIN`], darkens the corner by up to
 //!   [`AO_STRENGTH`] (creases, the underside of an overhang, the gap between hull and tracks);
 //! - **grime**: up to [`GRIME`] darker towards the ground, fading out at [`GRIME_HEIGHT_MM`];
-//! - **dust** (WP11.6p): on the lowest [`DUST_HEIGHT_MM`] (hulls, tracks, lower walls) up to
-//!   [`DUST`] of the way towards the dusty brown of [`DUST_TINT`] (a per-channel multiplier, so it
-//!   is darker and warmer and a black material stays black); a team triangle gets neither grime
-//!   nor dust ([`bake_team`]);
+//! - **dust** (WP11.6p): up to [`DUST`] of the way towards the fixed warm earth colour
+//!   [`DUST_SRGB`] at the ground, fading out at [`GRIME_HEIGHT_MM`] like the grime (hulls, tracks,
+//!   lower walls); a team triangle gets neither grime nor dust ([`bake_team`]);
 //! - **downward faces** up to [`DOWN`] darker;
 //! - **facet variation**: each flat triangle ± [`VARIATION`] from a fixed hash of its index, so
 //!   large flat areas do not look like one sheet; a smooth (lathed) triangle gets none, because on a
@@ -42,6 +41,7 @@
 //! The result is rounded to 1/255, so tiny float differences cannot reach the file. Only basic
 //! IEEE operations are used (no `sin`, `pow`), so every platform computes the same bytes.
 
+use crate::glb::linear;
 use crate::kit::Tri;
 
 /// Rays per corner: the normal itself and two rings of eight around it.
@@ -53,16 +53,14 @@ pub const AO_STRENGTH: f32 = 0.6;
 /// The blocked share is multiplied by this before [`AO_STRENGTH`] (tuning round: twice as visible),
 /// so half the rays blocked already gives the full darkening.
 pub const AO_GAIN: f32 = 2.0;
-/// Grime at the ground, fading to none at [`GRIME_HEIGHT_MM`] (WP11.6p: 0.40 before, the dust
-/// below takes over part of the work on the realistic palette).
-pub const GRIME: f32 = 0.30;
+/// The darkening towards the ground, fading to none at [`GRIME_HEIGHT_MM`] (WP11.6p: 0.40 before;
+/// on the muted palette the dust below does the rest).
+pub const GRIME: f32 = 0.20;
 pub const GRIME_HEIGHT_MM: f32 = 1300.0;
-/// Dust at the ground, fading to none at [`DUST_HEIGHT_MM`] (WP11.6p): the share of the way from the
-/// colour to the colour times [`DUST_TINT`].
-pub const DUST: f32 = 0.70;
-pub const DUST_HEIGHT_MM: f32 = 600.0;
-/// The per-channel multiplier of full dust: darker, and warmer because blue loses most.
-pub const DUST_TINT: [f32; 3] = [0.78, 0.66, 0.50];
+/// The share of the way towards [`DUST_SRGB`] at the ground (WP11.6p), fading with the grime.
+pub const DUST: f32 = 0.28;
+/// The fixed warm earth colour of the dust (sRGB).
+pub const DUST_SRGB: [u8; 3] = [118, 104, 82];
 /// A plain face's shade as a share of the material factor: the head room for highlights.
 pub const NOMINAL: f32 = 0.85;
 /// The extra brightness of an upward-sloping bevel or chamfer (the top-edge highlight; WP11.6p:
@@ -70,12 +68,15 @@ pub const NOMINAL: f32 = 0.85;
 pub const HIGHLIGHT: f32 = 0.05;
 pub const HIGHLIGHT_MIN_UP: f32 = 0.2;
 pub const HIGHLIGHT_MAX_UP: f32 = 0.97;
-/// How far worn edge paint moves towards a light grey (lighter, desaturated; WP11.6p: 0.35 before).
-pub const WEAR: f32 = 0.25;
-/// The grey worn paint moves towards is the luminance times this plus [`WEAR_GREY_LIFT`] (WP11.6p:
-/// 1.25 and 0.02 before: worn paint, not bright metal).
+/// How far worn edge paint moves towards a light grey (lighter, a little desaturated; WP11.6p: 0.35 before).
+pub const WEAR: f32 = 0.20;
+/// The target of worn paint is a grey of the luminance times this plus [`WEAR_GREY_LIFT`] (WP11.6p:
+/// 1.25 and 0.02 before: worn paint, not bright metal) ...
 pub const WEAR_GREY_GAIN: f32 = 1.12;
 pub const WEAR_GREY_LIFT: f32 = 0.01;
+/// ... of which this share is the material's own colour lightened by the same gain instead of grey,
+/// so a worn edge stays tinted by its paint (`bake` has no `paint_light`, only the material colour).
+pub const WEAR_TINT: f32 = 0.5;
 /// Only a face narrower than this (its height over its longest edge) is an edge that wears.
 pub const WEAR_WIDTH_MM: f32 = 320.0;
 /// A face pointing straight down loses this share.
@@ -329,6 +330,7 @@ pub fn bake_team(tris: &[Tri], lin: &[[f32; 3]], team: Option<u8>) -> Vec<[f32; 
         let base = lin[usize::from(t.mat.0)];
         let fac = factor(base);
         let is_team = team == Some(t.mat.0);
+        let dust = DUST_SRGB.map(linear);
         for (k, corner) in t.v.map(v).into_iter().enumerate() {
             let cn = normals[i][k];
             // Start a little inside the face and off it, so the ray does not hit its own edges.
@@ -340,11 +342,8 @@ pub fn bake_team(tris: &[Tri], lin: &[[f32; 3]], team: Option<u8>) -> Vec<[f32; 
             let share = (AO_GAIN * blocked as f32 / AO_RAYS as f32).min(1.0);
             let ao = 1.0 - AO_STRENGTH * share;
             let height = (corner[1] / GRIME_HEIGHT_MM).clamp(0.0, 1.0);
-            let grime = if is_team {
-                1.0
-            } else {
-                1.0 - GRIME * (1.0 - height)
-            };
+            let low = if is_team { 0.0 } else { 1.0 - height };
+            let grime = 1.0 - GRIME * low;
             let down = 1.0 - DOWN * (-cn[1]).max(0.0);
             let s = ao * grime * down * variation * tone * highlight(cn[1]);
             let mut c = base.map(|b| b * s);
@@ -352,11 +351,15 @@ pub fn bake_team(tris: &[Tri], lin: &[[f32; 3]], team: Option<u8>) -> Vec<[f32; 
                 // Lighter and less saturated: towards a grey a quarter above the luminance.
                 let lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
                 let grey = lum * WEAR_GREY_GAIN + WEAR_GREY_LIFT;
-                c = c.map(|x| x + WEAR * (grey - x));
+                c = [0, 1, 2].map(|k| {
+                    let target = (1.0 - WEAR_TINT) * grey + WEAR_TINT * c[k] * WEAR_GREY_GAIN;
+                    c[k] + WEAR * (target - c[k])
+                });
             }
-            if !is_team {
-                let dust = DUST * (1.0 - (corner[1] / DUST_HEIGHT_MM).clamp(0.0, 1.0));
-                c = [0, 1, 2].map(|k| c[k] * (1.0 - dust * (1.0 - DUST_TINT[k])));
+            if low > 0.0 {
+                // Towards the dust colour, lit like the face (the occlusion and the downward term).
+                let t = DUST * low;
+                c = [0, 1, 2].map(|k| c[k] * (1.0 - t) + dust[k] * ao * down * t);
             }
             out.push([0, 1, 2].map(|k| {
                 let q = if fac[k] > 0.0 { c[k] / fac[k] } else { 1.0 };

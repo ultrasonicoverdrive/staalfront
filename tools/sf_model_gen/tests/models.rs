@@ -851,64 +851,111 @@ fn no_state_has_more_triangles_than_its_finished_model() {
     }
 }
 
+/// sRGB (0..255) to CIE L*a*b* (D65), in f64: a test helper, nothing of the sim.
+fn lab(c: [u8; 3]) -> [f64; 3] {
+    let lin = |v: u8| {
+        let s = f64::from(v) / 255.0;
+        if s <= 0.04045 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (lin(c[0]), lin(c[1]), lin(c[2]));
+    let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+    let f = |t: f64| {
+        if t > 0.008856 {
+            t.cbrt()
+        } else {
+            7.787 * t + 16.0 / 116.0
+        }
+    };
+    let (fx, fy, fz) = (f(x), f(y), f(z));
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+fn delta_e(a: [u8; 3], b: [u8; 3]) -> f64 {
+    let (a, b) = (lab(a), lab(b));
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+fn saturation(c: [u8; 3]) -> f64 {
+    let hi = f64::from(*c.iter().max().unwrap());
+    let lo = f64::from(*c.iter().min().unwrap());
+    (hi - lo) / hi
+}
+
 #[test]
-fn the_shipped_palette_has_the_style_g_values() {
+fn the_shipped_palette_has_the_realistic_values() {
     let p = Palette::shipped();
+    let f = |paint, paint_light, paint2, paint2_shade, metal, rubber, accent| FactionColours {
+        paint,
+        paint_light,
+        paint2,
+        paint2_shade,
+        metal,
+        rubber,
+        accent,
+    };
+    // WP11.6p: albedo values (the brief's on-screen colours lifted a step: a top face renders at
+    // about 0.95 of its albedo and a side at 0.5-0.8; decision Tijmen 15-11-2026 and the art check).
     assert_eq!(
         p.factions["meridian"],
-        FactionColours {
-            paint: [220, 180, 80],
-            paint_light: [232, 200, 104],
-            paint2: [122, 122, 64],
-            paint2_shade: [80, 80, 60],
-            metal: [40, 40, 20],
-            rubber: [20, 20, 20],
-            accent: [70, 96, 110],
-        }
+        f(
+            [178, 160, 136],
+            [200, 186, 164],
+            [94, 88, 56],
+            [69, 66, 46],
+            [60, 57, 50],
+            [46, 44, 40],
+            [62, 74, 82]
+        )
     );
     assert_eq!(
         p.factions["veyran"],
-        FactionColours {
-            paint: [120, 148, 178],
-            paint_light: [150, 176, 204],
-            paint2: [74, 78, 104],
-            paint2_shade: [98, 102, 128],
-            metal: [40, 40, 40],
-            rubber: [20, 20, 20],
-            accent: [160, 32, 48],
-        }
+        f(
+            [108, 122, 138],
+            [136, 150, 164],
+            [60, 66, 76],
+            [78, 83, 90],
+            [58, 61, 67],
+            [46, 44, 40],
+            [122, 30, 40]
+        )
     );
     // Neutral models (WP11.6b): no faction accent, the third slot is a light paint.
     assert_eq!(
         p.factions["neutral"],
-        FactionColours {
-            paint: [190, 176, 140],
-            paint_light: [206, 196, 164],
-            paint2: [96, 108, 92],
-            paint2_shade: [70, 80, 70],
-            metal: [44, 44, 40],
-            rubber: [20, 20, 20],
-            accent: [150, 70, 40],
-        }
+        f(
+            [136, 142, 128],
+            [158, 164, 148],
+            [86, 90, 76],
+            [66, 70, 60],
+            [66, 65, 60],
+            [46, 44, 40],
+            [122, 74, 48]
+        )
     );
     let neutral: Vec<(String, [u8; 3])> = p
         .materials("neutral")
         .into_iter()
         .map(|m| (m.name, m.srgb))
         .collect();
-    assert_eq!(neutral[2], ("paint3".to_owned(), [206, 196, 164]));
+    assert_eq!(neutral[2], ("paint3".to_owned(), [158, 164, 148]));
     // WP11.6c: the Network defences (graphite with an amber lamp, the player colour).
     assert_eq!(
         p.factions["network"],
-        FactionColours {
-            paint: [92, 100, 112],
-            paint_light: [118, 126, 138],
-            paint2: [54, 58, 66],
-            paint2_shade: [70, 74, 84],
-            metal: [36, 36, 40],
-            rubber: [20, 20, 20],
-            accent: [150, 100, 20],
-        }
+        f(
+            [74, 76, 80],
+            [92, 95, 100],
+            [48, 50, 55],
+            [60, 63, 70],
+            [50, 50, 55],
+            [46, 44, 40],
+            [138, 100, 32]
+        )
     );
     assert_eq!(p.team_base, [235, 235, 235]);
     // The material slots, in their fixed order (a later texture step keys on them).
@@ -921,6 +968,73 @@ fn the_shipped_palette_has_the_style_g_values() {
     // its brightest channel is at most 160.
     assert!(p.factions["veyran"].accent.iter().all(|&c| c <= 160));
     assert!(Palette::parse("(factions: {}, team_base: (1, 2, 3))").is_err());
+}
+
+/// WP11.6p: the invariants of the palette, computed from the shipped file (not literals), so a
+/// retune that breaks the readability of the factions fails here.
+#[test]
+fn the_realistic_palette_keeps_the_factions_apart_and_muted() {
+    let p = Palette::shipped();
+    let (m, v, n, g) = (
+        &p.factions["meridian"],
+        &p.factions["veyran"],
+        &p.factions["neutral"],
+        &p.factions["network"],
+    );
+    let de = delta_e(m.paint, v.paint);
+    let dl = lab(m.paint)[0] - lab(v.paint)[0];
+    println!("meridian/veyran dE {de:.1} dL {dl:.1}");
+    assert!(de >= 20.0, "Meridian and Veyran paint dE {de}");
+    assert!(dl >= 10.0, "Meridian paint is lighter than Veyran by {dl}");
+    let near = delta_e(n.paint, m.paint);
+    let near2 = delta_e(g.paint, v.paint);
+    println!("neutral/meridian dE {near:.1}, network/veyran dE {near2:.1}");
+    // Readability as it renders: the mean non-team hull colour of the two light tanks in the M1
+    // shot at zoom 0.12 (docs/screenshots/wp11.6p/, `after_m1_zoom_0.12`) is about 0.70-0.73 of the
+    // palette paint (the lit top and the darker sides) and measured dE 24.1, dL 15.2 there; the
+    // same scaling on the palette keeps the factions apart by at least 20 and 10 steps.
+    let lit = |c: [u8; 3]| c.map(|x| (f64::from(x) * 0.70).round() as u8);
+    let (rde, rdl) = (
+        delta_e(lit(m.paint), lit(v.paint)),
+        lab(lit(m.paint))[0] - lab(lit(v.paint))[0],
+    );
+    println!("as rendered (x0.70): dE {rde:.1}, dL {rdl:.1}");
+    assert!(
+        rde >= 20.0 && rdl >= 10.0,
+        "factions as rendered: dE {rde}, dL {rdl}"
+    );
+    assert!(near >= 12.0, "neutral vs Meridian dE {near}");
+    assert!(near2 >= 12.0, "Network vs Veyran dE {near2}");
+    for (name, f) in &p.factions {
+        for c in [f.paint, f.paint_light] {
+            assert!(saturation(c) <= 0.30, "{name} paint {c:?} is too saturated");
+        }
+        assert!(
+            f.rubber.iter().max().unwrap() >= &40,
+            "{name} rubber would crush to black"
+        );
+    }
+    // Every player colour stays clear of every paint (the stripes must read on any hull).
+    let units = include_str!("../../../assets/config/units.ron");
+    let colours: Vec<[u8; 3]> = units
+        .split("srgb: (")
+        .skip(1)
+        .take(4)
+        .map(|t| {
+            let t = t.split(')').next().unwrap();
+            let v: Vec<u8> = t.split(',').map(|x| x.trim().parse().unwrap()).collect();
+            [v[0], v[1], v[2]]
+        })
+        .collect();
+    assert_eq!(colours.len(), 4, "the four player colours of units.ron");
+    for (name, f) in &p.factions {
+        for paint in [f.paint, f.paint_light, f.paint2, f.paint2_shade] {
+            for pc in &colours {
+                let d = delta_e(paint, *pc);
+                assert!(d >= 30.0, "{name} {paint:?} vs player {pc:?}: dE {d:.1}");
+            }
+        }
+    }
 }
 
 #[test]

@@ -3,7 +3,7 @@
 //! Every check runs on [`shade::bake`] itself, the function the GLB writer uses.
 
 use sf_model_gen::kit::{Mat, Mesh, Tri, bevel_box, cuboid, lathe};
-use sf_model_gen::shade::{self, NOMINAL, bake, factor, unit_normal};
+use sf_model_gen::shade::{self, NOMINAL, bake, bake_team, factor, unit_normal};
 
 /// A saturated colour (linear), so desaturation shows.
 const COLOUR: [f32; 3] = [0.7, 0.45, 0.08];
@@ -88,7 +88,82 @@ fn the_top_edge_bevels_are_brighter_than_the_flat_top() {
             .map(|(_, c)| lum(*c)),
     );
     println!("flat top {flat:.4}, top bevels {bevel:.4}");
-    assert!(bevel > flat * 1.08, "highlight: {bevel} vs {flat}");
+    // WP11.6p: a few per cent, not the 16 % of the bright style: visible, and pinned from above.
+    assert!(bevel > flat * 1.02, "highlight: {bevel} vs {flat}");
+    assert!(
+        bevel < flat * 1.08,
+        "highlight too strong: {bevel} vs {flat}"
+    );
+}
+
+/// WP11.6p: the constants of the muted bake, as literals (a changed value fails here).
+#[test]
+fn the_realistic_bake_constants_are_pinned() {
+    assert_eq!(shade::HIGHLIGHT, 0.05);
+    const { assert!(shade::HIGHLIGHT <= 0.08, "a few per cent at most") };
+    assert_eq!(shade::WEAR, 0.20);
+    assert_eq!(shade::WEAR_GREY_GAIN, 1.12);
+    assert_eq!(shade::WEAR_GREY_LIFT, 0.01);
+    assert_eq!(shade::WEAR_TINT, 0.5);
+    assert_eq!(shade::GRIME, 0.20);
+    assert_eq!(shade::GRIME_HEIGHT_MM, 1300.0);
+    assert_eq!(shade::DUST, 0.28);
+    assert_eq!(shade::DUST_SRGB, [118, 104, 82]);
+    assert_eq!(sf_model_gen::kit::SEAM, 500);
+    assert_eq!(sf_model_gen::kit::RECESS, 720);
+}
+
+/// The mean final colour of the top faces of a plate at height `y` (slot `mat`).
+fn plate_top(y: i32, mat: u8, team: Option<u8>) -> [f32; 3] {
+    let m = cuboid([-1000, y, -1000], [1000, y + 50, 1000], Mat(mat));
+    let lin = [COLOUR, COLOUR];
+    let baked = bake_team(&m.tris, &lin, team);
+    let f = factor(COLOUR);
+    let tops: Vec<[f32; 3]> = m
+        .tris
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| unit_normal(t)[1] > 0.99)
+        .flat_map(|(i, _)| (0..3).map(move |c| i * 3 + c))
+        .map(|k| [baked[k][0] * f[0], baked[k][1] * f[1], baked[k][2] * f[2]])
+        .collect();
+    [0, 1, 2].map(|k| mean(tops.iter().map(|c| c[k])))
+}
+
+fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+/// WP11.6p: the dust. Low faces are darker and closer to the dust colour than high faces of the
+/// same material; a team triangle carries neither.
+#[test]
+fn dust_darkens_and_pulls_the_foot_towards_the_dust_colour_and_a_team_triangle_has_none() {
+    let dust = sf_model_gen::shade::DUST_SRGB.map(sf_model_gen::glb::linear);
+    let (foot, mid, high) = (
+        plate_top(0, 0, None),
+        plate_top(700, 0, None),
+        plate_top(3000, 0, None),
+    );
+    println!("foot {foot:?} mid {mid:?} high {high:?}");
+    assert!(
+        lum(foot) < lum(mid) && lum(mid) < lum(high),
+        "darker towards the ground"
+    );
+    // The saturated COLOUR is far from the earth colour; the foot is nearer to it than the top.
+    let (df, dm, dh) = (dist(foot, dust), dist(mid, dust), dist(high, dust));
+    println!("distance to the dust colour: foot {df:.3} mid {dm:.3} high {dh:.3}");
+    assert!(
+        df < dm && dm < dh,
+        "closer to the dust colour at the ground"
+    );
+    // Team: the same plate in the team slot is the same colour at the ground and high up.
+    assert_eq!(
+        plate_top(0, 1, Some(1)),
+        plate_top(3000, 1, Some(1)),
+        "team: no grime, no dust"
+    );
+    // ... and the same two plates in a normal slot differ (the check above has teeth).
+    assert_ne!(plate_top(0, 1, None), plate_top(3000, 1, None));
 }
 
 #[test]
@@ -109,7 +184,7 @@ fn exposed_bevels_show_lighter_desaturated_wear() {
         .map(|(_, c)| *c)
         .collect();
     let flat_sat = mean(flat.iter().map(|c| sat(*c)));
-    let worn = bevel.iter().filter(|c| sat(**c) < flat_sat * 0.85).count();
+    let worn = bevel.iter().filter(|c| sat(**c) < flat_sat * 0.93).count();
     println!(
         "flat saturation {flat_sat:.3}, worn corners {worn} of {}",
         bevel.len()
@@ -188,7 +263,7 @@ fn a_lathed_dome_gets_no_edge_wear() {
     let c = colours(&dome);
     let sats: Vec<f32> = c.iter().map(|(_, c)| sat(*c)).collect();
     let top = sats.iter().copied().fold(0.0, f32::max);
-    let worn = sats.iter().filter(|s| **s < top * 0.85).count();
+    let worn = sats.iter().filter(|s| **s < top * 0.93).count();
     assert_eq!(worn, 0, "{worn} of {} dome corners are worn", sats.len());
     // The same mesh without the mark does wear: the rule is what keeps the dome clean.
     let mut plain = dome.clone();
@@ -197,7 +272,7 @@ fn a_lathed_dome_gets_no_edge_wear() {
     }
     let sats: Vec<f32> = colours(&plain).iter().map(|(_, c)| sat(*c)).collect();
     assert!(
-        sats.iter().any(|s| *s < top * 0.85),
+        sats.iter().any(|s| *s < top * 0.93),
         "the control mesh shows no wear"
     );
 }
@@ -286,4 +361,46 @@ fn no_smooth_part_carries_facet_variation() {
         t.lathed = false;
     }
     assert!(spread(&flat) > 1.01, "flat drum {}", spread(&flat));
+}
+
+/// WP11.6p, the black-crush floor: no vertex of any shipped model, times its material factor, is
+/// darker (luminance, linear) than [`CRUSH_FLOOR`] outside the team slot. Measured on the finished
+/// set (the darkest baked corner is printed); AO, grime, the downward term and the seam tone
+/// multiply, and on the near-black slots (rubber, metal) the floor is what keeps a track readable.
+/// 0.003, not 0.004: the heavily damaged power plant has a charred metal triangle at 0.0033 (the
+/// stage char tone, on purpose); the darkest corner is printed on every run.
+const CRUSH_FLOOR: f32 = 0.003;
+
+#[test]
+fn no_baked_vertex_crushes_to_black() {
+    let mut darkest = (f32::MAX, String::new());
+    for m in sf_model_gen::set::all() {
+        let lin: Vec<[f32; 3]> = m
+            .materials
+            .iter()
+            .map(|x| x.srgb.map(sf_model_gen::glb::linear))
+            .collect();
+        let team = m
+            .materials
+            .iter()
+            .position(|x| x.name == sf_model_gen::kit::TEAM)
+            .map(|i| i as u8);
+        let world = m.lods[0].world_tris();
+        let baked = bake_team(&world, &lin, team);
+        for (i, t) in world.iter().enumerate() {
+            if team == Some(t.mat.0) {
+                continue;
+            }
+            let f = factor(lin[usize::from(t.mat.0)]);
+            for c in 0..3 {
+                let b = baked[i * 3 + c];
+                let l = lum([b[0] * f[0], b[1] * f[1], b[2] * f[2]]);
+                if l < darkest.0 {
+                    darkest = (l, format!("{} tri {i} material {}", m.stem, t.mat.0));
+                }
+            }
+        }
+    }
+    println!("darkest baked corner: {:.5} ({})", darkest.0, darkest.1);
+    assert!(darkest.0 >= CRUSH_FLOOR, "crushed to black: {darkest:?}");
 }
