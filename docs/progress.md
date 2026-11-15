@@ -3499,13 +3499,22 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   (release, 4 cores, same machine, other agents building).
 * **Palette.** `neutral` and the `paint3` third slot as on branch WP11.6b (identical text), plus
   `network` (graphite, amber lamp) for the automated gun and the unmanned artillery.
-* **Checked.** `sf_asset_check assets/set_v5`: 143 pass, no warnings. Contact sheets in
-  `docs/screenshots/wp11.6c/`.
+* **Checked.** `sf_asset_check --deny-warnings assets/set_v5`: 157 pass (with the units of #142).
+  Contact sheets in `docs/screenshots/wp11.6c/`.
+* **Review sweep (15-11-2026).** No state is richer than its finished structure: states no longer
+  inherit the finished model's anchor-bolt filler and have no detail floor; LOD0 at most 30 / 70 /
+  90 / 70 % of the finished LOD0 (`STAGE_CEIL_PERMILLE`), LOD1/LOD2 built on the finished far
+  level, scaffolding walls bare, damage takes the small detail, team stripes top-face only.
+  `assets/set_v5` 55.3 MB -> 34 MB. New tests: `no_state_has_more_triangles_than_its_finished_model`,
+  a stronger `the_states_read_as_their_stage` (crane, roof under 90 % of the finished roof, anchors
+  down, soot, debris, cut walls), more constants pinned, and
+  `a_missing_set_v5_state_file_is_none_even_with_a_set_v4_one` (roster). The ore silo's size limit
+  is 7.60 m like the other two-cell structures.
 * **Gaps.** The heavily damaged stages read mostly as a heap (a grid of chunks in the cut shell);
   the scaffolding deck hides the inside of the cut walls; the bolt rows that pad small structures
   are a filler, not designed detail; the mission objects' special states (`_off`, `_disabled`,
   `_no_uplink`, `_burnt_out`, `_destroyed`, `_rubble`) are made but no engine rule shows them yet;
-  the ferry (a vessel) is WP11.6b's; 51 MB of GLB in the repo (non-indexed vertices with RGB
+  the ferry (a vessel) is WP11.6b's; 34 MB of GLB in `assets/set_v5` (non-indexed vertices with RGB
   vertex colour; the writer was left alone so the WP11.6a pins hold).
 
 ### WP11.6a notes: the model generator and the style proof (14-11-2026)

@@ -222,17 +222,24 @@ generated (`tools/sf_model_gen/src/buildings.rs`, `objects.rs`, `stages.rs`; `se
   - *scaffolding*: the finished model cut at 60 % of its roof level (`stages::roof_level`: the
     height under which half the top-down area of the body lies, so a crane or an antenna does not
     set it; triangles across the cut are clipped, `stages::clip`), a light deck over the open
-    walls, poles, ledgers, planks with team toe boards and a crane on one corner;
+    walls, poles, ledgers, planks with team toe boards and a crane on one corner; the cut walls are
+    bare (no panel lines, bolts, glass or steel fittings yet);
   - *damaged*: a hole blown in the roof at the one of four fixed places that takes the least team
-    colour with it, soot round it (team at the hole's rim burnt to the second paint), debris on
-    the free platform;
+    colour with it and then the most geometry, soot round it (team at the hole's rim burnt to the
+    second paint), the small detail gone within 8 hole radii, debris on the free platform; the
+    hole grows (1, 1.5, 2, 3 times, `HOLE_GROWTH`) until the stage is inside its ceiling;
   - *heavily damaged*: broken off along a slanted plane at half the roof level (slope at most
     250 mm/m), soot and char along the break, a heap of chunks inside the shell with fallen band
-    pieces (team candidates) on top, debris; a turret sinks onto the break and the smoke and fire
-    anchors move down to it;
-  - each state keeps a share of its finished model's LOD0 (`STAGE_FLOOR_PERMILLE`: 30 / 70 / 85 /
-    70 %) and stays inside the finished footprint; a stage's team stripes are 600 mm wide at LOD2
-    only (`FAR_STRIPE_MM`, the far view).
+    pieces (team candidates) on top, debris, no small detail; a turret sinks onto the break and the
+    smoke and fire anchors move down to it (a heap broken off under 30 % has lost its turret);
+  - **no state is richer than its finished structure** (WP11.6c review): a state takes nothing of
+    the finished model's anchor-bolt filler and has no detail floor; its LOD0 is at most a share of
+    the finished LOD0 (`STAGE_CEIL_PERMILLE`: 30 / 70 / 90 / 70 %), its LOD1 and LOD2 are built on
+    the finished far level, and anchor bolts are added only where a reduced level would otherwise
+    exceed its share, never past the ceiling (tests `buildings_use_their_detail_budget`,
+    `no_state_has_more_triangles_than_its_finished_model`); it stays inside the finished
+    footprint; its team stripes are their top face only, up to 600 mm wide at LOD2 and never
+    wider than a fifteenth of their length (`FAR_STRIPE_MM`).
 - **Mission objects** are neutral (no player colour; the third slot is `paint3`, as the neutral
   units of WP11.6b) and keep the state names of set v4: `_damaged`, `_heavily_damaged`, `_rubble`,
   `_burnt_out`, `_destroyed` (heavy stages broken off lower), `_off`, `_disabled`, `_no_uplink`
