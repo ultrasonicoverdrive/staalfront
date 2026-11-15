@@ -994,10 +994,9 @@ fn hole_at(parts: &Parts, slab: i32, seed: u32, k: u32) -> P {
         .filter(|t| faces_up(t))
         .map(centroid)
         .filter(|c| (c[0] - x).abs() < 1200 && (c[2] - z).abs() < 1200 && c[1] <= roof)
-        .map(|c| c[1])
-        .max()
-        .unwrap_or(roof - 1000);
-    [x, y, z]
+        .max_by_key(|c| c[1]);
+    // The hole is centred on that face (so it always takes something); without one, on the roof.
+    y.unwrap_or([x, roof - 1000, z])
 }
 
 /// Team candidates on the platform of every stage: narrow stripes (260 mm) in three rings along
@@ -1138,7 +1137,15 @@ fn damaged(
     };
     let c = (1..=4)
         .map(|k| hole_at(&parts, slab, seed, k))
-        .min_by_key(|c| team_near(*c))
+        .min_by_key(|c| {
+            // A place where the hole takes nothing is no hole at all: last choice.
+            let r2 = i64::from(r) * i64::from(r);
+            let takes = parts.body.tris.iter().any(|t| {
+                let d = sub(centroid(t), *c);
+                d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= r2
+            });
+            (!takes, team_near(*c))
+        })
         .expect("four places");
     let mut m = parts.body.clone();
     hole(&mut m, c, r);

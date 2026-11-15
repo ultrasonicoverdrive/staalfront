@@ -492,9 +492,11 @@ fn the_states_read_as_their_stage() {
         assert!(height(get("_heavily_damaged")) < h, "{} heavy", m.stem);
         let lod0 = |x: &Model| x.lods[0].world_tris();
         // The damaged state keeps most of the finished model but not all of it (the hole).
+        // By corners only: soot changes the tone and burns team paint, the hole removes geometry.
+        let finished: std::collections::BTreeSet<_> = lod0(m).iter().map(|t| t.v).collect();
         let kept = lod0(get("_damaged"))
             .iter()
-            .filter(|t| lod0(m).contains(t))
+            .filter(|t| finished.contains(&t.v))
             .count();
         assert!(kept < lod0(m).len(), "{}: no hole", m.stem);
         assert!(kept * 10 > lod0(m).len() * 7, "{}: too much gone", m.stem);

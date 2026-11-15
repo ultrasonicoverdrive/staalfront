@@ -17,8 +17,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_advanced_defences.glb", 457052, 0x0c0dc29c9e944e34),
     (
         "meridian_advanced_defences_damaged.glb",
-        498696,
-        0xaf5e52b011b4dcf6,
+        497208,
+        0x5a766127a9defa9b,
     ),
     (
         "meridian_advanced_defences_foundation.glb",
@@ -27,8 +27,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_advanced_defences_heavily_damaged.glb",
-        544464,
-        0xcba10818956d078a,
+        544576,
+        0x3d2ef08476593194,
     ),
     (
         "meridian_advanced_defences_scaffolding.glb",
@@ -36,7 +36,7 @@ const PINNED: [(&str, usize, u64); 143] = [
         0x56d2bd33d53cd0a2,
     ),
     ("meridian_barracks.glb", 400680, 0x40158c4754768874),
-    ("meridian_barracks_damaged.glb", 439692, 0xe55bc450b116c022),
+    ("meridian_barracks_damaged.glb", 414164, 0x991f3a90554e21cb),
     (
         "meridian_barracks_foundation.glb",
         191208,
@@ -59,8 +59,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_construction_center_damaged.glb",
-        575744,
-        0xd0c9dcb9c6fd42a6,
+        580648,
+        0x001fc2246e24580c,
     ),
     (
         "meridian_construction_center_foundation.glb",
@@ -69,8 +69,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_construction_center_heavily_damaged.glb",
-        482352,
-        0xbdda354b8bd286c3,
+        483376,
+        0x014afd928d1d20c7,
     ),
     (
         "meridian_construction_center_scaffolding.glb",
@@ -80,8 +80,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_decoy_emplacement.glb", 435896, 0x8f0d07d415a043ee),
     (
         "meridian_decoy_emplacement_damaged.glb",
-        435352,
-        0x97af77fbdb976b72,
+        431704,
+        0x52ef01a33804e99c,
     ),
     (
         "meridian_decoy_emplacement_foundation.glb",
@@ -90,8 +90,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_decoy_emplacement_heavily_damaged.glb",
-        529172,
-        0xbb095e7cb5885d9c,
+        518572,
+        0x7d33536089a61ea9,
     ),
     (
         "meridian_decoy_emplacement_scaffolding.glb",
@@ -101,8 +101,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_defence_tower.glb", 369488, 0xb6c78b3844246548),
     (
         "meridian_defence_tower_damaged.glb",
-        367572,
-        0x445183d4a94249dc,
+        368376,
+        0x3826e1088c286a45,
     ),
     (
         "meridian_defence_tower_foundation.glb",
@@ -111,8 +111,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_defence_tower_heavily_damaged.glb",
-        452804,
-        0x354ed9b7ef26aea1,
+        453032,
+        0xc63e3ac6d779ec81,
     ),
     (
         "meridian_defence_tower_scaffolding.glb",
@@ -122,7 +122,7 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_harvester.glb", 251960, 0xfdc6d76c5edada0d),
     ("meridian_light_tank.glb", 242188, 0xa78c91f749af33da),
     ("meridian_ore_silo.glb", 380744, 0xe5b00b983cb5c144),
-    ("meridian_ore_silo_damaged.glb", 498268, 0x54eb1001e1f700d2),
+    ("meridian_ore_silo_damaged.glb", 490976, 0x7a0cbe8eecabcc7b),
     (
         "meridian_ore_silo_foundation.glb",
         180896,
@@ -130,8 +130,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_ore_silo_heavily_damaged.glb",
-        535352,
-        0x1ee7a04659c9f922,
+        533640,
+        0xd845e90cc31b2dd6,
     ),
     (
         "meridian_ore_silo_scaffolding.glb",
@@ -141,8 +141,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_power_plant.glb", 400008, 0x4446ef96fb135c58),
     (
         "meridian_power_plant_damaged.glb",
-        438236,
-        0x76bd970effdd197f,
+        439372,
+        0x7200ed290a8fa9a5,
     ),
     (
         "meridian_power_plant_foundation.glb",
@@ -160,16 +160,16 @@ const PINNED: [(&str, usize, u64); 143] = [
         0xa871a356d7799d8b,
     ),
     ("meridian_radar.glb", 376052, 0xbd6463999840423e),
-    ("meridian_radar_damaged.glb", 412452, 0x066c77b2c9b3edde),
+    ("meridian_radar_damaged.glb", 415300, 0x2074a34f49bf8e49),
     ("meridian_radar_foundation.glb", 180884, 0xd0a412bf74560b93),
     (
         "meridian_radar_heavily_damaged.glb",
-        432696,
-        0x5073fd0f8c19bd7d,
+        431444,
+        0xcc4e9a983c9e1a0a,
     ),
     ("meridian_radar_scaffolding.glb", 439480, 0x278a9c38e2ef60e8),
     ("meridian_refinery.glb", 522540, 0x77a1dc82be4b49ec),
-    ("meridian_refinery_damaged.glb", 567260, 0x3e17cfe627ac5c1a),
+    ("meridian_refinery_damaged.glb", 561216, 0x18fd8796741bb444),
     (
         "meridian_refinery_foundation.glb",
         221928,
@@ -177,8 +177,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "meridian_refinery_heavily_damaged.glb",
-        505896,
-        0x6838e51528d5bc71,
+        509656,
+        0x781a921216031832,
     ),
     (
         "meridian_refinery_scaffolding.glb",
@@ -186,7 +186,7 @@ const PINNED: [(&str, usize, u64); 143] = [
         0x55702227e9bda1f6,
     ),
     ("meridian_shipyard.glb", 478568, 0xd66cbabc1a0347db),
-    ("meridian_shipyard_damaged.glb", 517584, 0xfea34273f732ffbd),
+    ("meridian_shipyard_damaged.glb", 516568, 0x91102bc2201a3880),
     (
         "meridian_shipyard_foundation.glb",
         253828,
@@ -205,8 +205,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("meridian_vehicle_factory.glb", 410696, 0xb0c77f7186429420),
     (
         "meridian_vehicle_factory_damaged.glb",
-        470372,
-        0x0e1ed70d3bb2f931,
+        470256,
+        0xc6d3774c73e368f1,
     ),
     (
         "meridian_vehicle_factory_foundation.glb",
@@ -242,14 +242,14 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "network_unmanned_artillery_rubble.glb",
-        382168,
-        0x7e1d88502121a635,
+        382280,
+        0x9d4577a6ce7cd918,
     ),
     ("neutral_archive_building.glb", 275476, 0xb8be02c0f8602a58),
     (
         "neutral_archive_building_damaged.glb",
-        376768,
-        0x454ab7d8d28e3118,
+        363548,
+        0x7edb4181edd9ec88,
     ),
     (
         "neutral_archive_building_heavily_damaged.glb",
@@ -259,41 +259,41 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("neutral_bridge_segment.glb", 148280, 0x54ddf03d83f7b952),
     (
         "neutral_bridge_segment_damaged.glb",
-        148304,
-        0x7d98294829bdeae6,
+        146368,
+        0x7e7ad4bfb6a6846f,
     ),
     (
         "neutral_bridge_segment_destroyed.glb",
-        125180,
-        0x05ae3c5888140114,
+        126316,
+        0xef7ae96197e1ea09,
     ),
     ("neutral_evidence_crate.glb", 32088, 0x2b4502f209c5868b),
     ("neutral_fuel_depot.glb", 248452, 0x21e728be44db6684),
     (
         "neutral_fuel_depot_burnt_out.glb",
-        231508,
-        0xb59236a1432d6912,
+        228772,
+        0x34bee2849c8c0d91,
     ),
-    ("neutral_fuel_depot_damaged.glb", 291232, 0xf8f0692e2d02bc23),
+    ("neutral_fuel_depot_damaged.glb", 292256, 0x2a542904344f2781),
     ("neutral_generator.glb", 154904, 0xe29ff62acdcaaf95),
     ("neutral_generator_off.glb", 153640, 0x261ecfdcf4f01c6a),
-    ("neutral_generator_rubble.glb", 140936, 0xa58813b637876bac),
+    ("neutral_generator_rubble.glb", 140820, 0x2acaa6c0d7b139ed),
     ("neutral_rail_spur.glb", 145356, 0x732a769f53d7bd1c),
     (
         "neutral_rail_spur_destroyed.glb",
-        116596,
-        0x05e61107d8ca5b33,
+        116260,
+        0x3463a753a27a61f9,
     ),
     ("neutral_relay_transmitter.glb", 286012, 0x6b0be1bdab50e282),
     (
         "neutral_relay_transmitter_damaged.glb",
-        284668,
-        0x152499e24041c660,
+        284896,
+        0xbe8290de04fe64ec,
     ),
     (
         "neutral_relay_transmitter_rubble.glb",
-        186812,
-        0x19faed29e47e7eff,
+        187844,
+        0xf37761488ff967ee,
     ),
     ("neutral_rubble_1x1.glb", 41312, 0xccec2f6aec4a955c),
     ("neutral_rubble_2x2.glb", 145484, 0x8dc71454f45772e3),
@@ -304,8 +304,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("veyran_advanced_defences.glb", 411700, 0xe38c652a55a83052),
     (
         "veyran_advanced_defences_damaged.glb",
-        451740,
-        0xf7a9d3bf968baa66,
+        449344,
+        0xd438c52a3ef3dec6,
     ),
     (
         "veyran_advanced_defences_foundation.glb",
@@ -314,8 +314,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "veyran_advanced_defences_heavily_damaged.glb",
-        521360,
-        0x38d0712c1c91ae73,
+        521472,
+        0xf21ba327ee538b6f,
     ),
     (
         "veyran_advanced_defences_scaffolding.glb",
@@ -323,7 +323,7 @@ const PINNED: [(&str, usize, u64); 143] = [
         0x63ff7bb477082d7f,
     ),
     ("veyran_barracks.glb", 399536, 0xc27b3381af6f0336),
-    ("veyran_barracks_damaged.glb", 439928, 0xbaba82def4cc03e4),
+    ("veyran_barracks_damaged.glb", 430352, 0x06499dfe54597d57),
     ("veyran_barracks_foundation.glb", 191204, 0xbd301143e19eb6f5),
     (
         "veyran_barracks_heavily_damaged.glb",
@@ -338,8 +338,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("veyran_construction_center.glb", 473936, 0xbf8b5f7880446186),
     (
         "veyran_construction_center_damaged.glb",
-        546716,
-        0xa1e3a2c6b4b8ca93,
+        540552,
+        0xeef8bf79bdb87aa0,
     ),
     (
         "veyran_construction_center_foundation.glb",
@@ -359,8 +359,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("veyran_defence_tower.glb", 343516, 0xe2b3fb24edd0e4d5),
     (
         "veyran_defence_tower_damaged.glb",
-        343428,
-        0xf990209b76a9e5bd,
+        340352,
+        0x2d2c7ae7489f3803,
     ),
     (
         "veyran_defence_tower_foundation.glb",
@@ -369,8 +369,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     (
         "veyran_defence_tower_heavily_damaged.glb",
-        306144,
-        0x574434f5077fa2ce,
+        305688,
+        0xc19f0fa1544933db,
     ),
     (
         "veyran_defence_tower_scaffolding.glb",
@@ -380,8 +380,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("veyran_fortified_bunker.glb", 361584, 0x12c917903a222eb2),
     (
         "veyran_fortified_bunker_damaged.glb",
-        400372,
-        0x35e9327ed5b3d4e9,
+        399692,
+        0x6766b1f58a6381de,
     ),
     (
         "veyran_fortified_bunker_foundation.glb",
@@ -400,12 +400,12 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
     ("veyran_light_tank.glb", 223532, 0x520461c2447f5b49),
     ("veyran_ore_silo.glb", 376304, 0x92d839a170709e73),
-    ("veyran_ore_silo_damaged.glb", 509292, 0x23431694cef8d424),
+    ("veyran_ore_silo_damaged.glb", 508272, 0xa0d4bd76d4e03b46),
     ("veyran_ore_silo_foundation.glb", 180892, 0xcd5655a6b37cb62d),
     (
         "veyran_ore_silo_heavily_damaged.glb",
-        553372,
-        0x1bb575379690bb3d,
+        550404,
+        0xd3ee6c18d5b64159,
     ),
     (
         "veyran_ore_silo_scaffolding.glb",
@@ -413,7 +413,7 @@ const PINNED: [(&str, usize, u64); 143] = [
         0x0158241ee8b46f21,
     ),
     ("veyran_power_plant.glb", 473580, 0xd0deb10bf3a80a22),
-    ("veyran_power_plant_damaged.glb", 511236, 0x47bf141642bfd6da),
+    ("veyran_power_plant_damaged.glb", 532788, 0xbc15086af08cc7fa),
     (
         "veyran_power_plant_foundation.glb",
         191152,
@@ -430,16 +430,16 @@ const PINNED: [(&str, usize, u64); 143] = [
         0x1b946a5d1ccb8424,
     ),
     ("veyran_radar.glb", 388296, 0xeaa285854203adbf),
-    ("veyran_radar_damaged.glb", 430852, 0xe2f9e1a8dae92b63),
+    ("veyran_radar_damaged.glb", 430848, 0x43779586b2d755c9),
     ("veyran_radar_foundation.glb", 180880, 0xdb4bf7e4c18c1450),
     (
         "veyran_radar_heavily_damaged.glb",
-        467276,
-        0xc8b176c423f1189d,
+        467848,
+        0x2251943c8b969192,
     ),
     ("veyran_radar_scaffolding.glb", 472100, 0xeb9d5ef8164adfad),
     ("veyran_refinery.glb", 459380, 0xcf55f48b59516ff3),
-    ("veyran_refinery_damaged.glb", 492132, 0xae22efe89a4574fe),
+    ("veyran_refinery_damaged.glb", 492368, 0xfe0774e4f1b37f2e),
     ("veyran_refinery_foundation.glb", 221924, 0xede27d5f8835065a),
     (
         "veyran_refinery_heavily_damaged.glb",
@@ -452,12 +452,12 @@ const PINNED: [(&str, usize, u64); 143] = [
         0xdf20ab62d7e5e6b5,
     ),
     ("veyran_shipyard.glb", 451476, 0x68cf9c9c079381df),
-    ("veyran_shipyard_damaged.glb", 487992, 0xd83888e57c84bd73),
+    ("veyran_shipyard_damaged.glb", 487300, 0xd87fc8aa44280643),
     ("veyran_shipyard_foundation.glb", 253824, 0x2753b548f295ee3e),
     (
         "veyran_shipyard_heavily_damaged.glb",
-        526884,
-        0x2a497f134e0940bf,
+        526536,
+        0x397d69daf539f02f,
     ),
     (
         "veyran_shipyard_scaffolding.glb",
@@ -467,8 +467,8 @@ const PINNED: [(&str, usize, u64); 143] = [
     ("veyran_vehicle_factory.glb", 416244, 0x4b25a30c31da70da),
     (
         "veyran_vehicle_factory_damaged.glb",
-        483900,
-        0xcbd33b70ed4d44f3,
+        483556,
+        0x146a043a477a893d,
     ),
     (
         "veyran_vehicle_factory_foundation.glb",
