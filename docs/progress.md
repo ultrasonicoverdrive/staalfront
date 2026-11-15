@@ -3620,19 +3620,26 @@ What it does not settle:
   in LOD0 (`ROUND_MIN_SEGS`). Rules in `docs/art-style.md` sections 5 and 6.
 * **Budgets.** `sf_asset_check::class::budget`: vehicles 4000 / 1200 / 300 (was 1500 / 500 / 150),
   buildings 8000 / 2400 / 500 (was 5000 / 1500 / 300); infantry, decor and wrecks unchanged. After
-  the round: vehicles 1,378-2,046 triangles in LOD0, finished structures 2,650-3,646. LOD1 and LOD2
-  are unchanged for every model (the new rules are LOD0 only).
+  the round: vehicles 1,378-2,046 triangles in LOD0, finished structures 2,650-3,646. The new rules
+  are LOD0 only: every file's LOD1 and LOD2 triangle counts equal main's (bb7f284), pinned by
+  `far_levels.rs`, except the ferry and the gunboat, whose funnel and mast now stay in LOD2 (+10
+  each). The first push let the bevel rule into the stages' far levels (67 files); the review sweep
+  found it, `kit::at_level` now sets the level for the stages too.
 * **Carried over.** The contact sheets frame each model whole (the sphere fits the view, top views
   run along the tile) at full tile size; `fit_team` keeps a share within 0.010 of its aim and
   otherwise stops with an assertion naming the model (no `SF_FIT_SOFT`); a test for "far levels keep
   the silhouette"; the pale pink stripes in WP11.6c's `m1_zoom_0.30_tick103.png` are the renderer's
   hover highlight (`instancing::HIGHLIGHT_TINT` 0.55 towards white on the model under the cursor),
   not the model; the decoy's heavy-break slack is 92 mm again (the test now ignores the fallen team
-  planks on the heap, which reached 13 mm over the bound with the new geometry). `assets/set_v5`
+  planks on the heap, marked with `stages::PLANK_TONE`, which reached 13 mm over the bound with the
+  new geometry; the 92 mm is asserted). `assets/set_v5`
   34 MB -> 37 MB.
 * **Not done (gaps).** The detail floor of the finished structures (`DETAIL_FLOOR` 2650, anchor-bolt
   rows) stays: dropped, 21 stage files break the far-level share rule (their far levels come from
   the finished far level). Lofted hulls with their own outlines (the six WP11.6a models, the
   transports) only get the wider recipe bevels; road wheels and track links were not reworked. The
-  v3 sniper (19.0 % team share, Tijmen's figure set, not generated) is left as is. The ferry and the
-  gunboat drop their mast in LOD2 (named exceptions in the silhouette test).
+  v3 sniper (19.0 % team share, Tijmen's figure set, not generated) is left as is. The silhouette
+  test skips the states (derived from the finished far level) and the rubble heaps' height (one
+  random chunk tip). Extruded profiles are outside the bevel rule: the sharp block corners of the
+  fortified bunker's buttresses (96, in three of its states too), the Veyran vehicle factory (6,
+  its damaged state 4) and the amphibious transport (6) are pinned as named exceptions.

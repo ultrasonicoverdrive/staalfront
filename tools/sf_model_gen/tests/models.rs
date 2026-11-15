@@ -174,12 +174,12 @@ fn far_levels_keep_the_silhouette() {
             .chain(&["_no_uplink"])
             .any(|s| stem.ends_with(s))
     };
-    // Named exceptions, measured on this generator (WP11.6r): the rubble heaps are decor whose
-    // top is a chunk tip (LOD2 down to 522 per mille of the height), and the ferry and the gunboat
-    // drop their mast in LOD2 (746 and 705 per mille of the height): left as they are, a gap.
-    let exempt = |stem: &str, k: usize| {
-        is_heap(stem) || (k == 2 && ["neutral_ferry", "veyran_gunboat"].contains(&stem))
-    };
+    // One named exception, measured on this generator (WP11.6r review): the rubble heaps are
+    // decor whose top is the tip of one random chunk, and a far level with fewer, blunter chunks
+    // stands lower (down to 522 per mille of the height, LOD2 of the 2 x 2 heap). Only their
+    // height (axis 1) is exempt; their footprint is checked like everything else. The ferry and
+    // the gunboat keep their funnel and mast in every level and are checked in full.
+    let exempt = |stem: &str, i: usize| is_heap(stem) && i == 1;
     for m in models().iter().filter(|m| !state(&m.stem)) {
         let (lo0, hi0) = extent(&m.lods[0]);
         for k in 1..3 {
@@ -188,7 +188,7 @@ fn far_levels_keep_the_silhouette() {
                 let e0 = i64::from(hi0[i] - lo0[i]);
                 let e = i64::from(hi[i] - lo[i]);
                 let permille = e * 1000 / e0.max(1);
-                if exempt(&m.stem, k) {
+                if exempt(&m.stem, i) {
                     continue;
                 }
                 if permille < worst.0 {
@@ -733,15 +733,12 @@ fn the_states_read_as_their_stage() {
         let finished_roof =
             sf_model_gen::stages::roof_level(&sf_model_gen::stages::split(&m.lods[0]), slab);
         let hb = &heavy.lods[0].find("body").expect("body").mesh.tris;
-        let team_mat = heavy
-            .team()
-            .expect("a faction structure has the team material");
-        // The walls, not the fallen team planks on the heap (WP11.6r: on the decoy a plank lay
-        // 13 mm above the bound; near the break every wall stripe is soot-coloured paint, so a
-        // team triangle there is a plank).
+        // The walls, not the fallen roof planks on the heap (`stages::PLANK_TONE`; WP11.6r: on the
+        // decoy a plank lay 13 mm above the bound).
+        let plank = sf_model_gen::stages::PLANK_TONE;
         let top = |left: bool| {
             hb.iter()
-                .filter(|t| t.mat != team_mat)
+                .filter(|t| t.tone != plank)
                 .flat_map(|t| t.v)
                 .filter(|p| (p[0] < 0) == left && p[0] != 0 && p[2].abs() <= 600)
                 .map(|p| p[1])
@@ -751,6 +748,10 @@ fn the_states_read_as_their_stage() {
         let brk = (top(true) + top(false)) / 2;
         let bound = slab + (finished_roof - slab) * 6 / 10 + 120 * 600 / 1000;
         println!("{}: heavy break slack {} mm", m.stem, bound - brk);
+        if m.stem == "meridian_decoy_emplacement" {
+            // The tightest structure (WP11.6c review asked for the slack after the shape round).
+            assert_eq!(bound - brk, 92, "decoy heavy-break slack");
+        }
         assert!(
             brk <= bound,
             "{}: heavy break at {brk} over {bound} (slab {slab}, finished roof {finished_roof})",
@@ -1001,11 +1002,66 @@ fn every_lod0_block_is_bevelled_by_the_kit_rule() {
     assert!(slanted(&model.lods[0].world_tris()) > 0);
     assert_eq!(slanted(&model.lods[1].world_tris()), 0);
     assert_eq!(model.triangles()[1..], [12, 12]);
-    // In the set: every model's LOD0 has bevel faces, and far more of them than its LOD2.
+    // In the set: no sharp box corner on a block of block size in LOD0, except these, which are
+    // not kit boxes but extruded recipe profiles (`extrude_z`): the 24 buttress wedges of the
+    // Veyran fortified bunker (in its states too), and a few on the Veyran vehicle factory and the
+    // amphibious transport. Their corner counts are pinned, so a new sharp block fails.
+    let exceptions = [
+        ("veyran_fortified_bunker", 96),
+        ("veyran_fortified_bunker_scaffolding", 96),
+        ("veyran_fortified_bunker_damaged", 96),
+        ("veyran_fortified_bunker_heavily_damaged", 96),
+        ("veyran_vehicle_factory", 6),
+        ("veyran_vehicle_factory_damaged", 4),
+        ("meridian_amphibious_transport", 6),
+    ];
     for m in models() {
-        let near = slanted(&m.lods[0].world_tris());
-        assert!(near >= 8, "{}: {near} bevel faces in LOD0", m.stem);
+        let n = sharp_block_corners(&m.lods[0].world_tris());
+        let allowed = exceptions.iter().find(|e| e.0 == m.stem).map_or(0, |e| e.1);
+        assert_eq!(n, allowed, "{}: sharp block corners in LOD0", m.stem);
     }
+    // The finder sees a plain block: a closed box of the same size outside LOD0 has 8.
+    let plain = Model::new("probe", Vec::new(), |_| {
+        vec![Node::part(
+            "body",
+            [0, 0, 0],
+            closed_box([0, 0, 0], [2000, 1000, 1200], m),
+        )]
+    });
+    assert_eq!(sharp_block_corners(&plain.lods[0].world_tris()), 0);
+    assert_eq!(sharp_block_corners(&plain.lods[1].world_tris()), 8);
+}
+
+/// Corners where three axis-aligned faces meet, each face at least `BEVEL_MIN_SIDE_MM` across in
+/// both of its directions: the corner of an unbevelled block (WP11.6r review).
+fn sharp_block_corners(tris: &[sf_model_gen::kit::Tri]) -> usize {
+    use sf_model_gen::kit::BEVEL_MIN_SIDE_MM;
+    use std::collections::BTreeMap;
+    // Per corner point: the axis directions (axis * 2 + sign) of the big axis faces that touch it.
+    let mut at: BTreeMap<[i32; 3], u8> = BTreeMap::new();
+    for t in tris {
+        let n = t.normal();
+        let axes: Vec<usize> = (0..3).filter(|&i| n[i] != 0).collect();
+        if axes.len() != 1 {
+            continue;
+        }
+        let a = axes[0];
+        let big = (0..3).filter(|&i| i != a).all(|i| {
+            let lo = t.v.iter().map(|p| p[i]).min().unwrap();
+            let hi = t.v.iter().map(|p| p[i]).max().unwrap();
+            hi - lo >= BEVEL_MIN_SIDE_MM
+        });
+        if !big {
+            continue;
+        }
+        let bit = 1u8 << (a * 2 + usize::from(n[a] > 0));
+        for p in t.v {
+            *at.entry(p).or_default() |= bit;
+        }
+    }
+    at.values()
+        .filter(|&&m| (0..3).all(|a| m & (0b11 << (a * 2)) != 0))
+        .count()
 }
 
 #[test]

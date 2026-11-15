@@ -587,7 +587,7 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
             let source = if lod.has(0) { 0 } else { 2 };
             let mut parts = split(&built.lods[source]);
             strip_filler(&mut parts.body, slab);
-            let children = match stage {
+            let children = crate::kit::at_level(lod, || match stage {
                 Stage::Foundation => foundation(&f, slab, &parts, lod, seed, &stem, teamed),
                 Stage::Scaffolding => scaffolding(&f, slab, parts, lod, seed, &stem, teamed),
                 Stage::Damaged => {
@@ -605,7 +605,7 @@ pub fn derive_as(built: &Model, stage: Stage, slab: i32, suffix: &str, cut: i32)
                     out
                 }
                 Stage::Heavy => heavy(&f, slab, parts, lod, seed, &stem, teamed, cut),
-            };
+            });
             Node {
                 name: format!("{stem}_LOD{}", lod.0),
                 at: [0, 0, 0],
@@ -644,6 +644,11 @@ pub const HOLE_GROWTH: [i32; 4] = [2, 3, 4, 6];
 pub const SCAFFOLD_CUT_PERMILLE: i32 = 600;
 /// The heavily damaged stage breaks off at this share of the roof level (thousandths).
 pub const HEAVY_CUT_PERMILLE: i32 = 500;
+
+/// The tone that marks a fallen roof plank on the heap of a heavily damaged stage (team material,
+/// which ignores the vertex colour, so it shows nothing): the stage test tells the planks from the
+/// walls by it (WP11.6r review).
+pub const PLANK_TONE: crate::kit::Tone = 999;
 
 /// How far round a damage hole the small detail is gone, in thousandths of the hole's radius.
 pub const DETAIL_GONE_PERMILLE: i32 = 8000;
@@ -1394,14 +1399,10 @@ fn heavy(
             for &(dz, q) in &planks[..if lod.has(1) { 3 } else { 1 }] {
                 let len = rr * 8 / 10;
                 let start = if q == 0 { x - len / 2 } else { x + len / 2 };
-                tops.push(fallen_plate(
-                    [start, floor + hh * 9 / 10, z + dz],
-                    len,
-                    280,
-                    180,
-                    q,
-                    TEAM,
-                ));
+                tops.push(
+                    fallen_plate([start, floor + hh * 9 / 10, z + dz], len, 280, 180, q, TEAM)
+                        .toned(PLANK_TONE),
+                );
             }
         }
     }

@@ -404,6 +404,16 @@ pub fn building_lod() -> Lod {
     Lod(BUILD_LOD.with(std::cell::Cell::get))
 }
 
+/// Run `build` with `lod` as the level being built ([`building_lod`]), then go back to LOD0.
+/// Every place that builds a level calls this: [`Model::new`] and the stages
+/// (`stages::derive_as`), so the LOD0-only rules never reach a far level (WP11.6r review).
+pub fn at_level<R>(lod: Lod, build: impl FnOnce() -> R) -> R {
+    BUILD_LOD.with(|l| l.set(lod.0));
+    let out = build();
+    BUILD_LOD.with(|l| l.set(0));
+    out
+}
+
 /// The kit's bevel for a box from `lo` to `hi`: [`BEVEL_PERMILLE`] of its smallest side, clamped
 /// to [`BEVEL_MIN_MM`]..=[`BEVEL_MAX_MM`]; 0 for a detail (smallest side under
 /// [`BEVEL_MIN_SIDE_MM`]) and outside LOD0 (the far levels keep their explicit bevels only, so
@@ -796,9 +806,7 @@ impl Model {
         let lods = Lod::ALL
             .iter()
             .map(|&lod| {
-                BUILD_LOD.with(|l| l.set(lod.0));
-                let children = parts(lod);
-                BUILD_LOD.with(|l| l.set(0));
+                let children = at_level(lod, || parts(lod));
                 Node {
                     name: format!("{stem}_LOD{}", lod.0),
                     at: [0, 0, 0],

@@ -126,7 +126,10 @@ levels keep only the recipes' own bevels (so their share of LOD0 does not grow).
 explicit bevels (`Lod::bevel`) are half as wide again in LOD0, at most 60 mm more; a value under 10
 is a switch (`v * lod.bevel(1)`) and stays. Lofted hulls with their own outlines (the six WP11.6a
 models, the transports) only get the widened recipe bevels: rebuilding those outlines would be a
-per-model edit, which this round did not do. Test: `every_lod0_block_is_bevelled_by_the_kit_rule`.
+per-model edit, which this round did not do. Test: `every_lod0_block_is_bevelled_by_the_kit_rule`
+also scans every LOD0 for sharp block corners (three axis faces of at least 240 mm meeting); the
+extruded profiles that still have them are a pinned list (the fortified bunker's buttresses, a few on
+the Veyran vehicle factory and the amphibious transport).
 
 Keep colours clean and bright: the AO darkens creases, not whole surfaces; judge it in the engine
 render (contact sheet), not only in numbers.
@@ -152,8 +155,11 @@ Budgets (WP11.6r, Tijmen 15-11-2026, `sf_asset_check::class::budget`): vehicles 
 budget is a ceiling, not a target: after the shape round a vehicle has 1,378-2,046 triangles in
 LOD0 and a finished structure 2,650-3,646. The far levels keep the silhouette: along every axis
 LOD1 and LOD2 span at least 90 % of LOD0 and reach at most 5 % past it (`far_levels_keep_the_silhouette`;
-named exceptions: the rubble heaps, and the ferry and the gunboat in LOD2, which drop the mast:
-746 and 705 per mille of the height, a gap).
+states are skipped, being derived from the finished far level; one named exception: the rubble
+heaps' height, the tip of one random chunk). The ferry's funnel and the gunboat's mast stay in every
+level for this. The far levels' triangle counts are pinned against main before the round
+(`tests/far_levels.rs`); `kit::at_level` sets the level for `Model::new` and for the stages, so the
+LOD0-only rules never reach a far level.
 
 **Detail budget** (tuning round 14-11-2026, `buildings_use_their_detail_budget`): a building uses
 **2,500-3,500 triangles in LOD0** on real geometry: vents with louvres, pipe runs with flanges,
