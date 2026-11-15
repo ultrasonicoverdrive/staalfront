@@ -655,6 +655,39 @@ impl Arsenal {
         self.projectiles == Projectiles::default()
     }
 
+    /// The section a save of this format cannot hold yet, if the arsenal has state of it
+    /// (`docs/rules/save.md`). Destructured without `..`: a new field fails to compile until it
+    /// is placed here.
+    pub(crate) fn unsaved_section(&self) -> Option<&'static str> {
+        let Arsenal {
+            // Rules, and what is derived from them.
+            table: _,
+            by_def: _,
+            armor_of_def: _,
+            widest: _,
+            // Scratch.
+            splash: _,
+            projectiles: _,
+            // The reports of the last tick: the return fire and the kill credit of the next tick
+            // read them, so a world with any of them waits for WP13.1c.
+            shots,
+            impacts,
+            attacks,
+            hurt,
+        } = self;
+        if !self.projectiles_at_start() {
+            Some("projectiles")
+        } else if !shots.is_empty()
+            || !impacts.is_empty()
+            || !attacks.is_empty()
+            || !hurt.is_empty()
+        {
+            Some("weapons")
+        } else {
+            None
+        }
+    }
+
     /// Checks `table` against the unit table and builds the lookup from unit-table position
     /// to weapon slots.
     pub fn new(table: WeaponTable, units: &UnitTable) -> Result<Arsenal, WeaponsError> {

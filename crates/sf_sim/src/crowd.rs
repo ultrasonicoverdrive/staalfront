@@ -858,6 +858,26 @@ pub(crate) struct Crowd {
     pub stats: CrowdStats,
 }
 
+impl Crowd {
+    /// Whether the part outside the entity columns holds state: never, the state is the column
+    /// `Entities::crowd`. Destructured without `..`: a new field fails to compile until it is
+    /// placed here.
+    pub(crate) fn has_state(&self) -> bool {
+        let Crowd {
+            // Rules: in the rules digest.
+            config: _,
+            // Derived from the unit table.
+            shapes: _,
+            side: _,
+            // Scratch within a tick.
+            scratch: _,
+            // A report: not hashed.
+            stats: _,
+        } = self;
+        false
+    }
+}
+
 impl PartialEq for Crowd {
     /// The scratch memory is not state.
     fn eq(&self, other: &Crowd) -> bool {

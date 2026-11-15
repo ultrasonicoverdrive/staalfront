@@ -264,6 +264,20 @@ pub(crate) struct Targeting {
     scratch: Scratch,
 }
 
+impl Targeting {
+    /// Whether the part outside the entity columns holds state: never, it is rules and scratch.
+    /// Destructured without `..`: a new field fails to compile until it is placed here.
+    pub(crate) fn has_state(&self) -> bool {
+        let Targeting {
+            // Rules: in the rules digest.
+            config: _,
+            // Scratch within a tick.
+            scratch: _,
+        } = self;
+        false
+    }
+}
+
 /// What [`Targeting`] reads besides the entities.
 pub(crate) struct Context<'a> {
     pub units: &'a UnitTable,

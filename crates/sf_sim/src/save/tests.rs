@@ -1231,6 +1231,9 @@ fn a_restored_jam_continues_like_the_original() {
     }
 }
 
+/// One crowd counter set one past its maximum.
+type PastMax = fn(&mut CrowdState, CollisionConfig, ReplanConfig);
+
 /// Every crowd counter at the most the simulation reaches: saved, restored and stepped with the
 /// crowd pass on, without an overflow. One past it is refused as corrupt.
 #[test]
@@ -1263,7 +1266,7 @@ fn crowd_counters_at_their_maximum_restore_and_step() {
     for _ in 0..80 {
         back.step();
     }
-    let past: [(&str, fn(&mut CrowdState, CollisionConfig, ReplanConfig)); 9] = [
+    let past: [(&str, PastMax); 9] = [
         ("quiet", |c, f, _| c.quiet = f.stuck_ticks),
         ("attempts", |c, f, _| c.attempts = f.stuck_attempts + 1),
         ("calm", |c, _, _| c.calm = crate::crowd::SHOVE_CALM),

@@ -159,6 +159,24 @@ impl Ore {
     }
 
     /// Counts the changes of any amount (a take, a growth). Equal versions mean equal amounts.
+    /// Whether no amount ever changed: the ore is as the world was given it (WP13.1a saves a
+    /// world only then). Destructured without `..`: a new field fails to compile until it is
+    /// placed here.
+    pub(crate) fn at_start(&self) -> bool {
+        let Ore {
+            // Rules and the layout, in the rules digest by the fingerprint.
+            rules: _,
+            width: _,
+            height: _,
+            fields: _,
+            // At `version == 0` these are the start amounts, which the fingerprint covers.
+            amount: _,
+            sum: _,
+            version,
+        } = self;
+        *version == 0
+    }
+
     pub fn version(&self) -> u64 {
         self.version
     }

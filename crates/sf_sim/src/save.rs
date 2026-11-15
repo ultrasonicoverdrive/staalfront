@@ -944,29 +944,57 @@ fn check_unsaved_sections(w: &World) -> SaveResult<()> {
     if !w.formations.at_start() {
         return Err(SaveError::Unsupported("formations"));
     }
-    if !w.arsenal.projectiles_at_start() {
-        return Err(SaveError::Unsupported("projectiles"));
+    if let Some(section) = w.arsenal.unsaved_section() {
+        return Err(SaveError::Unsupported(section));
     }
-    // The reports of the last shots: the return fire of the next tick reads the attacks, so a world
-    // with any of them waits for WP13.1c.
-    if !w.arsenal.shots.is_empty() || !w.arsenal.impacts.is_empty() || !w.arsenal.attacks.is_empty()
-    {
-        return Err(SaveError::Unsupported("weapons"));
-    }
-    if !w.destruction.wrecks.is_empty()
-        || !w.destruction.tally.is_empty()
-        || !w.destruction.deaths.is_empty()
-    {
+    // Destructured without `..` here or in the module: a new field of these parts fails to compile
+    // until it is placed.
+    let crate::destruction::Destruction {
+        // Rules: in the rules digest.
+        config: _,
+        wrecks,
+        tally,
+        // The report of the last tick; a world with deaths in it also has kill credit pending.
+        deaths,
+    } = &w.destruction;
+    if !wrecks.is_empty() || !tally.is_empty() || !deaths.is_empty() {
         return Err(SaveError::Unsupported("destruction"));
     }
-    if w.ore.as_ref().is_some_and(|o| o.version() != 0)
-        || w.harvest.is_some()
-        || w.money
-            .as_ref()
-            .is_some_and(|m| m.spent.iter().any(|&(_, s)| s != 0))
-    {
+    if w.targeting.has_state() {
+        return Err(SaveError::Unsupported("targeting"));
+    }
+    if w.crowd.has_state() {
+        return Err(SaveError::Unsupported("crowd"));
+    }
+    if let Some(m) = &w.money {
+        let crate::money::Money {
+            // Rules: in the rules digest.
+            rules: _,
+            spent,
+        } = m;
+        if spent.iter().any(|&(_, s)| s != 0) {
+            return Err(SaveError::Unsupported("economy"));
+        }
+    }
+    if w.ore.as_ref().is_some_and(|o| !o.at_start()) || w.harvest.is_some() {
         return Err(SaveError::Unsupported("economy"));
     }
+    if let Some(r) = &w.repair {
+        let crate::repair::RepairSell {
+            // Rules: in the rules digest.
+            rules: _,
+            // Reports for the host: not hashed, and no step reads them.
+            rejections: _,
+            waiting: _,
+            sold: _,
+        } = &**r;
+    }
+    let crate::placement::PlacementState {
+        // Rules: in the rules digest.
+        players: _,
+        // The report of the last step: cleared at the start of the next.
+        rejections: _,
+    } = &w.placement;
     if w.production.is_some() {
         return Err(SaveError::Unsupported("production"));
     }
@@ -1141,12 +1169,13 @@ impl World {
             movement: _,
             // Gated in `check_unsaved_sections` (the graphs are rules).
             pathing: _,
-            // Rules (settings and shapes) and scratch; the state is the entity column.
+            // Rules (settings and shapes) and scratch; the state is the entity column. Its fields
+            // are named in `Crowd::has_state`.
             crowd: _,
             // Gated.
             formations: _,
             // Rules (the table and what is derived from it) and the reports of the last tick;
-            // projectiles gated.
+            // projectiles gated. Its fields are named in `Arsenal::unsaved_section`.
             arsenal: _,
             // Rules.
             buildings: _,
@@ -1168,9 +1197,12 @@ impl World {
             placement: _,
             // A report of the last tick.
             completions: _,
-            // Rules and scratch; the state is the entity column.
+            // Rules and scratch; the state is the entity column. Fields named in
+            // `Targeting::has_state`.
             targeting: _,
-            // Rules and the report of the last tick; wrecks and tally gated.
+            // Rules and the report of the last tick; wrecks and tally gated. The fields of this
+            // and of `ore`, `money`, `repair` and `placement` are named in
+            // `check_unsaved_sections` (or the gate it calls).
             destruction: _,
             queue,
             // Not saved: a restored world starts a new history at its tick.
