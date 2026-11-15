@@ -26,6 +26,11 @@ pub mod palette;
 pub mod set;
 pub mod shade;
 pub mod stages;
+pub mod units;
+pub mod units_artillery;
+pub mod units_transport;
+pub mod units_vessels;
+pub mod units_wheeled;
 
 /// Every file of set v5: `(file name, bytes)`, sorted by file name ([`set::all`]). The files are
 /// written on a few threads (the baked shade is most of the time); each file is the same bytes

@@ -109,6 +109,9 @@ fn is_unarmed_state(file: &str) -> bool {
 fn is_armed(file: &str) -> bool {
     let armed = [
         "light_tank",
+        "heavy_tank",
+        "siege_artillery",
+        "gunboat",
         "defence_tower",
         "advanced_defences",
         "decoy_emplacement",
@@ -152,9 +155,9 @@ fn load(file: &str) -> LoadedModel {
 #[test]
 fn the_folder_holds_the_models_and_the_pack_lists_them() {
     let on_disk = files();
-    // WP11.6a: 6; WP11.6c: 22 structures x 5 states less the 3 finished ones of WP11.6a, 24
-    // mission objects and states, 6 heaps.
-    assert_eq!(on_disk.len(), 6 + 22 * 5 - 3 + 24 + 6);
+    // WP11.6a: 6; WP11.6b: 14 units; WP11.6c: 22 structures x 5 states less the 3 finished ones
+    // of WP11.6a, 24 mission objects and states, 6 heaps.
+    assert_eq!(on_disk.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6);
     let config = std::fs::read_to_string(assets().join(glb::MODELS_CONFIG)).unwrap();
     let file: PackFile = ron::from_str(&config).unwrap();
     let spec = file
@@ -189,7 +192,15 @@ fn every_model_loads_with_three_levels_parts_and_anchors() {
                 "{file} LOD{n}: {names:?} (structures have smoke and fire anchors)"
             );
             if is_armed(file) {
-                assert!(names.contains(&"muzzle"), "{file} LOD{n}: {names:?}");
+                // The heavy tank's twin cannon has a muzzle anchor per barrel (WP11.6b).
+                let muzzles: &[&str] = if file.contains("heavy_tank") {
+                    &["muzzle_l", "muzzle_r"]
+                } else {
+                    &["muzzle"]
+                };
+                for m in muzzles {
+                    assert!(names.contains(m), "{file} LOD{n}: {names:?}");
+                }
                 let joints: Vec<Joint> = level.parts.iter().map(|p| p.joint).collect();
                 assert!(
                     joints.contains(&Joint::Yaw) && joints.contains(&Joint::Pitch),

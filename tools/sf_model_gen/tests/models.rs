@@ -104,10 +104,23 @@ fn is_neutral(stem: &str) -> bool {
     stem.starts_with("neutral_")
 }
 
-/// A model with a gun: a muzzle under its barrel.
+/// A person (or a team of people): the figure nodes instead of hull and turret, the infantry
+/// budget. Only the heavy gun team is generated; the other figures are Tijmen's set v3 (WP11.6b).
+fn is_infantry(stem: &str) -> bool {
+    stem.ends_with("heavy_gun_team")
+}
+
+/// A vessel floats: the waterline `Y = 0` lies inside the hull (WP11.6b).
+fn is_vessel(stem: &str) -> bool {
+    stem.ends_with("gunboat") || stem.ends_with("ferry")
+}
+
+/// A model with a gun: a muzzle under its barrel (the heavy tank has two, `muzzle_l`/`_r`).
 fn is_armed(stem: &str) -> bool {
     let armed = [
         "light_tank",
+        "siege_artillery",
+        "gunboat",
         "defence_tower",
         "advanced_defences",
         "decoy_emplacement",
@@ -124,6 +137,8 @@ fn is_armed(stem: &str) -> bool {
 fn budget(stem: &str) -> [usize; 3] {
     if is_building(stem) && !is_decor(stem) {
         [5000, 1500, 300]
+    } else if is_infantry(stem) {
+        [1500, 250, 60]
     } else {
         [1500, 500, 150]
     }
@@ -189,6 +204,9 @@ fn buildings_use_their_detail_budget() {
                 .any(|s| m.stem.ends_with(s));
             let least = if state { 500 } else { 1000 };
             assert!((least..=3500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+        } else if is_infantry(&m.stem) {
+            // A figure is small: 400 triangles in LOD0 keep LOD2 (60 at most) under 15 %.
+            assert!((400..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else {
             assert!((1200..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         }
@@ -238,10 +256,42 @@ fn the_checker_finds_nothing_and_the_team_share_is_20_to_30_percent_in_every_lev
 #[test]
 fn a_neutral_model_has_no_team_material() {
     for m in models() {
+        let names: Vec<&str> = m.materials.iter().map(|x| x.name.as_str()).collect();
         assert_eq!(m.team().is_none(), is_neutral(&m.stem), "{}", m.stem);
-        if is_neutral(&m.stem) {
-            assert_eq!(m.materials[2].name, "paint3", "{}", m.stem);
+        let third = if is_neutral(&m.stem) {
+            "paint3"
+        } else {
+            "team"
+        };
+        assert_eq!(
+            names,
+            ["paint", "paint2", third, "metal", "rubber", "accent"],
+            "{}",
+            m.stem
+        );
+    }
+}
+
+/// A vessel's waterline `Y = 0` lies inside its hull (it has a keel under the water); every
+/// other model stands on the ground with its lowest point at `Y = 0`.
+#[test]
+fn vessels_float_and_everything_else_stands_on_the_ground() {
+    for (m, r) in models().iter().zip(reports()) {
+        let (lo, hi) = r.facts.bounds.expect("bounds");
+        if is_vessel(&m.stem) {
+            assert!(lo.y < 0.0 && hi.y > 0.0, "{}: {lo:?} {hi:?}", m.stem);
+        } else {
+            assert!(lo.y.abs() < 0.005, "{}: lowest point {}", m.stem, lo.y);
         }
+    }
+}
+
+/// The units of set v5 (WP11.6b) are in the set (the wiring is pinned in `sf_data`'s units test).
+#[test]
+fn every_unit_role_has_its_model_in_the_set() {
+    let stems: Vec<&str> = models().iter().map(|m| m.stem.as_str()).collect();
+    for want in UNIT_FOOTPRINTS.iter().map(|f| f.0) {
+        assert!(stems.contains(&want), "{want} is missing");
     }
 }
 
@@ -252,7 +302,13 @@ fn the_team_colour_is_bands_and_panels_never_one_triangle() {
         assert_eq!(m.materials[team.0 as usize].name, TEAM);
         for (n, level) in m.lods.iter().enumerate() {
             let count = level.world_tris().iter().filter(|t| t.mat == team).count();
-            assert!(count >= 12, "{} LOD{n}: {count} team triangles", m.stem);
+            // A figure's far level has 60 triangles in all: four team triangles there (a vest).
+            let least = if is_infantry(&m.stem) && n == 2 {
+                4
+            } else {
+                12
+            };
+            assert!(count >= least, "{} LOD{n}: {count} team triangles", m.stem);
         }
     }
 }
@@ -306,27 +362,48 @@ fn every_level_has_the_nodes_of_its_role() {
             let mut need = vec![];
             if is_building(&m.stem) {
                 need.extend(["body", "fx_smoke_0", "fx_fire_0"]);
+            } else if is_infantry(&m.stem) {
+                // The six figure nodes of the checker (`sf_asset_check::check::FIGURE_NODES`).
+                assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
+                need.extend(["torso", "head", "arm_l", "arm_r", "leg_l", "leg_r"]);
             } else {
                 // Vehicles smoke by the engine's rule (no anchors), like every other vehicle.
                 assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
                 need.extend(["hull", "turret", "barrel"]);
             }
-            if is_armed(&m.stem) {
+            if m.stem.ends_with("heavy_tank") {
+                // The twin cannon (burst of two): a muzzle per barrel, 912 mm apart like the set
+                // v4 heavy tank's; the n-th shot of a burst comes from the n-th anchor.
+                need.extend(["turret", "barrel", "muzzle_l", "muzzle_r"]);
+                let (l, r) = (
+                    root.find("muzzle_l").unwrap(),
+                    root.find("muzzle_r").unwrap(),
+                );
+                assert_eq!(l.at[0], r.at[0], "{}", m.stem);
+                assert_eq!(
+                    r.at[2] - l.at[2],
+                    912,
+                    "{}: the barrels are 912 mm apart",
+                    m.stem
+                );
+                assert!(root.find("muzzle").is_none(), "{}", m.stem);
+            } else if is_armed(&m.stem) {
                 need.extend(["turret", "barrel", "muzzle"]);
             }
             for name in need {
                 let node = root
                     .find(name)
                     .unwrap_or_else(|| panic!("{} LOD{n}: no node {name}", m.stem));
-                if name.starts_with("fx_") || name == "muzzle" {
+                if name.starts_with("fx_") || name.starts_with("muzzle") {
                     assert!(node.mesh.is_empty(), "{} {name} is an empty anchor", m.stem);
                 }
             }
             // The muzzle hangs under a barrel with geometry (docs/conventions.md §12).
             if let Some(barrel) = root.find("barrel")
-                && root.find("muzzle").is_some()
+                && (root.find("muzzle").is_some() || root.find("muzzle_l").is_some())
             {
-                assert!(!barrel.mesh.is_empty() && barrel.find("muzzle").is_some());
+                assert!(!barrel.mesh.is_empty());
+                assert!(barrel.find("muzzle").is_some() || barrel.find("muzzle_l").is_some());
             }
         }
     }
@@ -369,6 +446,23 @@ const V4_SIZES: [(&str, f32, f32); 30] = [
     ("rubble_2x2", 5.60, 5.50),
     ("rubble_2x3", 5.60, 8.25),
 ];
+/// The units of WP11.6b: the set v4 file they replace (the heavy gun team: its infantry cell).
+const UNIT_FOOTPRINTS: &[(&str, f32, f32)] = &[
+    ("meridian_amphibious_transport", 6.33, 3.26),
+    ("meridian_heavy_tank", 7.25, 3.80),
+    ("meridian_light_transport", 3.42, 2.11),
+    ("meridian_repair_truck", 4.94, 2.50),
+    ("meridian_siege_artillery", 8.60, 3.10),
+    ("neutral_ferry", 21.12, 9.00),
+    ("neutral_supply_truck", 5.64, 2.50),
+    ("veyran_gunboat", 18.00, 5.00),
+    ("veyran_harvester", 6.54, 3.60),
+    ("veyran_heavy_gun_team", 1.70, 1.20),
+    ("veyran_heavy_tank", 7.25, 3.80),
+    ("veyran_repair_truck", 4.94, 2.50),
+    ("veyran_siege_artillery", 8.60, 3.10),
+    ("veyran_transport_truck", 5.64, 2.50),
+];
 /// The larger heaps (set v4 sizes).
 const V4_HEAPS: [(&str, f32, f32); 3] = [
     ("rubble_3x4", 8.40, 11.00),
@@ -379,6 +473,9 @@ const V4_HEAPS: [(&str, f32, f32); 3] = [
 #[test]
 fn every_model_stays_inside_the_set_v4_footprint() {
     let size_of = |stem: &str| -> (f32, f32) {
+        if let Some((_, x, z)) = UNIT_FOOTPRINTS.iter().find(|f| f.0 == stem) {
+            return (*x, *z);
+        }
         let base = stem.split_once('_').unwrap().1;
         let by_stem = V4_SIZES.iter().chain(&V4_HEAPS).find(|(s, _, _)| {
             *s == stem || stem.strip_prefix(s).is_some_and(|r| r.starts_with('_'))
@@ -461,7 +558,8 @@ fn every_structure_has_all_its_states() {
     ] {
         assert!(stems.contains(&stem), "{stem} missing");
     }
-    assert_eq!(stems.len(), 6 + 22 * 5 - 3 + 24 + 6);
+    // WP11.6a 6, WP11.6b 14 units, WP11.6c the rest.
+    assert_eq!(stems.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6);
     let mut sorted = stems.clone();
     sorted.sort_unstable();
     assert_eq!(stems, sorted, "set::all is sorted by file name");
@@ -530,6 +628,25 @@ fn the_shipped_palette_has_the_style_g_values() {
             accent: [160, 32, 48],
         }
     );
+    // Neutral models (WP11.6b): no faction accent, the third slot is a light paint.
+    assert_eq!(
+        p.factions["neutral"],
+        FactionColours {
+            paint: [190, 176, 140],
+            paint_light: [206, 196, 164],
+            paint2: [96, 108, 92],
+            paint2_shade: [70, 80, 70],
+            metal: [44, 44, 40],
+            rubber: [20, 20, 20],
+            accent: [150, 70, 40],
+        }
+    );
+    let neutral: Vec<(String, [u8; 3])> = p
+        .materials("neutral")
+        .into_iter()
+        .map(|m| (m.name, m.srgb))
+        .collect();
+    assert_eq!(neutral[2], ("paint3".to_owned(), [206, 196, 164]));
     // WP11.6c: the Network defences (graphite with an amber lamp, the player colour).
     assert_eq!(
         p.factions["network"],

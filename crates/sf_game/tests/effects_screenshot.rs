@@ -593,7 +593,7 @@ fn shots_hits_and_deaths_are_drawn_close_up_and_fade_to_a_flash_from_afar() {
     assert!(stats.spawned > 10 && stats.dropped == 0, "{stats:?}");
 }
 
-/// WP5.6b: the flash starts at the barrel tip of the drawn model. A Veyran heavy tank (set v4, a twin cannon with
+/// WP5.6b: the flash starts at the barrel tip of the drawn model. A Veyran heavy tank (set v5, a twin cannon with
 /// two muzzles) stands with its hull facing east and a Meridian light tank four cells north of it, so its turret
 /// must turn about 90 degrees off the hull to fire. Every shot of the heavy tank is followed through the
 /// real path (`record`, `FxPlayer::frame_with`, `DrawnAnchors` on the instancer) and checked against the

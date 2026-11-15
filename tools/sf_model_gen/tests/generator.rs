@@ -487,6 +487,29 @@ const PINNED: [(&str, usize, u64); 143] = [
     ),
 ];
 
+/// The units of WP11.6b (vehicles, vessels, the heavy gun team), pinned the same way; see
+// the first table for how to re-pin. Sorted by file name.
+const PINNED_UNITS: [(&str, usize, u64); 14] = [
+    (
+        "meridian_amphibious_transport.glb",
+        237748,
+        0x5705da54c8d406d2,
+    ),
+    ("meridian_heavy_tank.glb", 253968, 0x772a76d76a58e293),
+    ("meridian_light_transport.glb", 207124, 0x728c043dc7e556a3),
+    ("meridian_repair_truck.glb", 232920, 0xe6fa17f290f5c1cf),
+    ("meridian_siege_artillery.glb", 245488, 0xbb18db5651739bf4),
+    ("neutral_ferry.glb", 189808, 0x5828524cb25235d2),
+    ("neutral_supply_truck.glb", 251852, 0xe2a6f0d2ccbd3b73),
+    ("veyran_gunboat.glb", 259836, 0x4542c9605d2926b6),
+    ("veyran_harvester.glb", 224140, 0xb53490113107c676),
+    ("veyran_heavy_gun_team.glb", 120972, 0x6420c1e02be053d4),
+    ("veyran_heavy_tank.glb", 255764, 0x017c668898bb6c33),
+    ("veyran_repair_truck.glb", 230184, 0x0ccef6d6d87e7390),
+    ("veyran_siege_artillery.glb", 244544, 0x5241858478a4aed4),
+    ("veyran_transport_truck.glb", 224936, 0xca886da6e95e8833),
+];
+
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for b in bytes {
@@ -499,7 +522,7 @@ fn set_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/set_v5")
 }
 
-/// One run of the generator, shared by the tests of this file (a run takes a while: 143 files).
+/// One run of the generator, shared by the tests of this file (a run takes a while: 157 files).
 fn first() -> &'static [(String, Vec<u8>)] {
     static F: std::sync::OnceLock<Vec<(String, Vec<u8>)>> = std::sync::OnceLock::new();
     F.get_or_init(files)
@@ -514,13 +537,18 @@ fn two_runs_give_the_same_bytes_and_every_file_is_pinned() {
     }
     let second = files();
     assert!(first == second.as_slice(), "two runs differ");
-    assert_eq!(first.len(), PINNED.len());
-    for ((name, bytes), (pin_name, len, hash)) in first.iter().zip(PINNED) {
-        assert_eq!(name, pin_name);
-        assert_eq!(bytes.len(), len, "{name} length");
+    // The units of WP11.6b are pinned in their own table; a file is in exactly one.
+    assert_eq!(first.len(), PINNED.len() + PINNED_UNITS.len());
+    for (name, bytes) in first {
+        let (_, len, hash) = PINNED
+            .iter()
+            .chain(PINNED_UNITS.iter())
+            .find(|p| p.0 == name)
+            .unwrap_or_else(|| panic!("{name} is not pinned"));
+        assert_eq!(bytes.len(), *len, "{name} length");
         assert_eq!(
             fnv1a(bytes),
-            hash,
+            *hash,
             "{name} hash (a recipe or the palette changed?)"
         );
     }

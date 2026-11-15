@@ -137,9 +137,13 @@ shoes (one raised face each), hatches, smoke dischargers, tools on the fenders, 
 As `docs/conventions.md` section 12 and `sf_asset_check` ask: roots `<stem>_LOD0..2`; vehicles
 `hull -> turret -> barrel -> muzzle` (empty `turret`/`barrel` nodes for an unarmed vehicle);
 buildings `body` (and `body -> turret -> barrel -> muzzle` for a defence) with empty anchors
-`fx_smoke_0` and `fx_fire_0`. Vehicles get no smoke anchors yet: a hurt vehicle smokes by the
-engine's rule like every other vehicle (anchors on the v5 tanks changed what
-`damage_screenshot.rs` counts as anchor puffs; WP11.6b decides for all vehicles at once). At most four parts per level (the engine's limit).
+`fx_smoke_0` and `fx_fire_0`. Vehicles get **no** smoke anchors (decision of WP11.6b, for all vehicles at once): a hurt
+vehicle smokes by the engine's rule like every other vehicle (anchors on the v5 tanks changed what
+`damage_screenshot.rs` counts as anchor puffs). An armed vehicle (`light_tank`, `heavy_tank`,
+`siege_artillery`, `gunboat`) has the muzzle under the barrel; an unarmed one keeps empty `turret`
+and `barrel` nodes. A figure (the heavy gun team) has the six figure nodes `torso`, `head`, `arm_l`,
+`arm_r`, `leg_l`, `leg_r` directly under the root, like the set v3 figures, and its gun as a
+seventh part. At most four parts per level (the engine's limit).
 
 ## 8. Cutscene parts
 
@@ -155,7 +159,39 @@ replaces, so names, pivots and offsets stay (`tools/sf_model_gen/src/cutout.rs`)
 WP11.6a only made the parts of the M1 briefing's two rigs (`assets/scenes/restyle_v5/`); the shipped
 scene does not use them yet (Phase 12).
 
-## 9. Later (style F)
+## 9. Units (WP11.6b)
+
+Every vehicle and vessel role has a generated model (`tools/sf_model_gen/src/units*.rs`); the
+infantry is Tijmen's set v3 (WP11.6b put it back, it is far better than the set v4 figures), and
+only the Veyran heavy gun team, which had no good figure, is generated.
+
+- **Both factions, one recipe, two outlines.** A role of both factions is one builder with a
+  `Style` (`Round` or `Angular`): the same parts, the hull and turret outlines of the faction
+  (`units::ring`: chamfered rectangle or wedge). Sizes: a model stays inside the set v4 model it
+  replaces, the barrel and the stripes included (`FOOTPRINTS` in `tools/sf_model_gen/tests/models.rs`).
+- **Tracked** (`heavy_tank`, `siege_artillery`, the harvester): the shared `Track` (cleats, shoes,
+  road wheels, a plain block at LOD2), skirts over the upper run, team stripes across the deck, along
+  the fenders and a band round the roof of the turret or casemate, never a whole roof.
+- **Wheeled** (repair truck, transport truck, supply truck, light and amphibious transport): wheels
+  are tyres with a tread step, a rim face and a hub at LOD0, plain eight-sided wheels at LOD1 and one
+  block a side at LOD2 (`units_wheeled::wheels`); mudguards over every wheel; the outer face of the
+  hubs counts for the footprint. A boat-shaped body (amphibious transport) is an extruded side
+  profile with a sloped bow.
+- **Vessels** (gunboat, ferry): the waterline is `Y = 0` and **lies inside the hull**, so the hull
+  has a keel about 0.35-0.45 m under it (`sf_asset_check`'s vessel rule; every other model has its
+  lowest point at `Y = 0`). Test: `vessels_float_and_everything_else_stands_on_the_ground`. The
+  team colour of a long deck is narrow cross stripes every 0.6-0.9 m (never a wide panel: the
+  350 mm rule holds), plus a band round the bridge roof or the turret.
+- **Neutral models** (supply truck, ferry) have **no player colour**: the third material slot is
+  `paint3` (the palette's `neutral` entry, `paint_light`), the file has no `team` material, and the
+  recipes mark lanes and stripes with `PAINT3`. Tests: `a_neutral_model_has_no_team_material`, the
+  neutral branches of the team tests.
+- **Far levels keep what sets the silhouette**: the height of an antenna or a roll bar, the length
+  of the barrel, the keel and the waterline; they drop details, not extent (`lod-size` stays quiet).
+- **Detail budget of a vehicle: 1,200-1,500 triangles in LOD0** (`buildings_use_their_detail_budget`),
+  a figure 400-1,500 (60 at most in LOD2, which needs at least 400 in LOD0 to stay under 15 %).
+
+## 10. Later (style F)
 
 Style F ("realistic, bright") is the later target once the engine gets textures and shadows (an
 engine WP, not WP11.6). The kit keeps a material slot per surface type for that: a texture step can

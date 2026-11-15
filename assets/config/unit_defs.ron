@@ -36,13 +36,14 @@
 // optional `models: { Meridian: Glb(..), Veyran: Glb(..) }` gives a faction
 // its own look for the same role (a unit is drawn with its owner's entry, else
 // with `model`, else with a primitive by category). Presentation only: the
-// simulation never sees it. Art set v4 (assets/set_v4) is wired this way: a
-// role of both factions has a model per faction (its `model` stays the fallback
-// for any other owner), a role of one faction or a neutral one names its file
-// in `model`. Three roles are not on v4: demolition_team (the v4 file fails
-// sf_asset_check) stays on set v3, heavy_gun_team (same) is a primitive, and
-// supply_truck (v4 has no neutral file) keeps its testpack_v1 model. Decor
-// (trees, rocks, ore stages, wrecks) is not a unit role and is not listed here.
+// simulation never sees it. Art set v5 (assets/set_v5, our own generator, style G, docs/art-style.md)
+// draws every vehicle and vessel role (WP11.6a/b), the neutral supply truck and ferry and the
+// Veyran heavy gun team; a role of both factions has a model per faction (its `model` stays the
+// fallback for any other owner), a role of one faction or a neutral one names its file in `model`.
+// The infantry is Tijmen's set v3 (assets/set_v3), which is better than the set v4 figures:
+// demolition_team was always on it, WP11.6b put the rest back. The set v4 files
+// (assets/set_v4) are still the structures that WP11.6c has not replaced yet. Decor (trees,
+// rocks, ore stages, wrecks) is not a unit role and is not listed here.
 //
 // Build pictures (WP11.1, docs/rules/sidebar.md): `build_picture: (color: (r, g, b), label: "PWR", order: 10)`
 // is the role's tile in the sidebar's build menu (a coloured tile with a short name until there is art),
@@ -235,7 +236,7 @@
             model: Glb("testpack_v1/models/grondstofwagen.glb"), strategic_icon: Triangle,
             models: {
                 Meridian: Glb("set_v5/meridian_harvester.glb"),
-                Veyran: Glb("set_v4/veyran_harvester.glb"),
+                Veyran: Glb("set_v5/veyran_harvester.glb"),
             },
             icon: "harvester",
             build_picture: (color: (210, 150, 50), label: "HARV", order: 10),
@@ -248,8 +249,8 @@
             weapons: ["rifle"],
             model: Shape(Cone), strategic_icon: Circle,
             models: {
-                Meridian: Glb("set_v4/meridian_rifleman.glb"),
-                Veyran: Glb("set_v4/veyran_rifleman.glb"),
+                Meridian: Glb("set_v3/meridian_rifleman.glb"),
+                Veyran: Glb("set_v3/veyran_rifleman.glb"),
             },
             icon: "rifleman",
             build_picture: (color: (90, 170, 100), label: "RIFLE", order: 10),
@@ -262,8 +263,8 @@
             weapons: ["rocket"],
             model: Shape(Cone), strategic_icon: Circle,
             models: {
-                Meridian: Glb("set_v4/meridian_rocket_trooper.glb"),
-                Veyran: Glb("set_v4/veyran_rocket_trooper.glb"),
+                Meridian: Glb("set_v3/meridian_rocket_trooper.glb"),
+                Veyran: Glb("set_v3/veyran_rocket_trooper.glb"),
             },
             icon: "rocket_trooper",
             build_picture: (color: (70, 150, 120), label: "ROCKT", order: 20),
@@ -276,8 +277,8 @@
             flags: (can_capture: true, repairs_structures: true, places_charges: true),
             model: Shape(Cone), strategic_icon: Circle,
             models: {
-                Meridian: Glb("set_v4/meridian_engineer.glb"),
-                Veyran: Glb("set_v4/veyran_engineer.glb"),
+                Meridian: Glb("set_v3/meridian_engineer.glb"),
+                Veyran: Glb("set_v3/veyran_engineer.glb"),
             },
             icon: "engineer",
             build_picture: (color: (200, 180, 90), label: "ENG", order: 30),
@@ -291,8 +292,8 @@
             flags: (stealth_in_cover: true),
             model: Shape(Cone), strategic_icon: Circle,
             models: {
-                Meridian: Glb("set_v4/meridian_scout.glb"),
-                Veyran: Glb("set_v4/veyran_scout.glb"),
+                Meridian: Glb("set_v3/meridian_scout.glb"),
+                Veyran: Glb("set_v3/veyran_scout.glb"),
             },
             icon: "scout",
             build_picture: (color: (120, 190, 140), label: "SCOUT", order: 40),
@@ -303,7 +304,7 @@
             cost: 600, build_seconds: 20, hp: 40, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 9,
             weapons: ["long_rifle"],
-            model: Glb("set_v4/meridian_sniper.glb"), strategic_icon: Circle,
+            model: Glb("set_v3/meridian_sniper.glb"), strategic_icon: Circle,
             icon: "sniper",
             build_picture: (color: (60, 120, 90), label: "SNIPE", order: 50),
             // placeholder: build_seconds, turn_rate, size, sight.
@@ -313,7 +314,7 @@
             cost: 400, build_seconds: 12, hp: 40, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             flags: (heal_radius: 2),
-            model: Glb("set_v4/veyran_medic.glb"), strategic_icon: Circle,
+            model: Glb("set_v3/veyran_medic.glb"), strategic_icon: Circle,
             icon: "medic",
             build_picture: (color: (220, 220, 230), label: "MEDIC", order: 60),
             // placeholder: build_seconds, turn_rate, size, sight.
@@ -350,8 +351,8 @@
             weapons: ["twin_cannon"],
             model: Glb("testpack_v1/models/zware_tank.glb"), strategic_icon: Triangle,
             models: {
-                Meridian: Glb("set_v4/meridian_heavy_tank.glb"),
-                Veyran: Glb("set_v4/veyran_heavy_tank.glb"),
+                Meridian: Glb("set_v5/meridian_heavy_tank.glb"),
+                Veyran: Glb("set_v5/veyran_heavy_tank.glb"),
             },
             icon: "heavy_tank",
             build_picture: (color: (150, 100, 60), label: "HTANK", order: 30),
@@ -364,8 +365,8 @@
             weapons: ["howitzer"],
             model: Glb("testpack_v1/models/mobiele_artillerie.glb"), strategic_icon: Triangle,
             models: {
-                Meridian: Glb("set_v4/meridian_siege_artillery.glb"),
-                Veyran: Glb("set_v4/veyran_siege_artillery.glb"),
+                Meridian: Glb("set_v5/meridian_siege_artillery.glb"),
+                Veyran: Glb("set_v5/veyran_siege_artillery.glb"),
             },
             icon: "siege_artillery",
             build_picture: (color: (160, 90, 90), label: "ARTY", order: 40),
@@ -378,8 +379,8 @@
             flags: (repair_radius: 2),
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
             models: {
-                Meridian: Glb("set_v4/meridian_repair_truck.glb"),
-                Veyran: Glb("set_v4/veyran_repair_truck.glb"),
+                Meridian: Glb("set_v5/meridian_repair_truck.glb"),
+                Veyran: Glb("set_v5/veyran_repair_truck.glb"),
             },
             icon: "repair_truck",
             build_picture: (color: (200, 190, 110), label: "REPAIR", order: 50),
@@ -390,7 +391,7 @@
             cost: 600, build_seconds: 18, hp: 300, armor: "light",
             movement: "wheeled", speed: 2.2, turn_rate: 8, size: 1.3, sight: 5,
             flags: (transports: 5),
-            model: Glb("set_v4/veyran_transport_truck.glb"), strategic_icon: Triangle,
+            model: Glb("set_v5/veyran_transport_truck.glb"), strategic_icon: Triangle,
             icon: "transport_truck",
             build_picture: (color: (140, 140, 110), label: "TRUCK", order: 60),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
@@ -400,7 +401,7 @@
             cost: 600, build_seconds: 18, hp: 250, armor: "light",
             movement: "wheeled", speed: 2.5, turn_rate: 10, size: 1.2, sight: 5,
             flags: (transports: 4),
-            model: Glb("set_v4/meridian_light_transport.glb"), strategic_icon: Triangle,
+            model: Glb("set_v5/meridian_light_transport.glb"), strategic_icon: Triangle,
             icon: "light_transport",
             build_picture: (color: (130, 150, 130), label: "LTRAN", order: 70),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
@@ -410,7 +411,7 @@
             cost: 900, build_seconds: 30, hp: 400, armor: "light",
             movement: "hover", speed: 1.5, water_speed: 1.2, turn_rate: 6, size: 1.5, sight: 5,
             flags: (transports: 5, transports_vehicles: 1),
-            model: Glb("set_v4/meridian_amphibious_transport.glb"), strategic_icon: Triangle,
+            model: Glb("set_v5/meridian_amphibious_transport.glb"), strategic_icon: Triangle,
             icon: "amphibious_transport",
             build_picture: (color: (90, 150, 170), label: "AMPH", order: 80),
             // placeholder: build_seconds, armor, turn_rate, size, sight, model.
@@ -422,7 +423,7 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             weapons: ["carbine"],
             flags: (can_capture: true, repairs_structures: true, places_charges: true, builds: ["fortified_bunker"]),
-            model: Glb("set_v4/veyran_combat_engineer.glb"), strategic_icon: Circle,
+            model: Glb("set_v3/veyran_combat_engineer.glb"), strategic_icon: Circle,
             icon: "combat_engineer",
             build_picture: (color: (170, 160, 80), label: "CENG", order: 80),
             // placeholder: build_seconds, turn_rate, size, sight.
@@ -433,17 +434,17 @@
             movement: "foot", speed: 0.6, turn_rate: 8, size: 0.6, sight: 6,
             weapons: ["anti_tank_gun"],
             flags: (deploys: true),
-            model: Shape(Cone), strategic_icon: Circle,
+            model: Glb("set_v5/veyran_heavy_gun_team.glb"), strategic_icon: Circle,
             icon: "heavy_gun_team",
             build_picture: (color: (100, 130, 80), label: "HGUN", order: 90),
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 28, id: "gunboat", factions: [Veyran], category: Vessel,
             cost: 1200, build_seconds: 35, hp: 600, armor: "light",
             movement: "water", speed: 2, turn_rate: 4, size: 1.5, sight: 7,
             weapons: ["naval_cannon"],
-            model: Glb("set_v4/veyran_gunboat.glb"), strategic_icon: HalfCircle,
+            model: Glb("set_v5/veyran_gunboat.glb"), strategic_icon: HalfCircle,
             icon: "gunboat",
             build_picture: (color: (70, 130, 170), label: "GUNBT", order: 10),
             // placeholder: build_seconds, armor, turn_rate, size, sight, model.
@@ -452,7 +453,7 @@
             kind: 29, id: "supply_truck", factions: [Neutral], category: Vehicle,
             hp: 300, armor: "light",
             movement: "wheeled", speed: 1.2, turn_rate: 8, size: 1.3, sight: 5,
-            model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
+            model: Glb("set_v5/neutral_supply_truck.glb"), strategic_icon: Triangle,
             icon: "supply_truck",
             // placeholder: armor, turn_rate, size, sight. Mission object, not buildable.
         ),
@@ -460,7 +461,7 @@
             kind: 30, id: "civilian", factions: [Neutral], category: Infantry,
             hp: 25, armor: "infantry",
             movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
-            model: Glb("set_v4/neutral_civilian.glb"), strategic_icon: Circle,
+            model: Glb("set_v3/neutral_civilian.glb"), strategic_icon: Circle,
             icon: "civilian",
             // placeholder: turn_rate, size, sight.
         ),
@@ -468,7 +469,7 @@
             kind: 31, id: "technician", factions: [Neutral], category: Infantry,
             hp: 25, armor: "infantry",
             movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
-            model: Glb("set_v4/neutral_technician.glb"), strategic_icon: Circle,
+            model: Glb("set_v3/neutral_technician.glb"), strategic_icon: Circle,
             icon: "technician",
             // placeholder: turn_rate, size, sight.
         ),
@@ -512,7 +513,7 @@
             kind: 36, id: "ferry", factions: [Neutral], category: Vessel,
             hp: 600, armor: "light",
             movement: "water", speed: 0.2, turn_rate: 2, size: 3, sight: 4,
-            model: Glb("set_v4/neutral_ferry.glb"), strategic_icon: HalfCircle,
+            model: Glb("set_v5/neutral_ferry.glb"), strategic_icon: HalfCircle,
             icon: "ferry",
             // placeholder: armor, turn_rate, size, sight, model. Speed 0.2 is from units.md.
         ),

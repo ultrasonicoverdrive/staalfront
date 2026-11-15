@@ -17,16 +17,30 @@ use crate::kit::{
 use crate::palette::{Palette, slot::*};
 
 /// The tone of a track shoe (a little darker than the band it sits on).
-const SHOE: crate::kit::Tone = 820;
+pub(crate) const SHOE: crate::kit::Tone = 820;
 
 /// The recipes of set v5, sorted by file name.
 pub const MODELS: &[fn() -> Model] = &[
+    crate::units_transport::meridian_amphibious_transport,
     meridian_construction_center,
     meridian_harvester,
+    crate::units::meridian_heavy_tank,
     meridian_light_tank,
+    crate::units_transport::meridian_light_transport,
+    crate::units_wheeled::meridian_repair_truck,
+    crate::units_artillery::meridian_siege_artillery,
+    crate::units_vessels::neutral_ferry,
+    crate::units_wheeled::neutral_supply_truck,
     veyran_defence_tower,
+    crate::units_vessels::veyran_gunboat,
+    crate::units_transport::veyran_harvester,
+    crate::units_vessels::veyran_heavy_gun_team,
+    crate::units::veyran_heavy_tank,
     veyran_light_tank,
     veyran_power_plant,
+    crate::units_wheeled::veyran_repair_truck,
+    crate::units_artillery::veyran_siege_artillery,
+    crate::units_wheeled::veyran_transport_truck,
 ];
 
 // ---- Shared parts ------------------------------------------------------------------------
@@ -39,17 +53,17 @@ pub(crate) fn both_sides(right: Mesh) -> Mesh {
 /// One track run on the right side: a rubber band with sloped ends from `-hx` to `hx`, between
 /// `z0` and `z1`, `h` high; cleats on its top run and road wheels on its outer face at LOD0, the
 /// wheels with fewer segments at LOD1; a plain block at LOD2.
-struct Track {
-    hx: i32,
-    z0: i32,
-    z1: i32,
-    h: i32,
-    wheels: i32,
-    wheel_r: i32,
+pub(crate) struct Track {
+    pub(crate) hx: i32,
+    pub(crate) z0: i32,
+    pub(crate) z1: i32,
+    pub(crate) h: i32,
+    pub(crate) wheels: i32,
+    pub(crate) wheel_r: i32,
 }
 
 impl Track {
-    fn mesh(&self, lod: Lod) -> Mesh {
+    pub(crate) fn mesh(&self, lod: Lod) -> Mesh {
         let Track {
             hx,
             z0,
