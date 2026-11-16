@@ -231,7 +231,7 @@ be committed, shared or uploaded (B11).
 `sf_game` (the game shell as a library, plus the development viewer binary);
 `tools/` holds `sf_editor`, `sf_headless`, `sf_demo` (the engine demo and
 benchmark, the same shell with the demo's defaults), `sf_icon_gen` (writes the
-placeholder strategic icons in `assets/icons`), `sf_music_gen` (writes the CC0 music of the calm and combat moods in `assets/audio/music`: `cargo run -p sf_music_gen`, `-- --check`, `-- --table`), `sf_sound_gen` (writes the CC0 fight sounds in
+placeholder strategic icons in `assets/icons`), `sf_music_gen` (writes the CC0 music of the calm and combat moods in `assets/audio/music`: `cargo run -p sf_music_gen`, `-- --check`, `-- --table`; the combat track has an orchestral layer from CC0 samples of VSCO 2 Community Edition by Versilian Studios / Sam Gossner, <https://versilian-studios.com/vsco-community/>), `sf_sound_gen` (writes the CC0 fight sounds in
 `assets/audio/sfx`: `cargo run -p sf_sound_gen` to regenerate, `-- --check` to compare, `-- --table` to list them), `sf_voice_gen` (filters the committed Piper renders in `tools/sf_voice_gen/voice_src` into the CC0 unit voices in `assets/audio/voice`: `cargo run -p sf_voice_gen`, `-- --check`, `-- --table`) and `sf_asset_check` (checks
 delivered `.glb` models against the art brief).
 See PLAN.md section 1.1.

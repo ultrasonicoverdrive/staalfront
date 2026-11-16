@@ -18,6 +18,8 @@
 //! checks that the join is no bigger a step than the music has inside.
 
 pub mod flac;
+pub mod orchestra;
+pub mod sampler;
 
 use sf_sound_gen::{Rng, burst, envelope, lowpass, ms, normalise, shape, thump};
 
@@ -57,7 +59,7 @@ pub const TRACKS: [TrackSpec; 2] = [
         bpm: 128,
         key: "D minor",
         bars: 36,
-        character: "driving: four-on-the-floor kick, snare on two and four, 16th hats, a 16th bass ostinato, short chord stabs, a breakdown and a snare-roll build, a square lead in the last third",
+        character: "driving: four-on-the-floor kick, snare on two and four, 16th hats, a 16th bass ostinato, short chord stabs, a breakdown and a snare-roll build, a square lead in the last third, and an orchestral layer of real CC0 samples (timpani, trombone, horn, tuba, cello, crash, bass drum, gong)",
     },
 ];
 
@@ -530,16 +532,28 @@ fn calm() -> Vec<i16> {
     song.finish(104, 150, 40)
 }
 
+/// Root and minor/major of the chord of bar `bar` of the combat track: the A phrase D D Bb C and the B phrase
+/// D G Bb A, in the order of [`COMBAT_PHRASES`].
+const COMBAT_PHRASE_A: [(u32, bool); 4] = [(38, true), (38, true), (34, false), (36, false)];
+const COMBAT_PHRASE_B: [(u32, bool); 4] = [(38, true), (43, true), (34, false), (33, false)];
+/// Which phrase each of the nine sections plays (`true` = B).
+const COMBAT_PHRASES: [bool; 9] = [false, false, true, false, true, false, false, true, false];
+
+fn combat_chord(bar: usize) -> (u32, bool) {
+    if COMBAT_PHRASES[bar / 4] {
+        COMBAT_PHRASE_B[bar % 4]
+    } else {
+        COMBAT_PHRASE_A[bar % 4]
+    }
+}
+
 /// Combat: 128 BPM, D minor, 36 bars (67.5 s) in nine sections of four bars. Bar roots: D D Bb C (A phrase)
 /// and D G Bb A (B phrase). Sections: 0 intro (kick, bass, hats), 1 snare and pad, 2 stabs (B), 3 full (A),
 /// 4 breakdown (B: no kick, no bass, toms and a pad), 5 build (A, snare roll in the last bar), 6 full with
 /// lead (A), 7 full with lead (B), 8 outro (A, thinner, ends on a tom fill that runs into the intro).
-fn combat() -> Vec<i16> {
+fn combat(with_orchestra: bool) -> Vec<i16> {
     let spec = &TRACKS[1];
     let mut song = Song::new(spec.bpm, spec.bars);
-    const PHRASE_A: [(u32, bool); 4] = [(38, true), (38, true), (34, false), (36, false)];
-    const PHRASE_B: [(u32, bool); 4] = [(38, true), (43, true), (34, false), (33, false)];
-    const PHRASES: [bool; 9] = [false, false, true, false, true, false, false, true, false];
     let kick = kick_hard();
     let snare = snare();
     let hats = [hat(0x4841_5431, false), hat(0x4841_5432, false)];
@@ -561,11 +575,7 @@ fn combat() -> Vec<i16> {
 
     for bar in 0..spec.bars as usize {
         let sec = bar / 4;
-        let (root, minor) = if PHRASES[sec] {
-            PHRASE_B[bar % 4]
-        } else {
-            PHRASE_A[bar % 4]
-        };
+        let (root, minor) = combat_chord(bar);
         let step0 = bar * 16;
         let last_of_sec = bar % 4 == 3;
         let breakdown = sec == 4;
@@ -665,7 +675,97 @@ fn combat() -> Vec<i16> {
             song.put(Bus::Echo, step0 + s, 0, &v, 36);
         }
     }
-    song.finish(96, 120, 20)
+    let base = song.finish(96, 120, 20);
+    if with_orchestra {
+        layer_over(&base, &orchestra_layers())
+    } else {
+        base
+    }
+}
+
+/// The orchestral layer of the combat track (WP11.4c), part by part, as rings of the length of the track; 32767
+/// is the full scale of the track. See [`orchestra`].
+pub fn orchestra_layers() -> Vec<(orchestra::Part, Vec<i32>)> {
+    let spec = &TRACKS[1];
+    orchestra::combat_layers(spec.bpm, spec.bars as usize, |bar| combat_chord(bar).0)
+}
+
+/// The combat track without the orchestral layer (what WP11.4b shipped).
+pub fn combat_base() -> Vec<i16> {
+    combat(false)
+}
+
+/// Add the layers to a finished track, limit the sum and bring it back to [`FILE_PEAK`].
+fn layer_over(base: &[i16], layers: &[(orchestra::Part, Vec<i32>)]) -> Vec<i16> {
+    let mut x: Vec<i32> = base.iter().map(|s| i32::from(*s)).collect();
+    for (_, l) in layers {
+        assert_eq!(l.len(), x.len());
+        for (d, s) in x.iter_mut().zip(l) {
+            *d += *s;
+        }
+    }
+    limit_ring(&mut x, FILE_PEAK);
+    normalise(&mut x);
+    let k = i64::from(FILE_PEAK);
+    x.iter()
+        .map(|s| (i64::from(*s) * k / 32_767) as i16)
+        .collect()
+}
+
+/// Length of a limiter block (5 ms) in samples.
+const LIMIT_BLOCK: usize = ms(5);
+/// How fast the gain comes back after a peak: `exp(-5 ms / 150 ms)` per block in Q15 (31696 / 32768).
+const LIMIT_RELEASE_Q15: i64 = 31_696;
+
+/// A look-ahead peak limiter in integer maths. The peaks of 5 ms blocks (and of the next block, so the gain is
+/// down before the peak) give a gain that falls at once and rises again over about 150 ms; the gain is
+/// interpolated linearly between block centres. The track is a ring, so the gain state is run for two laps
+/// and the last block feeds the first: no step at the loop point.
+fn limit_ring(x: &mut [i32], ceiling: i32) {
+    let n = x.len();
+    let nb = n.div_ceil(LIMIT_BLOCK);
+    let peak: Vec<i64> = (0..nb)
+        .map(|b| {
+            x[b * LIMIT_BLOCK..((b + 1) * LIMIT_BLOCK).min(n)]
+                .iter()
+                .map(|s| i64::from(s.abs()))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let want: Vec<i64> = (0..nb)
+        .map(|b| {
+            let p = peak[b].max(peak[(b + 1) % nb]);
+            if p <= i64::from(ceiling) {
+                32_768
+            } else {
+                i64::from(ceiling) * 32_768 / p
+            }
+        })
+        .collect();
+    let mut gain = vec![32_768i64; nb];
+    let mut cur = 32_768i64;
+    for lap in 0..2 {
+        for b in 0..nb {
+            let back = 32_768 - (32_768 - cur) * LIMIT_RELEASE_Q15 / 32_768;
+            cur = want[b].min(back);
+            if lap == 1 {
+                gain[b] = cur;
+            }
+        }
+    }
+    let half = LIMIT_BLOCK / 2;
+    for (i, s) in x.iter_mut().enumerate() {
+        let (b, o) = (i / LIMIT_BLOCK, i % LIMIT_BLOCK);
+        // Between the centre of the neighbour before (or after) and the centre of this block.
+        let (a, c, w) = if o >= half {
+            (gain[b], gain[(b + 1) % nb], o - half)
+        } else {
+            (gain[(b + nb - 1) % nb], gain[b], o + half)
+        };
+        let g = a + (c - a) * w as i64 / LIMIT_BLOCK as i64;
+        *s = (i64::from(*s) * g / 32_768) as i32;
+    }
 }
 
 /// The finished 16-bit samples of a track.
@@ -673,7 +773,7 @@ pub fn render(spec: &TrackSpec) -> Vec<i16> {
     if spec.bank_name == TRACKS[0].bank_name {
         calm()
     } else {
-        combat()
+        combat(true)
     }
 }
 

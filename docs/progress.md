@@ -3754,3 +3754,14 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   their own (same peak and volume as the unit voices). Details: `announcements.md` section 7.
 * **Environment.** The disk filled up during the work (other worktrees hold 30 to 78 GB of `target` each); one corrupt PDB had to
   be deleted and the test binaries relinked.
+
+## WP11.4c: orchestral layer from real CC0 samples in the combat track (16-11-2026)
+
+* **What**: `tools/sf_music_gen` gets an integer sample player (`sampler.rs`), an import step (`--import <VSCO 2 CE dir>`) and the arrangement (`orchestra.rs`);
+  30 samples (2,761,980 bytes) are committed in `tools/sf_music_gen/samples/`. `combat.flac` is 2,050,089 bytes (was 2,021,170); the two tracks 3,559,727 bytes of 4,000,000, budget unchanged.
+  Rules: `docs/rules/audio.md` section 3d-2. Licence row for VSCO 2 CE (CC0) in `assets/LICENSES.md`.
+* **Measured**: combat peak 29,000 before and after, RMS 9,120 -> 9,165. Timpani pitches (autocorrelation, 12 hits): drum 2 about 34.4, drum 3 37.5, drum 5 42.7, roll 37.5 (MIDI); file-name rule 12 x (octave + 2) + pitch class holds for all used pitched samples.
+* **Tests** (`tools/sf_music_gen/tests/orchestra.rs`, 21): sample pins, pitch measurements, pitch-ratio pins, player determinism and unison, no float in the render path, import filter and import of synthetic 24-bit stereo, per-section layers (timpani onsets per beat, brass held, stabs, cello, accents), old track byte-for-byte with the layer off, loudness.
+  Mutations (each reverted): cello sections 5-6 only, gong at bar 17, ln 2 constant off, brass held a quarter bar, timpani on every breakdown bar: each fails the named section or pin test.
+* **Pins**: only `combat.flac` (length, hash) moved, by the layer (shown by the layer-off test); `calm.flac`, `sf_sim` and all scenarios untouched.
+* **Gaps**: the integer render has not been listened to (only the float preview was); mono; levels are the preview's, not tuned by ear.
