@@ -805,10 +805,10 @@ fn same_sector_goals() -> World {
 fn job_in(mut w: World, phase: u8, mode: u8, abs_started: bool) -> World {
     for _ in 0..600 {
         w.step();
-        if let Some((ph, m, _, a)) = w.pathing.job_shape_for_test() {
-            if (ph, m, a) == (phase, mode, abs_started) {
-                return w;
-            }
+        if let Some((ph, m, _, a)) = w.pathing.job_shape_for_test()
+            && (ph, m, a) == (phase, mode, abs_started)
+        {
+            return w;
         }
     }
     panic!("no job in stage {phase}, mode {mode}, begun {abs_started}");
