@@ -24,7 +24,10 @@ fn main() -> ExitCode {
         }
     }
     if table {
-        for l in &sf_voice_gen::LINES {
+        for l in sf_voice_gen::LINES
+            .iter()
+            .chain(&sf_voice_gen::ANNOUNCEMENTS)
+        {
             println!(
                 "| `{}` | `{}` | {} s | \"{}\" |",
                 l.event,

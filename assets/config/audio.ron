@@ -84,6 +84,48 @@
         repeat_gap_ms: 1200,
     ),
 
+    // Announcements (WP11.2c): the status lines of the player's own base ("Unit ready", "Base under attack").
+    // Presentation only; rules in docs/rules/announcements.md. They go through the Voice category (the "Unit
+    // voices" slider). One voice at a time over unit voices and announcements together: an announcement waits
+    // while a unit voice or another announcement sounds, and a unit voice that is asked for while an
+    // announcement sounds is skipped (as the unit voices skip a request while one of them sounds).
+    //   min_gap_ms     after an announcement has started, no other one starts within this many milliseconds
+    //   max_wait_ms    an announcement that has waited this long is dropped (old news is not news)
+    //   queue_len      at most this many wait; when full the lowest priority, then the oldest, goes
+    //   settle_ticks   ticks (20 are a second) after a game starts in which nothing is raised
+    //   fallback/events  per event: priority (higher first) and repeat_gap_ms, the time before the same
+    //                  announcement may start again (at least min_gap_ms); longer for "under attack" and the
+    //                  states that stay (low power, storage full)
+    // An event with no sound (not in bank.ron, no Red Alert file mapped) is silent and uses up no gap.
+    announce: (
+        min_gap_ms: 2000,
+        max_wait_ms: 4000,
+        queue_len: 4,
+        settle_ticks: 100,
+        fallback: (priority: 2, repeat_gap_ms: 5000),
+        events: {
+            "announce.victory": (priority: 10, repeat_gap_ms: 60000),
+            "announce.defeat": (priority: 10, repeat_gap_ms: 60000),
+            "announce.base_under_attack": (priority: 8, repeat_gap_ms: 20000),
+            "announce.harvester_under_attack": (priority: 7, repeat_gap_ms: 15000),
+            "announce.structure_lost": (priority: 7, repeat_gap_ms: 6000),
+            "announce.unit_lost": (priority: 5, repeat_gap_ms: 6000),
+            "announce.low_power": (priority: 6, repeat_gap_ms: 30000),
+            "announce.insufficient_funds": (priority: 5, repeat_gap_ms: 15000),
+            "announce.storage_full": (priority: 4, repeat_gap_ms: 30000),
+            "announce.cannot_deploy": (priority: 4, repeat_gap_ms: 3000),
+            "announce.structure_ready": (priority: 3, repeat_gap_ms: 2000),
+            "announce.unit_ready": (priority: 3, repeat_gap_ms: 2000),
+            "announce.on_hold": (priority: 3, repeat_gap_ms: 10000),
+            "announce.structure_sold": (priority: 3, repeat_gap_ms: 2000),
+            "announce.new_options": (priority: 2, repeat_gap_ms: 10000),
+            "announce.building": (priority: 2, repeat_gap_ms: 2000),
+            "announce.training": (priority: 2, repeat_gap_ms: 2000),
+            "announce.cancelled": (priority: 2, repeat_gap_ms: 2000),
+            "announce.repairing": (priority: 2, repeat_gap_ms: 5000),
+        },
+    ),
+
     // The sounds of the game's events (shots, hits, deaths): which of them play in a frame. The event names
     // are the `sound` fields of effects.ron. An event whose name is not in the sound bank is silent without a
     // message. Per frame the events go through, in this order:

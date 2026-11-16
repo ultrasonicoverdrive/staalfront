@@ -3710,3 +3710,36 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
 * **Heard.** Tijmen listened on 15-11-2026 to the nine filtered lines (the files written at 19:52, the ones in this PR,
   unchanged since) and said "joe klinkt goed".
 * **Gaps.** Not heard in a running game over a fight. One voice for all units and factions.
+
+### WP11.2c notes: announcements (16-11-2026)
+
+* **What changed.** 19 status announcements ("Unit ready", "Base under attack", "Power low", ...) in the Piper joe voice
+  through the unchanged walkie-talkie filter (19 sources in `tools/sf_voice_gen/voice_src/`, 19 outputs in
+  `assets/audio/voice/`, 0.51 to 1.31 s, so the 1.5 s limit held and no separate limit was needed). Raised in the
+  presentation only (`sf_game::announce`), for the local player, from snapshot facts, the shown effects deaths and the sim's
+  placement refusals; a brake (2 s between any two, a repeat gap per event, 20 s for "base under attack", no duplicate in the
+  queue, priorities, one voice channel shared with the unit voices). `--ra-audio` maps 18 Red Alert names (all `.AUD`, checked
+  by onderzoeker; `harvester_under_attack` has none, `structure_lost` is a medium-confidence match). Rules:
+  `docs/rules/announcements.md`.
+* **Pins.** `sf_sim` untouched, no checksum or golden moved. The nine unit voice sources and outputs are byte-equal (their
+  pins in `generator.rs` unchanged and passing; `git status` shows no changed file under the nine names). New pins: 19
+  sources, 19 outputs, 19 event names, 19 bank entries (0.35, Voice, 1 instance, as-is), 18 RA names, the `announce`
+  numbers of `audio.ron`.
+* **Measured.** The played match (`tests/announcements.rs`, real `World` of `m1`, a snapshot per tick): with no gaps a
+  harvester under attack was announced every 40 ticks; with the shipped brake 150 s of attack gave five "base under
+  attack", exactly 400 ticks apart, and no two announcements closer than 40 ticks.
+* **Mutations** (each applied, the named test failed, reverted): no owner check in `deaths`: `only_the_own_deaths_count`;
+  no owner check in `Facts::read`: `an_attack_a_repair_a_sale_and_the_losses_are_announced_for_the_local_player_only`; no
+  repeat gap: `an_event_is_not_raised_again_inside_its_repeat_gap_...`; no dedupe: `the_same_announcement_is_not_queued_twice`;
+  speak while a voice sounds: `an_announcement_does_not_cut_off_or_talk_over_a_voice` (+2); voice channel without the
+  announcements: `the_voice_channel_holds_the_unit_voices_and_every_announcement`; no settle time:
+  `nothing_is_said_while_the_game_settles_...`; an option new every time: `an_option_is_new_once_per_game_...`; priority ignored:
+  `the_most_important_goes_first_...`; attack on any hit-point change: `losing_hit_points_says_...`; storage state not an edge:
+  `low_power_and_storage_full_are_said_when_the_state_starts`; refusal of any player: `a_refused_placement_of_the_local_player_...`;
+  bank volume 0.5: `the_shipped_bank_speaks_every_announcement_without_red_alert_files`; `original_as_is` off: same test; one RA name
+  changed: `shipped_mapping_names_are_pinned`; base-attack gap 2 s: `config::tests::the_shipped_audio_ron_is_these_numbers`.
+* **Gaps.** Not heard by a person, not run in a window (the runner's calls are checked by reading); on_hold, storage_full as its own
+  edge and a repeating factory's cancel are covered by stated facts only; announcements have no loudness test against a fight of
+  their own (same peak and volume as the unit voices). Details: `announcements.md` section 7.
+* **Environment.** The disk filled up during the work (other worktrees hold 30 to 78 GB of `target` each); one corrupt PDB had to
+  be deleted and the test binaries relinked.

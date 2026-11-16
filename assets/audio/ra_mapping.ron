@@ -37,6 +37,29 @@
         "unit.move": "ACKNO.V01",
         "unit.attack": "AFFIRM1.V01",
         "building.placed": "PLACBLDG.AUD",
+        // Announcements (WP11.2c): the status lines of the player's own base. One name per event, checked one
+        // fact at a time by onderzoeker (all .AUD files of SPEECH.MIX). When each one plays in Red Alert has NOT
+        // been checked: the game raises each event by its own rules (docs/rules/announcements.md). Our own line
+        // plays when the file is not found. announce.harvester_under_attack has no Red Alert line (none mapped),
+        // so it always plays our own. announce.structure_lost is the closest match only (medium confidence).
+        "announce.structure_ready": "CONSCMP1.AUD",
+        "announce.unit_ready": "UNITRDY1.AUD",
+        "announce.building": "ABLDGIN1.AUD",
+        "announce.training": "TRAIN1.AUD",
+        "announce.on_hold": "ONHOLD1.AUD",
+        "announce.cancelled": "CANCLD1.AUD",
+        "announce.base_under_attack": "BASEATK1.AUD",
+        "announce.low_power": "LOPOWER1.AUD",
+        "announce.insufficient_funds": "NOFUNDS1.AUD",
+        "announce.storage_full": "SILOND1.AUD",
+        "announce.unit_lost": "UNITLST1.AUD",
+        "announce.structure_lost": "STRCKIL1.AUD",
+        "announce.new_options": "NEWOPT1.AUD",
+        "announce.cannot_deploy": "NODEPLY1.AUD",
+        "announce.victory": "MISNWON1.AUD",
+        "announce.defeat": "MISNLST1.AUD",
+        "announce.structure_sold": "STRUSLD1.AUD",
+        "announce.repairing": "REPAIR1.AUD",
         // Fight sounds (28-10-2026): each event matched by role (who fires it, see weapon_defs.ron) to the
         // Red Alert sound of the same role, one fact at a time, checked by onderzoeker; tried by ear by Tijmen.
         // Red Alert has no sound for placing a demolition charge, for bullet hits or for a miss, so

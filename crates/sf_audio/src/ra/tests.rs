@@ -292,7 +292,28 @@ fn shipped_mapping_names_are_pinned() {
         ("explosion.medium", "KABOOM22.AUD"),
         ("explosion.large", "KABOOM22.AUD"),
         ("unit.destroyed.infantry", "DEDMAN1.AUD"),
+        // Announcements (WP11.2c): checked one fact at a time by onderzoeker; structure_lost is the closest
+        // match only (medium confidence); harvester_under_attack has no Red Alert line and is not here.
+        ("announce.structure_ready", "CONSCMP1.AUD"),
+        ("announce.unit_ready", "UNITRDY1.AUD"),
+        ("announce.building", "ABLDGIN1.AUD"),
+        ("announce.training", "TRAIN1.AUD"),
+        ("announce.on_hold", "ONHOLD1.AUD"),
+        ("announce.cancelled", "CANCLD1.AUD"),
+        ("announce.base_under_attack", "BASEATK1.AUD"),
+        ("announce.low_power", "LOPOWER1.AUD"),
+        ("announce.insufficient_funds", "NOFUNDS1.AUD"),
+        ("announce.storage_full", "SILOND1.AUD"),
+        ("announce.unit_lost", "UNITLST1.AUD"),
+        ("announce.structure_lost", "STRCKIL1.AUD"),
+        ("announce.new_options", "NEWOPT1.AUD"),
+        ("announce.cannot_deploy", "NODEPLY1.AUD"),
+        ("announce.victory", "MISNWON1.AUD"),
+        ("announce.defeat", "MISNLST1.AUD"),
+        ("announce.structure_sold", "STRUSLD1.AUD"),
+        ("announce.repairing", "REPAIR1.AUD"),
     ];
+    assert!(!m.sounds.contains_key("announce.harvester_under_attack"));
     assert_eq!(m.sounds.len(), want.len(), "{:?}", m.sounds);
     for (event, name) in want {
         assert_eq!(
