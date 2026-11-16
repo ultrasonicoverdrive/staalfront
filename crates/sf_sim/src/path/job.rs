@@ -1304,7 +1304,9 @@ impl Job {
 
     /// Reads what [`Job::save`] wrote, with the planner's memory `work` already read. Refused:
     /// a slot, graph, sector or cell out of range, an unknown mode or stage, more legs than a job
-    /// refines, a smoothing cursor past the raw route, a leg said to be ready that has no cells.
+    /// refines, a smoothing cursor past the raw route, and a state the planner never yields in
+    /// (a stage it does not stop in, a leg ready, a search flag of another stage, an abstract
+    /// search not begun where every way to the stage begins it).
     pub(crate) fn restore(r: &mut ByteReader<'_>, b: &Bounds, work: &Work) -> SaveResult<Job> {
         let slot = r.u32()?;
         let ticket = r.u32()?;
@@ -1389,9 +1391,28 @@ impl Job {
             job.legs <= REFINE_LEGS && job.near_stage <= 1,
             "a job counter the planner never reaches",
         )?;
+        // A saved job is always one the planner yielded in (`Pathing::serve` keeps a job only
+        // after `Progress::Yield`): never in Begin or Finish, never with a leg ready (that leg is
+        // used in the same call), searching exactly in the stages that yield inside a search, and
+        // with its abstract search begun in every stage after it.
         ensure(
-            !job.leg_ready || !work.cells.is_empty(),
-            "a job's ready leg has no cells",
+            !matches!(job.phase, Phase::Begin | Phase::Finish) && !job.leg_ready,
+            "a job stopped where the planner never yields",
+        )?;
+        let searches = matches!(
+            job.phase,
+            Phase::ConnectStart | Phase::ConnectGoal | Phase::Nearest | Phase::Refine
+        );
+        ensure(
+            job.searching == searches,
+            "a job's search flag does not match its stage",
+        )?;
+        ensure(
+            (job.abs_started || !matches!(job.phase, Phase::Abstract | Phase::Nearest))
+                && (job.abs_started || job.phase != Phase::Refine || job.mode == Mode::Refill)
+                && (!job.overlay_on || job.mode == Mode::Fresh)
+                && (!job.strict || job.overlay_on),
+            "a job's abstract search was never begun",
         )?;
         let n = work.raw.len();
         ensure(
@@ -1409,8 +1430,10 @@ impl Job {
 impl Job {
     /// 0: more legs than a job refines; 1: a slot past the entities; 2: a ready leg without cells
     /// (with `work`); 3: the smoothing past the raw route; 4: a search past its sector; 5: a
-    /// search in flight in the abstract stage; 6: a search in flight with the leg's cells ready
-    /// (save tests).
+    /// search in flight in the abstract stage; 6: a search in flight with the leg's cells ready;
+    /// 7: the stage Finish; 8: the search flag turned over; 9: the abstract search not begun;
+    /// 10: an overlay; 11: strict without an overlay; 12: the epoch one on; 13: a leg ready;
+    /// 14: the raw route past the route's goal (save tests).
     pub(crate) fn corrupt_for_test(&mut self, what: u8, work: &mut Work) {
         match what {
             0 => self.legs = REFINE_LEGS + 1,
@@ -1421,6 +1444,7 @@ impl Job {
             }
             3 => {
                 self.phase = Phase::Smooth;
+                self.searching = false;
                 if work.raw.is_empty() {
                     work.raw.push((self.pos, self.start_cell));
                 }
@@ -1440,12 +1464,54 @@ impl Job {
                     work.cells.push(self.start_cell);
                 }
             }
+            7 => self.phase = Phase::Finish,
+            8 => self.searching = !self.searching,
+            9 => self.abs_started = false,
+            10 => self.overlay_on = true,
+            11 => {
+                self.strict = true;
+                self.overlay_on = false;
+            }
+            12 => self.epoch = self.epoch.wrapping_add(1),
+            13 => self.leg_ready = true,
+            14 => {
+                // The raw route of the leg ends one cell further on than the route's goal.
+                let &(at, c) = work.raw.last().expect("a leg being smoothed");
+                work.raw.push((at, if c > 0 { c - 1 } else { c + 1 }));
+            }
             _ => {
                 // A search of the start sector in flight, with a cell past the sector in its heap.
                 self.phase = Phase::ConnectStart;
                 self.searching = true;
                 work.local.corrupt_for_test(2);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Job {
+    /// The stage, mode, search flag and whether the abstract search is begun (save tests).
+    pub(crate) fn shape_for_test(&self) -> (u8, u8, bool, bool) {
+        (
+            self.phase.tag(),
+            self.mode.tag(),
+            self.searching,
+            self.abs_started,
+        )
+    }
+
+    /// The memory this job reads given a node that is no portal of graph `g` (save tests): 0 in
+    /// the start links, 1 in the abstract search's heap, 2 as the abstract search's nearest node
+    /// (any node not reached by the search going on).
+    pub(crate) fn corrupt_memory_for_test(&self, what: u8, g: &ClassGraph, work: &mut Work) {
+        let none = (0..g.sector.len() as u32 * SLOTS as u32)
+            .find(|&n| g.sector[node_sector(n) as usize].portal[node_slot(n)] == NO_PORTAL)
+            .expect("a slot without a portal");
+        match what {
+            0 => work.start_links.push((none, 1)),
+            1 => work.search.push_for_test(none),
+            _ => work.search.set_nearest_for_test(none),
         }
     }
 }
@@ -1512,15 +1578,51 @@ impl Job {
     /// rectangle the job's stage searches. A search of another rectangle would read cells outside
     /// it, past the edge of the map.
     ///
-    /// `searching` must belong to a stage that goes on with a search: a job searching in a stage
-    /// that runs none (or in a Refine leg whose cells are ready, which skips the search) would
-    /// carry the heap into the next search, which does not begin again, in a rectangle this check
-    /// never compared it against. The planner clears `searching` whenever a search ends.
+    /// `Job::restore` already ties `searching` to the stages that search; a Refine job whose next
+    /// leg is no search (a step, the goal reached) must not be searching either.
     pub(crate) fn search_fits(&self, g: &ClassGraph, route: &Route, work: &Work) -> bool {
         match self.search_rect(g, route, work) {
-            Some(rect) => !(self.phase == Phase::Refine && self.leg_ready) && work.local.fits(rect),
+            Some(rect) => work.local.fits(rect),
             None => !self.searching,
         }
+    }
+
+    /// Whether the planner's memory this job will read names only portals of its graph (restore
+    /// checks, after the graphs are rebuilt; the job is of the service's epoch, so the graph is
+    /// the one the memory was made on). Once the abstract search is begun the job reads the start
+    /// and goal links, the search's heap, parents and nearest node: each node of the search
+    /// (save the goal) must be a portal that exists, or the planner would take `NO_PORTAL` as a
+    /// cell. In ConnectGoal only the start links are this job's already. Without the abstract
+    /// search begun, a job may carry an earlier job's links, and reads none of them: a Refill job
+    /// refines its route, and the job that reached its goal in its own sector (saved only in
+    /// Smooth) must have a leg that ends that route.
+    pub(crate) fn memory_fits(&self, g: &ClassGraph, route: &Route, work: &Work) -> SaveResult<()> {
+        let exists = |n: u32| {
+            g.sector
+                .get(node_sector(n) as usize)
+                .is_some_and(|s| s.portal[node_slot(n)] != NO_PORTAL)
+        };
+        let links = |l: &[(u32, u32)]| l.iter().all(|&(n, _)| exists(n));
+        let fine = if self.abs_started {
+            links(&work.start_links) && links(&work.goal_links) && work.search.names_only(exists)
+        } else if self.phase == Phase::ConnectGoal {
+            links(&work.start_links)
+        } else {
+            true
+        };
+        ensure(
+            fine,
+            "the planner's memory names a portal that does not exist",
+        )?;
+        let shortcut =
+            self.phase == Phase::Smooth && self.mode != Mode::Refill && !self.abs_started;
+        ensure(
+            !shortcut
+                || (route.abs_len() == 0
+                    && !route.truncated
+                    && work.raw.last().is_some_and(|&(_, c)| c == route.goal)),
+            "a job's leg does not end its route",
+        )
     }
 }
 

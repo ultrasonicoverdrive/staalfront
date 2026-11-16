@@ -396,7 +396,7 @@ fn corruptions() -> Vec<Corruption> {
             let n = w.entities.len() as u32;
             w.pathing.set_slots_for_test(Some(n), None)
         }),
-        ("a job's ready leg has no cells", |w| {
+        ("a job stopped where the planner never yields", |w| {
             w.pathing.corrupt_for_test(2)
         }),
         ("a job's smoothing is past its route", |w| {
@@ -437,11 +437,20 @@ fn corruptions() -> Vec<Corruption> {
         ("a job's search does not fit its stage", |w| {
             w.pathing.corrupt_for_test(15)
         }),
-        ("a job's search does not fit its stage", |w| {
+        ("a job's search flag does not match its stage", |w| {
             w.pathing.corrupt_for_test(20)
         }),
-        ("a job's search does not fit its stage", |w| {
+        ("a job stopped where the planner never yields", |w| {
             w.pathing.corrupt_for_test(21)
+        }),
+        ("a job of another epoch than the path service", |w| {
+            w.pathing.corrupt_for_test(22)
+        }),
+        ("a job of another epoch than the path service", |w| {
+            w.pathing.corrupt_job_for_test(12)
+        }),
+        ("a job stopped where the planner never yields", |w| {
+            w.pathing.corrupt_job_for_test(7)
         }),
         ("a field build out of range", |w| {
             w.pathing.corrupt_for_test(17)
@@ -530,19 +539,6 @@ fn every_impossible_path_or_formation_state_is_corrupt() {
             Err(SaveError::Corrupt(what)),
             "case {k}"
         );
-    }
-}
-
-/// A job begun in an older epoch replans without reading its memory, so memory that no longer
-/// fits its stage is not refused (after a map change `refresh_sectors` rebuilds with that memory).
-#[test]
-fn a_job_of_an_older_epoch_restores_whatever_its_search_memory() {
-    let mut w = mid_flight();
-    w.pathing.corrupt_for_test(15);
-    w.pathing.corrupt_for_test(22);
-    let mut back = World::restore(fresh(), &w.save().unwrap()).expect("an old job is not judged");
-    for _ in 0..60 {
-        back.step();
     }
 }
 
@@ -726,4 +722,266 @@ fn the_most_stuck_attempts_do_not_overflow() {
     assert_eq!(crate::crowd::next_attempts(254, u8::MAX), u8::MAX);
     assert_eq!(crate::crowd::next_attempts(3, 4), 4);
     assert_eq!(crate::crowd::next_attempts(4, 4), 4);
+}
+
+// The job states a saved world can hold (WP13.1b fix round 2). `Pathing::serve` keeps a job only
+// after it yielded, so a save holds a job in one of the stages it yields in, searching exactly when
+// it yields inside a search, its abstract search begun in every stage after it. The worlds below
+// reach each such state for real; each case then breaks one thing.
+
+const CONNECT_START: u8 = 2;
+const CONNECT_GOAL: u8 = 3;
+const ABSTRACT: u8 = 4;
+const NEAREST: u8 = 5;
+const REFINE: u8 = 6;
+const SMOOTH: u8 = 7;
+const FRESH: u8 = 0;
+const REFILL: u8 = 1;
+
+/// Foot soldiers in the top-left sectors, ordered a few at a time to their own sectors and, one
+/// in five, into the rock wall at x 36, which no class can reach (the nearest-cell stage).
+fn unreachable_goals() -> World {
+    let mut w = fresh();
+    let s = |w: &mut World, t: u64, c: Command| w.schedule(Tick(t), PlayerId(0), c).unwrap();
+    for n in 0..24u32 {
+        let pos = p(1 + (n % 6) as i32 * 2, 1 + (n / 6) as i32 * 3);
+        s(
+            &mut w,
+            0,
+            Command::SpawnUnit {
+                kind: FOOT,
+                pos,
+                owner: PlayerId(0),
+            },
+        );
+    }
+    for n in 0..24u32 {
+        let goal = if n % 5 == 4 {
+            p(36, 5)
+        } else {
+            p(14 - (n % 6) as i32, 14 - (n / 6) as i32)
+        };
+        let order = Command::Order {
+            ids: vec![EntityId::new(n, 0)],
+            order: Order::Move(goal),
+            queued: false,
+        };
+        s(&mut w, 1 + u64::from(n / 3), order);
+    }
+    w
+}
+
+/// Foot soldiers beside the rock wall at x 36, ordered eight a tick round its gap to goals in the
+/// same sector: jobs that reach their goal in the start sector without the abstract search, and
+/// smooth that leg over several ticks.
+fn same_sector_goals() -> World {
+    let mut w = fresh();
+    let s = |w: &mut World, t: u64, c: Command| w.schedule(Tick(t), PlayerId(0), c).unwrap();
+    for n in 0..40u32 {
+        let pos = p(33 + (n % 3) as i32, 1 + (n / 3) as i32);
+        s(
+            &mut w,
+            0,
+            Command::SpawnUnit {
+                kind: FOOT,
+                pos,
+                owner: PlayerId(0),
+            },
+        );
+    }
+    for n in 0..40u32 {
+        let order = Command::Order {
+            ids: vec![EntityId::new(n, 0)],
+            order: Order::Move(p(46 - (n % 7) as i32, 15 - (n % 13) as i32)),
+            queued: false,
+        };
+        s(&mut w, 1 + u64::from(n / 8), order);
+    }
+    w
+}
+
+/// The first tick of `w` whose save holds a job of stage `phase` and mode `mode` with the given
+/// abstract-search flag.
+fn job_in(mut w: World, phase: u8, mode: u8, abs_started: bool) -> World {
+    for _ in 0..600 {
+        w.step();
+        if let Some((ph, m, _, a)) = w.pathing.job_shape_for_test() {
+            if (ph, m, a) == (phase, mode, abs_started) {
+                return w;
+            }
+        }
+    }
+    panic!("no job in stage {phase}, mode {mode}, begun {abs_started}");
+}
+
+/// The two worlds above restore at every tick, so the checks of the job's state refuse none of
+/// the states they reach (`a_moving_world_round_trips_at_every_save_tick` is the same for
+/// `moving`): among them a job in the nearest-cell stage and one smoothing the leg to a goal in its
+/// own sector.
+#[test]
+fn every_tick_of_the_job_state_worlds_restores() {
+    for (name, world) in [
+        ("unreachable", unreachable_goals as fn() -> World),
+        ("same sector", same_sector_goals),
+    ] {
+        let mut w = world();
+        let mut shapes = std::collections::BTreeSet::new();
+        for t in 1..=200u64 {
+            w.step();
+            if let Some(s) = w.pathing.job_shape_for_test() {
+                shapes.insert(s);
+            }
+            let bytes = w.save().unwrap();
+            let back =
+                World::restore(fresh(), &bytes).unwrap_or_else(|e| panic!("{name} {t}: {e:?}"));
+            assert_eq!(
+                back.checksum(),
+                w.checksum(),
+                "{name}: checksum after {t} ticks"
+            );
+        }
+        let want = if name == "unreachable" {
+            (NEAREST, FRESH, true, true)
+        } else {
+            (SMOOTH, FRESH, false, false)
+        };
+        assert!(shapes.contains(&want), "{name}: {shapes:?}");
+    }
+}
+
+type JobCase = (&'static str, fn() -> World, fn(&mut World));
+
+/// One impossible job state per rule, each from a real world in the state the case needs.
+fn job_cases() -> Vec<JobCase> {
+    vec![
+        // A leg ready: the planner uses it in the call that made it.
+        (
+            "a job stopped where the planner never yields",
+            || job_in(moving(fresh()), REFINE, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(13),
+        ),
+        (
+            "a job stopped where the planner never yields",
+            || job_in(moving(fresh()), REFINE, REFILL, false),
+            |w| w.pathing.corrupt_job_for_test(13),
+        ),
+        // Not searching in a stage that yields only inside its search, and the other way round.
+        (
+            "a job's search flag does not match its stage",
+            || job_in(moving(fresh()), CONNECT_START, FRESH, false),
+            |w| w.pathing.corrupt_job_for_test(8),
+        ),
+        (
+            "a job's search flag does not match its stage",
+            || job_in(moving(fresh()), CONNECT_GOAL, FRESH, false),
+            |w| w.pathing.corrupt_job_for_test(8),
+        ),
+        (
+            "a job's search flag does not match its stage",
+            || job_in(moving(fresh()), REFINE, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(8),
+        ),
+        (
+            "a job's search flag does not match its stage",
+            || job_in(unreachable_goals(), NEAREST, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(8),
+        ),
+        (
+            "a job's search flag does not match its stage",
+            || job_in(moving(fresh()), ABSTRACT, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(8),
+        ),
+        (
+            "a job's search flag does not match its stage",
+            || job_in(moving(fresh()), SMOOTH, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(8),
+        ),
+        // The abstract search not begun in a stage after it.
+        (
+            "a job's abstract search was never begun",
+            || job_in(moving(fresh()), ABSTRACT, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(9),
+        ),
+        (
+            "a job's abstract search was never begun",
+            || job_in(unreachable_goals(), NEAREST, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(9),
+        ),
+        (
+            "a job's abstract search was never begun",
+            || job_in(moving(fresh()), REFINE, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(9),
+        ),
+        (
+            "a job's abstract search was never begun",
+            || job_in(moving(fresh()), REFINE, REFILL, false),
+            |w| w.pathing.corrupt_job_for_test(10),
+        ),
+        (
+            "a job's abstract search was never begun",
+            || job_in(moving(fresh()), REFINE, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(11),
+        ),
+        // The abstract search's memory naming a node that is no portal of the graph.
+        (
+            "an abstract search node or sector",
+            || job_in(unreachable_goals(), NEAREST, FRESH, true),
+            |w| w.pathing.corrupt_job_memory_for_test(2),
+        ),
+        (
+            "the planner's memory names a portal that does not exist",
+            || job_in(moving(fresh()), ABSTRACT, FRESH, true),
+            |w| w.pathing.corrupt_job_memory_for_test(1),
+        ),
+        (
+            "the planner's memory names a portal that does not exist",
+            || job_in(moving(fresh()), REFINE, FRESH, true),
+            |w| w.pathing.corrupt_job_memory_for_test(0),
+        ),
+        (
+            "the planner's memory names a portal that does not exist",
+            || job_in(moving(fresh()), CONNECT_GOAL, FRESH, false),
+            |w| w.pathing.corrupt_job_memory_for_test(0),
+        ),
+        // The leg of a job that reached its goal in its own sector, past the route's goal; and a
+        // job smoothing a leg of an abstract path said not to have begun that search.
+        (
+            "a job's leg does not end its route",
+            || job_in(same_sector_goals(), SMOOTH, FRESH, false),
+            |w| w.pathing.corrupt_job_for_test(14),
+        ),
+        (
+            "a job's leg does not end its route",
+            || job_in(moving(fresh()), SMOOTH, FRESH, true),
+            |w| w.pathing.corrupt_job_for_test(9),
+        ),
+    ]
+}
+
+#[test]
+fn every_impossible_job_state_is_corrupt() {
+    for (k, (what, world, change)) in job_cases().into_iter().enumerate() {
+        let mut w = world();
+        let bytes = w.save().unwrap();
+        World::restore(fresh(), &bytes).unwrap_or_else(|e| panic!("case {k}: base {e:?}"));
+        change(&mut w);
+        let bytes = w.save().expect("save does not judge");
+        assert_eq!(
+            World::restore(fresh(), &bytes),
+            Err(SaveError::Corrupt(what)),
+            "case {k}"
+        );
+    }
+}
+
+/// Memory an earlier job left (its start links) is not judged for a job that never reads it: a
+/// Refill job refines its route only.
+#[test]
+fn a_refill_job_carries_links_it_never_reads() {
+    let mut w = job_in(moving(fresh()), REFINE, REFILL, false);
+    w.pathing.corrupt_job_memory_for_test(0);
+    let mut back = World::restore(fresh(), &w.save().unwrap()).expect("not read, not judged");
+    for _ in 0..60 {
+        back.step();
+    }
 }

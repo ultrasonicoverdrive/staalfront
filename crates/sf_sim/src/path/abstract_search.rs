@@ -226,6 +226,14 @@ impl AbstractSearch {
         self.path_through(last, out);
     }
 
+    /// Whether every node of the search going on, save the goal, and of its goal links passes
+    /// `exists` (restore checks: they must be portals of the graph).
+    pub(crate) fn names_only(&self, exists: impl Fn(u32) -> bool) -> bool {
+        let current = |n: usize| self.seen[n] == self.generation && self.generation != 0;
+        (0..self.nodes as usize).all(|n| !current(n) || exists(n as u32))
+            && self.goal_links.iter().all(|&(n, _)| exists(n))
+    }
+
     fn path_through(&self, last: u32, out: &mut Vec<u32>) {
         let from = out.len();
         let mut at = last;
@@ -327,7 +335,9 @@ impl AbstractSearch {
         ensure(
             (goal_sector as usize) < sectors.max(1)
                 && goal_links.iter().all(|&(n, _)| (n as usize) < nodes)
-                && nearest.is_none_or(|(_, _, n)| (n as usize) < nodes)
+                && nearest.is_none_or(|(_, _, n)| {
+                    (n as usize) < nodes && seen[n as usize] == generation && generation != 0
+                })
                 && banned[..banned_len].iter().all(|&b| (b as usize) < sectors),
             "an abstract search node or sector",
         )?;
@@ -372,6 +382,21 @@ impl AbstractSearch {
 
 #[cfg(test)]
 impl AbstractSearch {
+    /// Node `n` reached by the search going on, from the start, and in its heap (save tests).
+    pub(crate) fn push_for_test(&mut self, n: u32) {
+        let at = n as usize;
+        self.seen[at] = self.generation;
+        self.g[at] = 0;
+        self.parent[at] = FROM_START;
+        self.heap.push_or_lower(n, (0, 0));
+    }
+
+    /// Node `n`, not reached by the search going on, as its nearest (save tests).
+    pub(crate) fn set_nearest_for_test(&mut self, n: u32) {
+        self.seen[n as usize] = 0;
+        self.nearest = Some((0, 0, n));
+    }
+
     /// A node of the search going on whose parent is not of it (save tests).
     pub(crate) fn corrupt_for_test(&mut self) {
         self.generation = self.generation.max(1);

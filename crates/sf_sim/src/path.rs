@@ -400,6 +400,13 @@ impl Pathing {
         } else {
             None
         };
+        // Only a map change moves the epoch (`refresh_sectors`), and it comes either before the
+        // service runs (commands), which then replans a job of the old epoch at once, or after it
+        // (a structure destroyed), whose tick saves nothing. So a saved job is of this epoch.
+        ensure(
+            self.job.as_ref().is_none_or(|j| j.epoch() == self.epoch),
+            "a job of another epoch than the path service",
+        )?;
         let nodes = (b.sectors * graph::SLOTS) as u64;
         e.route = Routes::restore(r, e.len(), b.cells(), nodes)?;
         let looked = e.route.len().min(e.len());
@@ -486,6 +493,26 @@ impl Pathing {
         }
     }
 
+    /// The stage, mode, search flag and abstract-search flag of the job in flight (save tests).
+    #[cfg(test)]
+    pub(crate) fn job_shape_for_test(&self) -> Option<(u8, u8, bool, bool)> {
+        self.job.as_ref().map(Job::shape_for_test)
+    }
+
+    /// Breaks the job in flight as [`Job`]'s case `what` (save tests).
+    #[cfg(test)]
+    pub(crate) fn corrupt_job_for_test(&mut self, what: u8) {
+        let job = self.job.as_mut().expect("a job in flight");
+        job.corrupt_for_test(what, &mut self.work);
+    }
+
+    /// Gives the job's memory a node that is no portal (save tests, `Job` memory case `what`).
+    #[cfg(test)]
+    pub(crate) fn corrupt_job_memory_for_test(&mut self, what: u8) {
+        let job = self.job.as_ref().expect("a job in flight");
+        job.corrupt_memory_for_test(what, &self.graphs[job.graph], &mut self.work);
+    }
+
     /// The flowfield pool (save tests).
     #[cfg(test)]
     pub(crate) fn fields(&self) -> &Fields {
@@ -520,18 +547,15 @@ impl Pathing {
     /// the local search a job or a field build has in flight fits the rectangle its stage
     /// searches ([`Job::search_fits`]).
     pub(crate) fn check_in_flight(&self, e: &Entities) -> crate::save::SaveResult<()> {
-        // A job begun in an older pathing epoch replans without reading its memory (`Job::work`
-        // checks the epoch first), so its memory may already have been overwritten by
-        // `refresh_sectors` and is not judged.
-        if let Some(job) = self.job.as_ref().filter(|j| j.epoch() == self.epoch) {
+        // The job is of the service's epoch (`Pathing::restore`), so the rebuilt graph is the one
+        // its memory was made on.
+        if let Some(job) = self.job.as_ref() {
+            let (g, route) = (&self.graphs[job.graph], &e.route[job.slot as usize]);
             crate::save::ensure(
-                job.search_fits(
-                    &self.graphs[job.graph],
-                    &e.route[job.slot as usize],
-                    &self.work,
-                ),
+                job.search_fits(g, route, &self.work),
                 "a job's search does not fit its stage",
             )?;
+            job.memory_fits(g, route, &self.work)?;
         }
         if let (Some(c), Some(s)) = (&self.fields.cur, &self.fields.scratch) {
             let f = &self.fields.entries[c.entry];
