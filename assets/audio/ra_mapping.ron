@@ -4,8 +4,8 @@
 //
 // Used only when "Use original Red Alert audio" is on (assets/config/audio.ron
 // or `sf_game --ra-audio <path>`). An event whose file is not found keeps
-// its CC0 sound from bank.ron (every fight event has one since WP11.3b; a few
-// events like unit.select have none yet and stay silent). A mapped original plays as-is:
+// its CC0 sound from bank.ron (every fight event has one since WP11.3b, the unit
+// voices since WP11.2b; building.placed has none and stays silent). A mapped original plays as-is:
 // volume 1, no pitch spread, default voice cap (bank entries with original_as_is: true).
 //
 //   sounds: event -> file name inside the MIX archives ("NAME.AUD", or "NAME.V01" for a voice line), or the

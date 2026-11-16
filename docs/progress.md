@@ -3682,3 +3682,31 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   Red Alert tracks would remove the hitch and was left out because it touches `drive_music`, which WP11.2b's branch also edits. One track per mood: the same loop
   repeats. The loop test proves no click at the join, not that the join sounds musical; the phrase of the last bars is built to flow into the first (a long fade of the last pad into the
   first chord), by design only.
+### WP11.2b notes: unit voices over a walkie-talkie (15-11-2026)
+
+* **What changed.** Nine lines of our own, "Ready", "Online", "Standing by" (`unit.select`), "Moving", "Route set",
+  "On it" (`unit.move`), "Engaging", "Target locked", "Firing" (`unit.attack`), 0.51 to 1.02 s. Source: Piper
+  `en_US-joe-medium` (Tijmen chose joe over norman by ear, 15-11-2026), rendered offline once and committed in
+  `tools/sf_voice_gen/voice_src/` (417,164 bytes); `tools/sf_voice_gen` filters them into `assets/audio/voice/` (265,334 bytes) like a
+  walkie-talkie (Tijmen, 15-11-2026). A first version with an own formant synthesizer and a robot colour was replaced
+  before the PR by that decision; the synthesizer is gone. `sf_audio` bank entries gained `variants` (one file picked
+  per play, never the last one: `pick_variant`); `PlayTrace` gained `file`. `bank.ron` has the three events, category
+  `Voice`, volume 0.35, `max_instances: 1`, `original_as_is: true`. Rules: `voices.md` 3a.
+* **Measured** (`the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound`): every line peaks at
+  0.278 of full scale, the same as the loudest fight sound alone (`explosion.large`); RMS while sounding 0.055 to 0.090
+  against 0.042 for that explosion and 0.105 for the whole 20-tank fight mix (test: at least half of it). Band, with
+  tones: 1.09 at 700 Hz, 1.80 at 1800 Hz, 0.059 at 150 Hz, 0.025 at 6 kHz.
+* **Mutations** (each reverted): `pick_variant` ignoring the last pick: `pick_variant_takes_any_but_the_last_one`,
+  `the_voice_events_pick_their_variants_and_never_repeat_one`; `unit.select` without `original_as_is`:
+  `the_original_voice_wins_where_found_and_the_cc0_lines_play_otherwise` (+1); band top 3000 -> 6000 Hz:
+  `the_walkie_talkie_band_passes_300_to_3000_hz_with_a_presence_bump` and the two pin tests; presence bump off: the band
+  test. The `is_original` guard before the variant pick is load-bearing: a mapped original whose bank entry has
+  variants and `original_as_is: false` resolves to the bank definition with its variants, and without the guard a
+  bank file would replace the Red Alert sound (`a_mapped_original_with_bank_variants_still_plays_the_original` fails
+  without it). Picking before the audibility check: `a_dropped_play_does_not_count_as_the_last_variant`; no skip of
+  missing variants: `a_missing_variant_is_never_picked`.
+* **Pins.** None of an earlier phase moved; `sf_sim` untouched. New pins: the nine sources and the nine outputs (length
+  and hash).
+* **Heard.** Tijmen listened on 15-11-2026 to the nine filtered lines (the files written at 19:52, the ones in this PR,
+  unchanged since) and said "joe klinkt goed".
+* **Gaps.** Not heard in a running game over a fight. One voice for all units and factions.

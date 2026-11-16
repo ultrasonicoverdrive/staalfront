@@ -22,6 +22,7 @@ members = [
     "tools/sf_icon_gen",
     "tools/sf_sound_gen",
     "tools/sf_music_gen",
+    "tools/sf_voice_gen",
     "tools/sf_model_gen",
 ]
 

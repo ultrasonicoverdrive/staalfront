@@ -1064,6 +1064,13 @@ mod tests {
 
     /// [`mixed_peak`] with the frame limiter set to `limit` (`None`: the shipped `max_summed_gain`).
     fn mixed_peak_limited(frames: &[Vec<FxEvent>], limit: Option<f32>) -> f32 {
+        fight_mix(frames, limit)
+            .iter()
+            .fold(0.0f32, |m, v| m.max(v.abs()))
+    }
+
+    /// The mixed fight of [`mixed_peak_limited`] itself, as samples (share of full scale).
+    fn fight_mix(frames: &[Vec<FxEvent>], limit: Option<f32>) -> Vec<f32> {
         let bank = shipped_bank();
         let (fx, mut sound) = setup();
         if let Some(limit) = limit {
@@ -1095,7 +1102,76 @@ mod tests {
                 }
             }
         }
-        mix.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+        mix
+    }
+
+    /// Root mean square of `x`, over the samples above a thousandth of full scale (the sound, not its silence).
+    fn rms_of_sound(x: &[f32]) -> f32 {
+        let on: Vec<f32> = x.iter().copied().filter(|v| v.abs() > 0.001).collect();
+        (on.iter().map(|v| v * v).sum::<f32>() / on.len().max(1) as f32).sqrt()
+    }
+
+    /// WP11.2b: the unit voices at the default settings (voice volume 1.0, effects 1.0) are clearly heard
+    /// over the 20-tank fight, and not louder than the loudest single fight sound. Each of the nine lines is
+    /// played through the game's own path (`AudioSystem::play_as(.., Voice)`, the call of `unit_voice`) and its
+    /// file scaled by the traced gain. Heard: the voice's loudness (RMS while it sounds) is at least half (-6 dB) that of the
+    /// whole fight mix, and above the loudest fight sound's own RMS. Not louder: its peak is at most the peak
+    /// of the loudest fight sound alone at the focus.
+    #[test]
+    fn the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound() {
+        let cfg = AudioConfig::embedded();
+        assert_eq!(cfg.mix.voice_volume, Some(1.0));
+        assert_eq!(cfg.mix.sfx_volume, 1.0);
+        let bank = shipped_bank();
+        let fight = fight_mix(&tank_fight(), None);
+        let fight_rms = rms_of_sound(&fight);
+        let (mut loudest_peak, mut loudest_rms, mut loudest) = (0.0f32, 0.0f32, "");
+        for (name, ev) in every_fight_event([12.0, 12.0], 0) {
+            let alone = fight_mix(&[vec![ev]], None);
+            let peak = alone.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            if peak > loudest_peak {
+                (loudest_peak, loudest_rms, loudest) = (peak, rms_of_sound(&alone), name);
+            }
+        }
+        let mut audio = tracing_audio(&assets());
+        for event in ["unit.select", "unit.move", "unit.attack"] {
+            let def = bank.get(event).unwrap();
+            assert_eq!(def.category, sf_audio::Category::Voice, "{event}");
+            assert_eq!(def.files().count(), 3, "{event}");
+            let mut heard = std::collections::BTreeSet::new();
+            for _ in 0..12 {
+                audio.play_as(event, sf_audio::Category::Voice);
+                let t = audio.take_trace().pop().unwrap();
+                let voice: Vec<f32> = wav_samples(&t.file)
+                    .iter()
+                    .map(|s| f32::from(*s) / 32_768.0 * t.gain)
+                    .collect();
+                let peak = voice.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+                let rms = rms_of_sound(&voice);
+                if heard.insert(t.file.clone()) {
+                    println!(
+                        "WP11.2b: {} peak {peak:.3} rms {rms:.3}; fight mix rms {fight_rms:.3}, loudest fight sound {loudest} peak {loudest_peak:.3} rms {loudest_rms:.3}",
+                        t.file
+                    );
+                }
+                assert!(
+                    peak <= loudest_peak,
+                    "{}: peak {peak} above {loudest} {loudest_peak}",
+                    t.file
+                );
+                assert!(
+                    rms >= fight_rms / 2.0,
+                    "{}: rms {rms} below half the fight's {fight_rms}",
+                    t.file
+                );
+                assert!(
+                    rms > loudest_rms,
+                    "{}: rms {rms} not above {loudest}'s {loudest_rms}",
+                    t.file
+                );
+            }
+            assert_eq!(heard.len(), 3, "{event}: {heard:?}");
+        }
     }
 
     /// 20 tanks in a cluster at the focus fire a volley every 30 ticks, staggered, each shell hits 4 ticks later;
