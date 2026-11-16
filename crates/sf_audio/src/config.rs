@@ -415,7 +415,7 @@ mod tests {
                 ("announce.new_options", 2, 10000),
                 ("announce.on_hold", 3, 10000),
                 ("announce.repairing", 2, 5000),
-                ("announce.storage_full", 4, 30000),
+                ("announce.storage_full", 2, 30000),
                 ("announce.structure_lost", 7, 6000),
                 ("announce.structure_ready", 3, 2000),
                 ("announce.structure_sold", 3, 2000),

@@ -117,11 +117,11 @@ impl Game {
         let mut events = Vec::new();
         fx_events::record(&self.world, &mut events);
         for a in announce::deaths(&events, ME) {
-            self.announcer.raise(a, now);
+            self.announcer.raise_live(a, now);
         }
         // The refusals of the tick, as the runner reads them (it keeps the last ones of the sim thread).
         if let Some(a) = announce::refusal(self.world.placement_rejections(), ME) {
-            self.announcer.raise(a, now);
+            self.announcer.raise_live(a, now);
         }
         while self.announcer.speak(now, &mut self.speaker).is_some() {}
     }
@@ -512,10 +512,22 @@ fn the_shipped_brake_thins_a_long_attack_to_one_announcement_every_20_seconds() 
         .filter(|(_, n)| *n == "announce.base_under_attack")
         .map(|(t, _)| *t)
         .collect();
-    assert!(
-        (3..=8).contains(&base.len()),
-        "{} times: {base:?}",
-        base.len()
+    // Pinned (the world is deterministic): the tank shoots at a structure from tick 1289 until it is destroyed
+    // (a "structure lost" at 2969); then it turns on the harvester ("harvester under attack" at 3009, 3328,
+    // 3648, and "unit lost" at 3888). So the five base attacks are 400 ticks (20 s) apart and the attack on the
+    // base did not stop early because of the brake: the structure it shot at was gone.
+    assert_eq!(base, [1289, 1689, 2089, 2489, 2889]);
+    let lost: Vec<(u64, &str)> = heard
+        .iter()
+        .filter(|(_, n)| n.ends_with("_lost"))
+        .copied()
+        .collect();
+    assert_eq!(
+        lost,
+        [
+            (2969, "announce.structure_lost"),
+            (3888, "announce.unit_lost")
+        ]
     );
     assert!(
         base.windows(2).all(|w| w[1] - w[0] >= 400),
@@ -537,4 +549,50 @@ fn the_shipped_brake_thins_a_long_attack_to_one_announcement_every_20_seconds() 
         let gap = u64::from(rule.repeat_gap_ms) / 50;
         assert!(at.windows(2).all(|w| w[1] - w[0] >= gap), "{event}: {at:?}");
     }
+}
+
+/// The per-tick cost of what the runner does for the announcements on a large world: 3,600 units of the
+/// player, `Facts::read` of a snapshot and `changes` against the facts of the tick before. Prints the numbers
+/// (`--nocapture`); asserts only that the world was large and that the comparison finds what it should.
+#[test]
+fn the_per_tick_cost_on_a_large_world_is_measured() {
+    let mut g = Game::new();
+    g.run(2);
+    let kind = g.kind("rifleman");
+    for i in 0..3600i32 {
+        let pos = Vec2::from_ints(20 + i % 60, 20 + i / 60);
+        g.send(
+            ME,
+            Command::SpawnUnit {
+                kind,
+                pos,
+                owner: ME,
+            },
+        );
+    }
+    g.step();
+    g.step();
+    let snap = SimSnapshot::capture(&g.world);
+    let units = snap.views().iter().filter(|v| v.owner == ME).count();
+    assert!(units > 2500, "{units} units of the player");
+    let runs = 50;
+    let t = std::time::Instant::now();
+    let mut now = Facts::read(&snap, ME, Some(&g.catalog));
+    for _ in 1..runs {
+        now = Facts::read(&snap, ME, Some(&g.catalog));
+    }
+    let read = t.elapsed() / runs;
+    // The tick before had one unit fewer: the comparison has something to find.
+    let mut before = now.clone();
+    before.units.pop();
+    let t = std::time::Instant::now();
+    let mut said = Vec::new();
+    for _ in 0..runs {
+        said = announce::changes(&before, &now);
+    }
+    let diff = t.elapsed() / runs;
+    println!(
+        "large world: {units} units of the player, Facts::read {read:?}, changes {diff:?} (debug build, per tick)"
+    );
+    assert!(said.contains(&Announcement::UnitReady));
 }

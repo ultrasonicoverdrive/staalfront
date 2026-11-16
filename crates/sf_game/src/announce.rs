@@ -70,6 +70,31 @@ pub enum Announcement {
 }
 
 impl Announcement {
+    /// The place of this event in [`Announcement::ALL`] (an exhaustive match: a new event must be given one).
+    pub fn index(self) -> usize {
+        match self {
+            Announcement::StructureReady => 0,
+            Announcement::UnitReady => 1,
+            Announcement::Building => 2,
+            Announcement::Training => 3,
+            Announcement::OnHold => 4,
+            Announcement::Cancelled => 5,
+            Announcement::BaseUnderAttack => 6,
+            Announcement::HarvesterUnderAttack => 7,
+            Announcement::LowPower => 8,
+            Announcement::InsufficientFunds => 9,
+            Announcement::StorageFull => 10,
+            Announcement::UnitLost => 11,
+            Announcement::StructureLost => 12,
+            Announcement::NewOptions => 13,
+            Announcement::CannotDeploy => 14,
+            Announcement::Victory => 15,
+            Announcement::Defeat => 16,
+            Announcement::StructureSold => 17,
+            Announcement::Repairing => 18,
+        }
+    }
+
     pub const ALL: [Announcement; 19] = [
         Announcement::StructureReady,
         Announcement::UnitReady,
@@ -214,7 +239,9 @@ impl Facts {
                 f.units.push(v.id);
             } else if snap.construction_of(v.id).is_some() {
                 f.constructions.push(v.id);
-            } else if snap.menu().factory_function(v.kind).is_some() {
+            } else if snap.menu().factory_function(v.kind).is_some()
+                && crate::sidebar::stands_when_built(snap, v)
+            {
                 let view = snap.factory_of(v.id);
                 f.factories.push(FactoryFact {
                     id: v.id,
@@ -244,8 +271,12 @@ impl Facts {
         f
     }
 
+    /// The health of `id`. `health` is ascending by id (the snapshot's slot order), so this is a binary search.
     fn hp_of(&self, id: EntityId) -> Option<&Health> {
-        self.health.iter().find(|h| h.id == id)
+        self.health
+            .binary_search_by_key(&id, |h| h.id)
+            .ok()
+            .map(|i| &self.health[i])
     }
 
     fn short_of_money(&self) -> bool {
@@ -253,7 +284,13 @@ impl Facts {
     }
 }
 
-/// What happened between two snapshots, in a fixed order. Pure. The first one of a game
+/// Whether `id` is in `list`, which is ascending (every id list of [`Facts`] is: the snapshot walks the slots in order).
+fn has(list: &[EntityId], id: &EntityId) -> bool {
+    list.binary_search(id).is_ok()
+}
+
+/// What happened between two snapshots, in a fixed order. Pure. Every id list of both is ascending, so each
+/// lookup is a binary search: the cost is linear in the entities of the player times a logarithm, not quadratic. The first one of a game
 /// and the one at the end of the settling time are not compared (see [`Announcer::observe`]).
 ///
 /// * `Building`: a structure of the player is going up that was not before. `StructureReady`: one that was
@@ -272,15 +309,12 @@ pub fn changes(prev: &Facts, now: &Facts) -> Vec<Announcement> {
     let new_constructions = now
         .constructions
         .iter()
-        .any(|id| !prev.constructions.contains(id));
-    let finished = prev.constructions.iter().any(|id| {
-        !now.constructions.contains(id) && now.hp_of(*id).is_some() && !now.sales.contains(id)
-    });
-    let new_units = now
-        .units
+        .any(|id| !has(&prev.constructions, id));
+    let finished = prev
+        .constructions
         .iter()
-        .filter(|id| !prev.units.contains(id))
-        .count();
+        .any(|id| !has(&now.constructions, id) && now.hp_of(*id).is_some() && !has(&now.sales, id));
+    let new_units = now.units.iter().filter(|id| !has(&prev.units, id)).count();
     let queued = now.factories.iter().any(|f| {
         f.items
             > prev
@@ -308,7 +342,7 @@ pub fn changes(prev: &Facts, now: &Facts) -> Vec<Announcement> {
     let hit = |harvester: bool, structure: bool| {
         now.health.iter().any(|h| {
             (h.structure == structure && h.harvester == harvester)
-                && !now.sales.contains(&h.id)
+                && !has(&now.sales, &h.id)
                 && prev.hp_of(h.id).is_some_and(|p| h.hp < p.hp)
         })
     };
@@ -332,11 +366,11 @@ pub fn changes(prev: &Facts, now: &Facts) -> Vec<Announcement> {
         ),
         (
             Announcement::StructureSold,
-            now.sales.iter().any(|id| !prev.sales.contains(id)),
+            now.sales.iter().any(|id| !has(&prev.sales, id)),
         ),
         (
             Announcement::Repairing,
-            now.repairs.iter().any(|id| !prev.repairs.contains(id)),
+            now.repairs.iter().any(|id| !has(&prev.repairs, id)),
         ),
         (
             Announcement::Victory,
@@ -441,6 +475,8 @@ pub struct Announcer {
     last_start: Option<u64>,
     last_by_event: [Option<u64>; 19],
     first_tick: Option<u64>,
+    /// The settling time is over (set by [`Announcer::observe`]).
+    settled: bool,
     prev: Option<Facts>,
     /// Every option the sidebar has offered in this game.
     seen_options: BTreeSet<Kind>,
@@ -455,6 +491,7 @@ impl Announcer {
             last_start: None,
             last_by_event: [None; 19],
             first_tick: None,
+            settled: false,
             prev: None,
             seen_options: BTreeSet::new(),
             stats: AnnounceStats::default(),
@@ -486,6 +523,7 @@ impl Announcer {
     pub fn observe(&mut self, facts: Facts, now_ms: u64) {
         let first = *self.first_tick.get_or_insert(facts.tick);
         let settled = facts.tick >= first + u64::from(self.config.settle_ticks);
+        self.settled = settled;
         let new_options = facts
             .options
             .iter()
@@ -505,11 +543,21 @@ impl Announcer {
         self.prev = Some(facts);
     }
 
+    /// [`Announcer::raise`] for what the runner learns outside [`Announcer::observe`] (the shown deaths, the
+    /// refusals of a placement): nothing is raised while the game settles, so the grace of `settle_ticks`
+    /// covers every path. Returns whether it was queued.
+    pub fn raise_live(&mut self, a: Announcement, now_ms: u64) -> bool {
+        if !self.settled {
+            return false;
+        }
+        self.raise(a, now_ms)
+    }
+
     /// Raise `a` at `now_ms`: it waits to be said unless the same one waits already or was said inside its
     /// repeat gap. Returns whether it was queued.
     pub fn raise(&mut self, a: Announcement, now_ms: u64) -> bool {
         self.stats.raised += 1;
-        let index = Announcement::ALL.iter().position(|x| *x == a).unwrap_or(0);
+        let index = a.index();
         let gap = u64::from(self.config.rule(a.event()).repeat_gap_ms);
         let recent = self.last_by_event[index].is_some_and(|at| now_ms.saturating_sub(at) < gap);
         if recent || self.pending.iter().any(|(p, _)| *p == a) {
@@ -556,16 +604,18 @@ impl Announcer {
         {
             return None;
         }
+        // The highest priority; of equal ones the first raised (`max_by_key` would take the last of equal
+        // maxima, and everything raised in one `observe` has the same time), so the index breaks the tie.
         let best = (0..self.pending.len()).max_by_key(|&i| {
             (
                 self.config.rule(self.pending[i].0.event()).priority,
-                std::cmp::Reverse(self.pending[i].1),
+                std::cmp::Reverse(i),
             )
         })?;
         let (a, _) = self.pending.remove(best);
         out.play(a.event());
         self.last_start = Some(now_ms);
-        let index = Announcement::ALL.iter().position(|x| *x == a).unwrap_or(0);
+        let index = a.index();
         self.last_by_event[index] = Some(now_ms);
         self.stats.played += 1;
         Some(a)

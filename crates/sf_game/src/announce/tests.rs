@@ -663,3 +663,96 @@ fn observe_raises_what_changes_gives_and_a_reset_forgets_it_all() {
     assert!(a.is_new_tick(101), "no baseline after a reset");
     assert_eq!(a.stats(), AnnounceStats::default());
 }
+
+#[test]
+fn the_index_of_an_event_is_its_place_in_all() {
+    for (i, a) in Announcement::ALL.iter().enumerate() {
+        assert_eq!(a.index(), i, "{}", a.event());
+    }
+}
+
+/// Everything raised in one `observe` has the same time: of equal priority the first raised is said first
+/// (structure ready and unit ready are both priority 3).
+#[test]
+fn equal_priorities_in_the_same_millisecond_go_in_the_order_raised() {
+    let mut a = announcer();
+    let mut out = Out::new();
+    a.raise(Announcement::StructureReady, 500);
+    a.raise(Announcement::UnitReady, 500);
+    assert_eq!(a.speak(500, &mut out), Some(Announcement::StructureReady));
+    assert_eq!(a.speak(2500, &mut out), Some(Announcement::UnitReady));
+    // The same through `observe`: one change gives both, in the order of `changes`.
+    let mut a = announcer();
+    let mut out = Out::new();
+    let going_up = Facts {
+        health: vec![structure(1, 100), structure(2, 10)],
+        constructions: vec![id(2)],
+        ..Facts::default()
+    };
+    let after = Facts {
+        tick: 101,
+        health: vec![structure(1, 100), structure(2, 100), unit(3, 50)],
+        units: vec![id(3)],
+        ..Facts::default()
+    };
+    a.observe(going_up.clone(), 0);
+    a.observe(
+        Facts {
+            tick: 100,
+            ..going_up
+        },
+        5000,
+    );
+    a.observe(after, 5050);
+    assert_eq!(
+        a.pending(),
+        [Announcement::StructureReady, Announcement::UnitReady]
+    );
+    assert_eq!(a.speak(5050, &mut out), Some(Announcement::StructureReady));
+}
+
+/// A finished refinery: "Structure ready" before "Storage full" although the full store was raised first.
+#[test]
+fn storage_full_is_said_after_structure_ready() {
+    let mut a = announcer();
+    let mut out = Out::new();
+    a.raise(Announcement::StorageFull, 0);
+    a.raise(Announcement::StructureReady, 0);
+    assert_eq!(a.speak(0, &mut out), Some(Announcement::StructureReady));
+    assert_eq!(a.speak(2000, &mut out), Some(Announcement::StorageFull));
+}
+
+/// The grace covers the direct raises too (a death, a refused placement): nothing in the settling time.
+#[test]
+fn a_death_or_a_refusal_in_the_settling_time_says_nothing() {
+    let mut a = announcer();
+    // Before the first facts: the game has not started to settle.
+    assert!(!a.raise_live(Announcement::CannotDeploy, 0));
+    let at = |t: u64| Facts {
+        tick: t,
+        ..Facts::default()
+    };
+    a.observe(at(10), 500);
+    assert!(!a.raise_live(Announcement::UnitLost, 600), "tick 10");
+    a.observe(at(109), 5400);
+    assert!(!a.raise_live(Announcement::CannotDeploy, 5400), "tick 109");
+    assert!(a.pending().is_empty());
+    // Settled at the 100th tick after the first (110): now they are heard.
+    a.observe(at(110), 5450);
+    assert!(a.raise_live(Announcement::CannotDeploy, 5450));
+    assert_eq!(a.pending(), [Announcement::CannotDeploy]);
+    // A new game settles again.
+    a.reset();
+    assert!(!a.raise_live(Announcement::UnitLost, 6000));
+}
+
+/// A factory that is being sold (or has no hit points) is not a standing factory: its queue going away with
+/// it is not a cancel (`Facts::read` leaves it out; here the comparison of the lists without it).
+#[test]
+fn a_factory_that_is_gone_from_the_facts_is_not_a_cancel() {
+    let before = Facts {
+        factories: vec![factory(1, 2)],
+        ..Facts::default()
+    };
+    assert_eq!(said(&before, &Facts::default()), []);
+}

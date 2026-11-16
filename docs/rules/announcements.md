@@ -79,17 +79,26 @@ forgets the baseline, the queue and the gaps.
 | `settle_ticks` | 100 | Nothing is raised in this many ticks after a game starts. |
 | `fallback`, `events` | priority 2, 5000 ms | Per event: `priority` (higher first) and `repeat_gap_ms`, the time before the *same* announcement may start again. |
 
-Per event (priority, repeat gap): victory and defeat 10, 60 s; base under attack 8, **20 s**; harvester under attack 7,
-**15 s**; structure lost 7, 6 s; low power 6, 30 s; unit lost 5, 6 s; not enough credits 5, 15 s; storage full 4, 30 s;
-cannot build there 4, 3 s; structure ready, unit ready, structure sold 3, 2 s; on hold 3, 10 s; new options 2, 10 s;
+Per event (priority, repeat gap; see Order below): victory and defeat 10, 60 s; base under attack 8, **20 s**; harvester under attack 7,
+**15 s**; structure lost 7, 6 s; low power 6, 30 s; unit lost 5, 6 s; not enough credits 5, 15 s;
+cannot build there 4, 3 s; structure ready, unit ready, structure sold 3, 2 s; storage full 2, 30 s (below structure ready: a finished refinery says "Structure ready" first); on hold 3, 10 s; new options 2, 10 s;
 building, training, cancelled 2, 2 s; repairing 2, 5 s.
 
 * **One at a time.** `Announcer::speak` starts at most one announcement per call, and only when `min_gap_ms` has
   passed since the last one started.
 * **The same event is not queued twice.** `raise` refuses an event that is already waiting, and one that started inside
   its own `repeat_gap_ms` (counted from when it started). A base that is hit for two minutes says so every 20 s, not
-  every second (`the_shipped_brake_thins_a_long_attack_to_one_announcement_every_20_seconds`: 150 s of attack in a real
-  match world gave five "base under attack", 400 ticks apart).
+  every second (`the_shipped_brake_thins_a_long_attack_to_one_announcement_every_20_seconds`: 150 s of game time in a real
+  match world: the five "base under attack" are at ticks 1289, 1689, 2089, 2489 and 2889, exactly 400 ticks apart; at 2969 the
+  structure the tank was shooting is destroyed ("structure lost"), and the tank then turns on the harvester ("harvester under
+  attack" at 3009, 3328 and 3648, "unit lost" at 3888). The list is pinned as literals, so five is what the world gives for
+  an attack on one structure, not a cap of the brake).
+* **Order.** Higher priority first; of equal priority the one raised first (the index in the queue breaks the tie, because
+  everything raised from one snapshot has the same time): structure ready, unit ready and structure sold (3) before new options,
+  building, training, cancelled, repairing and storage full (2).
+* **The settling time covers every path.** `raise_live` (used for the shown deaths and the refusals of a placement) is refused
+  until the settling ticks are over, like the changes `observe` finds; a refused placement in the first 5 s is silent
+  (`a_death_or_a_refusal_in_the_settling_time_says_nothing`).
 * **A waiting queue, by priority.** What cannot be said at once waits (it is not lost like a skipped unit voice): the
   highest priority first, equal ones in the order raised.
 * **A silent event** (nothing in `bank.ron`, no Red Alert file) is dropped without a message and uses up no gap.
@@ -155,10 +164,18 @@ There is no separate slider for announcements.
   pinned by `shipped_mapping_names_are_pinned`; with a fake install, the original wins where found and our line plays
   otherwise: `the_original_announcement_wins_where_found_and_our_line_plays_otherwise`.
 
+* **Cost.** `Facts::read` plus `changes` run once per new snapshot tick and only in a match. On a world with 3,121 units of the
+  player (debug build, this laptop, `the_per_tick_cost_on_a_large_world_is_measured`): `Facts::read` 1.8 ms and `changes` 23.0 ms
+  while the lookups were linear scans; after they became binary searches `Facts::read` 2.2 ms (the same, run to run noise) and
+  `changes` 1.1 ms. Same machine, same test, one run each, run alternately with nothing else started by me; other agents'
+  builds may have been running on it. Per tick, a release build is faster; the 20 ticks a second budget is not threatened either way.
+  The id lists of `Facts` are ascending (the snapshot walks the slots in order) and `changes` relies on it.
+
 ## 5. Where it is wired
 
 * `crates/sf_game/src/announce.rs`: `Announcement` (the 19 events), `Facts` and `Facts::read`, `changes`, `deaths`,
-  `refusal`, `Announcer` (the brake and the queue), `AnnounceOut` and `voice_channel`.
+  `refusal`, `Announcer` (`raise_live` for the shown deaths and the refusals: it honours the settling time, `raise` is the
+  ungated queue) (the brake and the queue), `AnnounceOut` and `voice_channel`.
 * `crates/sf_audio/src/announce_config.rs`: `AnnounceConfig`/`AnnounceRule` (`announce` in `audio.ron`).
 * `runner.rs`: in the audio part of the frame, after the music mood and before the fight sounds (the shown events
   are still there): `Facts::read` when the snapshot's tick is new, `announce::deaths(self.fx.shown())`, `speak`; and in

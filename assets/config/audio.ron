@@ -112,7 +112,7 @@
             "announce.unit_lost": (priority: 5, repeat_gap_ms: 6000),
             "announce.low_power": (priority: 6, repeat_gap_ms: 30000),
             "announce.insufficient_funds": (priority: 5, repeat_gap_ms: 15000),
-            "announce.storage_full": (priority: 4, repeat_gap_ms: 30000),
+            "announce.storage_full": (priority: 2, repeat_gap_ms: 30000),
             "announce.cannot_deploy": (priority: 4, repeat_gap_ms: 3000),
             "announce.structure_ready": (priority: 3, repeat_gap_ms: 2000),
             "announce.unit_ready": (priority: 3, repeat_gap_ms: 2000),

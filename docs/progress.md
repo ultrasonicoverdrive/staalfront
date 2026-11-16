@@ -3726,8 +3726,9 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   sources, 19 outputs, 19 event names, 19 bank entries (0.35, Voice, 1 instance, as-is), 18 RA names, the `announce`
   numbers of `audio.ron`.
 * **Measured.** The played match (`tests/announcements.rs`, real `World` of `m1`, a snapshot per tick): with no gaps a
-  harvester under attack was announced every 40 ticks; with the shipped brake 150 s of attack gave five "base under
-  attack", exactly 400 ticks apart, and no two announcements closer than 40 ticks.
+  harvester under attack was announced every 40 ticks; with the shipped brake the 150 s run gave five "base under
+  attack" at ticks 1289, 1689, 2089, 2489, 2889 (exactly 400 apart; pinned as literals; at 2969 the structure the tank shot at was
+  destroyed and the tank turned on the harvester), and no two announcements closer than 40 ticks.
 * **Mutations** (each applied, the named test failed, reverted): no owner check in `deaths`: `only_the_own_deaths_count`;
   no owner check in `Facts::read`: `an_attack_a_repair_a_sale_and_the_losses_are_announced_for_the_local_player_only`; no
   repeat gap: `an_event_is_not_raised_again_inside_its_repeat_gap_...`; no dedupe: `the_same_announcement_is_not_queued_twice`;
@@ -3738,6 +3739,16 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   `low_power_and_storage_full_are_said_when_the_state_starts`; refusal of any player: `a_refused_placement_of_the_local_player_...`;
   bank volume 0.5: `the_shipped_bank_speaks_every_announcement_without_red_alert_files`; `original_as_is` off: same test; one RA name
   changed: `shipped_mapping_names_are_pinned`; base-attack gap 2 s: `config::tests::the_shipped_audio_ron_is_these_numbers`.
+* **Review round (pre-review sweep).** Ties in the queue now go to the first raised (`equal_priorities_in_the_same_millisecond_...`,
+  mutation `tie_last` fails it); the deaths and refusals go through `raise_live`, which honours the settling time
+  (`a_death_or_a_refusal_in_the_settling_time_says_nothing`, mutation `no_grace`); the five "base under attack" are pinned as
+  literals and the reason for five is that the shot structure was destroyed at tick 2969 and the tank turned to the harvester;
+  `changes` uses binary searches (large world of 3,121 units, debug build: `changes` 23.0 ms before, 1.1 ms after;
+  `Facts::read` 1.8 ms before, 2.2 ms after, same code, noise); `Facts::read` lists only standing factories; `Announcement::index()`
+  is an exhaustive match; `Announcer::stats()` is printed once in the end summary (`summary: announcements ...`); `storage_full`
+  priority 4 -> 2 (below structure ready). Mutations added: `min_gap_ms` 2000 -> 0 (`only_one_announcement_starts_at_a_time_...`),
+  `max_wait_ms` 4000 -> 40000 (`old_news_is_dropped`), `queue_len` 4 -> 8 (`a_full_queue_drops_...`), cancel rule `taken_out > 0`
+  (`a_unit_that_leaves_a_factory_says_unit_ready`). Wording: the licence line no longer says "nothing taken from any game".
 * **Gaps.** Not heard by a person, not run in a window (the runner's calls are checked by reading); on_hold, storage_full as its own
   edge and a repeating factory's cancel are covered by stated facts only; announcements have no loudness test against a fight of
   their own (same peak and volume as the unit voices). Details: `announcements.md` section 7.

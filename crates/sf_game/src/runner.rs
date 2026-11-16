@@ -1631,7 +1631,7 @@ impl Runner {
                     announce::refusal(&last[last.len() - new..], commands::LOCAL_PLAYER)
             {
                 let at = self.now_ms();
-                self.announcer.raise(a, at);
+                self.announcer.raise_live(a, at);
             }
             // Only the local player's own refusals go to its top bar.
             for r in last[last.len() - new..]
@@ -3054,7 +3054,7 @@ impl App for Runner {
                     self.announcer.observe(facts, announce_ms);
                 }
                 for a in announce::deaths(self.fx.shown(), commands::LOCAL_PLAYER) {
-                    self.announcer.raise(a, announce_ms);
+                    self.announcer.raise_live(a, announce_ms);
                 }
                 if let Some(said) = self.announcer.speak(announce_ms, audio) {
                     println!("announce: tick {tick} {}", said.event());
@@ -3303,6 +3303,7 @@ impl App for Runner {
         }
         self.write_record(&exit, None);
         println!("summary: fight sounds {:?}", self.fx_sound.totals());
+        println!("summary: announcements {:?}", self.announcer.stats());
         // Summary for the stress test (software rendering: no fps claim).
         println!(
             "summary: {} units requested, {} in the world, {} frames",
