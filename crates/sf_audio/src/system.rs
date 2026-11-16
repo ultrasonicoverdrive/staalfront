@@ -493,14 +493,6 @@ impl AudioSystem {
         if self.player.is_none() && self.trace.is_none() {
             return;
         }
-        let mut file = path.display().to_string();
-        if !def.variants.is_empty() && !self.is_original(name) {
-            let f = self.pick_file(name, &def).to_string();
-            path = self.root.join(&f);
-            file = f;
-        } else if !self.is_original(name) {
-            file.clone_from(&def.file);
-        }
         let (mut gain, mut pan) = (self.base_gain(&def, category) * scale, 0.0);
         if let Some(pos) = pos {
             let m = spatial::mix(&self.listener, pos, &self.params);
@@ -511,6 +503,21 @@ impl AudioSystem {
             gain *= m.gain;
             pan = m.pan;
         }
+        // The variant is picked only for a play that gets this far; it counts as the last one only once the
+        // output took it (below), so a dropped play never moves it. A mapped original is never a bank file:
+        // with `original_as_is: false` its definition is the bank's, variants included, and the key stays.
+        let original = self.is_original(name);
+        let mut pick = None;
+        let file = if original {
+            path.display().to_string()
+        } else if def.variants.is_empty() {
+            def.file.clone()
+        } else {
+            let (i, f) = self.pick_file(name, &def);
+            pick = Some(i);
+            path = self.root.join(&f);
+            f
+        };
         if let Some(t) = &mut self.trace {
             t.push(PlayTrace {
                 name: name.to_string(),
@@ -531,6 +538,13 @@ impl AudioSystem {
                 looped: def.looped,
             })
         });
+        let taken = match outcome {
+            Some(o) => matches!(o, Outcome::Played | Outcome::AlreadyPlaying),
+            None => true, // tracing without a device: what would have been played
+        };
+        if let (Some(i), true) = (pick, taken) {
+            self.last_variant.insert(name.to_string(), i);
+        }
         self.record(outcome);
     }
 
@@ -916,12 +930,25 @@ impl AudioSystem {
     }
 
     /// One of the sound's files for this play (`file` or a variant), never the one it played last.
-    fn pick_file<'d>(&mut self, name: &str, def: &'d SoundDef) -> &'d str {
-        let count = 1 + def.variants.len();
+    /// Its index among `file` and the variants, and the file (as written in the bank). Files that are not on
+    /// disk are skipped (a missing variant warned when the bank loaded); with none on disk, `file` is played
+    /// and fails like any missing sound.
+    fn pick_file(&mut self, name: &str, def: &SoundDef) -> (usize, String) {
+        let present: Vec<(usize, &str)> = def
+            .files()
+            .enumerate()
+            .filter(|(_, f)| self.root.join(f).is_file())
+            .collect();
+        if present.is_empty() {
+            return (0, def.file.clone());
+        }
+        let last = self
+            .last_variant
+            .get(name)
+            .and_then(|l| present.iter().position(|(i, _)| i == l));
         let roll = self.next_random();
-        let i = pick_variant(count, self.last_variant.get(name).copied(), roll);
-        self.last_variant.insert(name.to_string(), i);
-        def.files().nth(i).unwrap_or(&def.file)
+        let (i, f) = present[pick_variant(present.len(), last, roll)];
+        (i, f.to_string())
     }
 
     fn next_random(&mut self) -> u32 {
@@ -1446,6 +1473,17 @@ mod tests {
             assert_eq!(def.files().collect::<Vec<_>>(), files, "{event}");
             assert_eq!(def.category, Category::Voice, "{event}");
             assert!(def.original_as_is, "{event}");
+            // The shipped tuning, as literals.
+            assert_eq!(
+                (
+                    def.volume,
+                    def.max_instances,
+                    def.pitch_variation,
+                    def.looped
+                ),
+                (0.35, 1, 0.0, false),
+                "{event}"
+            );
             let mut seen = BTreeSet::new();
             let mut last = String::new();
             for _ in 0..30 {
@@ -1461,6 +1499,81 @@ mod tests {
             assert_eq!(seen.len(), 3, "{event}: {seen:?}");
         }
         assert_eq!(s.stats().unknown, 0);
+    }
+
+    /// A play that is dropped (here: too far away to hear) picks no variant and does not count as the last one,
+    /// so two lines that are heard one after the other always differ.
+    #[test]
+    fn a_dropped_play_does_not_count_as_the_last_variant() {
+        let mut s = AudioSystem::silent(assets());
+        s.set_trace(true);
+        s.set_listener(Listener::new([0.0; 3], [1.0, 0.0, 0.0], 30.0));
+        let mut last = String::new();
+        for _ in 0..40 {
+            s.play_as("unit.move", Category::Voice);
+            let heard = s.take_trace().pop().unwrap().file;
+            assert_ne!(heard, last, "the line heard before was repeated");
+            last = heard;
+            for _ in 0..3 {
+                s.play_at("unit.move", [5_000.0, 0.0, 0.0]);
+            }
+            assert!(s.take_trace().is_empty(), "inaudible plays are dropped");
+        }
+        assert_eq!(s.stats().inaudible, 120);
+    }
+
+    /// A variant that is not on disk warned when the bank loaded and is never picked.
+    #[test]
+    fn a_missing_variant_is_never_picked() {
+        let d = scratch(
+            "missing_variant",
+            r#"(sounds: {"v": (file: "audio/sfx/test_click.wav",
+                variants: ["audio/sfx/gone.wav", "audio/sfx/other.wav"], category: Voice)})"#,
+        );
+        std::fs::copy(
+            d.join("audio/sfx/test_click.wav"),
+            d.join("audio/sfx/other.wav"),
+        )
+        .unwrap();
+        let mut s = AudioSystem::silent(&d);
+        s.set_trace(true);
+        let mut seen = BTreeSet::new();
+        for _ in 0..30 {
+            s.play("v");
+            seen.insert(s.take_trace().pop().unwrap().file);
+        }
+        assert_eq!(
+            seen.into_iter().collect::<Vec<_>>(),
+            ["audio/sfx/other.wav", "audio/sfx/test_click.wav"]
+        );
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    /// A mapped original whose bank entry has variants and is *not* `original_as_is` takes the entry's volume, but
+    /// plays the Red Alert sound, never one of the bank's files: the `is_original` guard before the pick.
+    #[test]
+    fn a_mapped_original_with_bank_variants_still_plays_the_original() {
+        let (d, install) = ra_root("ra_variants");
+        std::fs::write(
+            d.join("audio/bank.ron"),
+            r#"(sounds: {"unit.move": (file: "audio/sfx/test_click.wav",
+                variants: ["audio/sfx/test_click.wav"], volume: 0.5, category: Voice)})"#,
+        )
+        .unwrap();
+        let mut s = mock_at(&d);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        wait_for_ra(&mut s);
+        s.set_trace(true);
+        for _ in 0..5 {
+            s.play_as("unit.move", Category::Voice);
+            let t = s.take_trace().pop().unwrap();
+            assert_eq!(t.file, "ra-audio:unit.move");
+            assert_eq!(t.gain, 0.5, "the bank's volume (not original_as_is)");
+        }
+        std::fs::remove_dir_all(d).ok();
     }
 
     /// WP11.2b: with the original audio on, a mapped voice event plays the Red Alert line as-is (volume 1, no

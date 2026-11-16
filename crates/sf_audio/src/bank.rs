@@ -186,7 +186,7 @@ impl Bank {
                 }
                 if !file_exists(v) {
                     warnings.push(format!(
-                        "sound '{name}': variant '{v}' not found; it will be skipped when picked"
+                        "sound '{name}': variant '{v}' not found; it is skipped when a variant is picked"
                     ));
                 }
                 true

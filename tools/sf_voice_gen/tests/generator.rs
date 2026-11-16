@@ -89,7 +89,7 @@ fn the_committed_files_are_what_a_fresh_run_writes() {
 }
 
 #[test]
-fn every_line_is_an_unclipped_mono_wav_of_at_most_15_s_near_its_trimmed_source_with_the_same_peak()
+fn every_line_is_an_unclipped_mono_wav_of_at_most_1_5_s_near_its_trimmed_source_with_the_same_peak()
 {
     let mut total = 0usize;
     for l in &LINES {
@@ -154,6 +154,16 @@ fn three_lines_per_event_with_the_agreed_words() {
             "{key} not in piper_lines.py"
         );
     }
+}
+
+#[test]
+fn a_short_or_broken_wav_is_an_error_not_a_panic() {
+    let mut head = b"RIFF\0\0\0\0WAVEfmt ".to_vec();
+    head.extend_from_slice(&4u32.to_le_bytes());
+    head.extend_from_slice(&[1, 0, 1, 0]);
+    assert!(read_wav(&head).is_err(), "a 4-byte fmt chunk");
+    assert!(read_wav(b"RIFF").is_err());
+    assert!(read_wav(b"nope nope nope").is_err());
 }
 
 #[test]

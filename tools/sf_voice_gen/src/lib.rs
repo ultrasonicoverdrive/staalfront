@@ -342,9 +342,12 @@ pub fn read_wav(bytes: &[u8]) -> Result<Vec<i16>, String> {
             .get(at + 8..at + 8 + len)
             .ok_or("chunk runs past the end")?;
         if id == b"fmt " {
+            if len < 16 {
+                return Err("fmt chunk too short".into());
+            }
             let u16_at = |o: usize| u16::from_le_bytes([body[o], body[o + 1]]);
             let rate = u32::from_le_bytes([body[4], body[5], body[6], body[7]]);
-            if len < 16 || u16_at(0) != 1 || u16_at(2) != 1 || u16_at(14) != 16 {
+            if u16_at(0) != 1 || u16_at(2) != 1 || u16_at(14) != 16 {
                 return Err("not 16-bit mono PCM".into());
             }
             if rate != SAMPLE_RATE {

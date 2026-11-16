@@ -92,11 +92,23 @@ field radio (Tijmen, 15-11-2026: it must sound like a walkie-talkie; this replac
 | `unit.attack` | `unit_attack_target_locked.wav` | 0.853 s | "Target locked" |
 | `unit.attack` | `unit_attack_firing.wav` | 0.555 s | "Firing" |
 
+**Variants.** A bank entry may list `variants: [..]`, more files besides `file`. Each play picks one of them at random
+(presentation side, the audio system's own xorshift), never the one this name played last (`sf_audio::pick_variant`;
+tests `pick_variant_takes_any_but_the_last_one`, `the_voice_events_pick_their_variants_and_never_repeat_one`). Volume,
+pitch, cap and category are shared by the variants. A variant path outside the asset root is removed with a warning; a
+variant that is not on disk warns when the bank loads and is skipped when a variant is picked
+(`a_missing_variant_is_never_picked`). A play that is dropped (inaudible, over the cap, or a failed load) does not count
+as the last pick (`a_dropped_play_does_not_count_as_the_last_variant`). A mapped Red Alert sound never plays a bank
+file, also when its entry has variants and is not `original_as_is`
+(`a_mapped_original_with_bank_variants_still_plays_the_original`). The brake (section 2) is unchanged: it sees the
+event, not the file.
+
 The chain, per line (`render` in `tools/sf_voice_gen/src/lib.rs`; every number is a named constant there):
 
 1. **Trim** Piper's silence: from 15 ms before the first sample above 2 % of the peak to 40 ms after the last.
-2. **Band**: two high passes at 300 Hz and two low passes at 3000 Hz (Butterworth biquads, fourth order on each
-   side), and a presence bell of +6 dB at 1800 Hz. Measured with tones (`the_walkie_talkie_band_passes_300_to_3000_hz_with_a_presence_bump`):
+2. **Band**: two cascaded high-pass biquads at 300 Hz and two cascaded low-pass biquads at 3000 Hz (each Q 0.707,
+   so -6 dB at the corner and 24 dB per octave beyond it), and a presence bell at 1800 Hz of nominal +6 dB
+   (measured about +5 dB over the band, because the edges also act there). Measured with tones (`the_walkie_talkie_band_passes_300_to_3000_hz_with_a_presence_bump`):
    gain 1.09 at 700 Hz, 1.80 at 1800 Hz, 0.059 at 150 Hz, 0.012 at 100 Hz, 0.025 at 6 kHz, 0.002 at 8 kHz.
 3. **Radio compressor** (gain `knee / (envelope + knee)`, knee 20 % of the peak, release 40 ms) and **soft
    saturation** (driven to 140 %, bent by `1.5u - 0.5u^3`), then the two low passes once more so the grit stays in
