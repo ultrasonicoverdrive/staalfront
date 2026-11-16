@@ -234,7 +234,9 @@ fn renderer() -> Renderer {
     r
 }
 
-/// A view from `elevation_deg` down, from the front-right, framing a model of radius `radius`.
+/// A view from `elevation_deg` down, from the front-right, framing a model of radius `radius`: the
+/// whole bounding sphere fits the 40° vertical field (WP11.6r: at 2.3 radii long models were cut
+/// off), and seen from above the model's length runs across the wide side of the tile.
 fn view(centre: Vec3, radius: f32, elevation: f32) -> Mat4 {
     // cos/sin of the azimuth (35 degrees from +X towards +Z) and of the elevation.
     let (ca, sa) = (0.819_f32, 0.574_f32);
@@ -243,9 +245,10 @@ fn view(centre: Vec3, radius: f32, elevation: f32) -> Mat4 {
     } else {
         (0.707_f32, 0.707_f32)
     };
-    let d = radius * 2.3;
+    // sin(20°) = 0.342: the distance at which the sphere just fits, plus a margin.
+    let d = radius / 0.342 * 1.04;
     let eye = centre + Vec3::new(ca * ce, se, sa * ce) * d;
-    let up = if elevation > 60.0 { Vec3::X } else { Vec3::Y };
+    let up = if elevation > 60.0 { -Vec3::Z } else { Vec3::Y };
     let proj =
         rh::proj::directx::perspective(40_f32.to_radians(), TW as f32 / TH as f32, 0.1, d * 4.0);
     proj * rh::view::look_at_mat4(eye, centre, up)
@@ -272,7 +275,8 @@ fn every_model_is_drawn_in_its_player_colour_and_the_contact_sheet_is_written_on
         let b = glb::bounds_of(model);
         let ext = b.max - b.min;
         let radius = (ext.length() * 0.5).max(1.0);
-        let centre = Vec3::new(at.0, b.max.y * 0.4, at.1);
+        let mid = (b.min + b.max) * 0.5;
+        let centre = Vec3::new(at.0 + mid.x, mid.y, at.1 + mid.z);
         let mut counts = [[0usize; 2]; 2];
         for player in [0u8, 1] {
             for elevation in [45.0, 80.0] {
@@ -333,9 +337,9 @@ fn every_model_is_drawn_in_its_player_colour_and_the_contact_sheet_is_written_on
         );
     }
     if let Some(dir) = std::env::var_os("SF_SAVE_SHOTS") {
-        // One sheet per group; two models per row, each as four half-size tiles (blue 45, blue
-        // 80, red 45, red 80).
-        let (w, h) = (TW / 2, TH / 2);
+        // One sheet per group; two models per row, each as four full-size tiles (blue 45, blue
+        // 80, red 45, red 80; WP11.6r: full size, the half-size tiles hid the facets).
+        let (w, h) = (TW, TH);
         for group in [
             "structures",
             "build_stages",
@@ -358,18 +362,9 @@ fn every_model_is_drawn_in_its_player_colour_and_the_contact_sheet_is_written_on
                     let (cx, cy) = ((slot as u32 % 2) * 4 + k as u32, slot as u32 / 2);
                     for y in 0..h {
                         for x in 0..w {
-                            // A 2 x 2 box filter.
-                            let mut sum = [0u32; 4];
-                            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                                let p = tile.pixel(x * 2 + dx, y * 2 + dy);
-                                for c in 0..4 {
-                                    sum[c] += u32::from(p[c]);
-                                }
-                            }
+                            let p = tile.pixel(x, y);
                             let o = (((cy * h + y) * w * cols + cx * w + x) * 4) as usize;
-                            for c in 0..4 {
-                                px[o + c] = (sum[c] / 4) as u8;
-                            }
+                            px[o..o + 4].copy_from_slice(&p);
                         }
                     }
                 }

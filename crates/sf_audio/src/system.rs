@@ -1,6 +1,6 @@
 //! [`AudioSystem`]: the public face of the crate.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -47,6 +47,8 @@ pub struct AudioSystem {
     category_volume: [f32; 4],
     master_volume: f32,
     rng: u32,
+    /// The variant each sound with variants played last (WP11.2b), so the next play picks another.
+    last_variant: BTreeMap<String, usize>,
     stats: Stats,
     warned: BTreeSet<String>,
     ra: Ra,
@@ -127,6 +129,9 @@ impl MusicState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlayTrace {
     pub name: String,
+    /// The file played: as written in the bank (the picked variant), or `ra-audio:<event>` for a mapped
+    /// Red Alert sound.
+    pub file: String,
     /// Base volume x category volume x spatial gain.
     pub gain: f32,
     pub pan: f32,
@@ -170,6 +175,20 @@ fn default_def(key: &Path) -> SoundDef {
         category: Category::Sfx,
         looped: false,
         original_as_is: false,
+        variants: Vec::new(),
+    }
+}
+
+/// Which of `count` variants to play, from a random `roll`: any of them, except the one played `last` (when
+/// there is more than one). Presentation only, so the randomness is fine (WP11.2b).
+pub fn pick_variant(count: usize, last: Option<usize>, roll: u32) -> usize {
+    match last {
+        _ if count <= 1 => 0,
+        Some(last) if last < count => {
+            let i = roll as usize % (count - 1);
+            if i >= last { i + 1 } else { i }
+        }
+        _ => roll as usize % count,
     }
 }
 
@@ -228,6 +247,7 @@ impl AudioSystem {
             category_volume: [1.0; 4],
             master_volume: 1.0,
             rng: 0x9E37_79B9,
+            last_variant: BTreeMap::new(),
             stats: Stats::default(),
             warned: BTreeSet::new(),
             ra: Ra::Off,
@@ -467,7 +487,7 @@ impl AudioSystem {
         scale: f32,
     ) {
         // Look the name up first so unknown names warn even without a device.
-        let Some((def, path)) = self.resolve(name) else {
+        let Some((def, mut path)) = self.resolve(name) else {
             return;
         };
         if self.player.is_none() && self.trace.is_none() {
@@ -483,9 +503,25 @@ impl AudioSystem {
             gain *= m.gain;
             pan = m.pan;
         }
+        // The variant is picked only for a play that gets this far; it counts as the last one only once the
+        // output took it (below), so a dropped play never moves it. A mapped original is never a bank file:
+        // with `original_as_is: false` its definition is the bank's, variants included, and the key stays.
+        let original = self.is_original(name);
+        let mut pick = None;
+        let file = if original {
+            path.display().to_string()
+        } else if def.variants.is_empty() {
+            def.file.clone()
+        } else {
+            let (i, f) = self.pick_file(name, &def);
+            pick = Some(i);
+            path = self.root.join(&f);
+            f
+        };
         if let Some(t) = &mut self.trace {
             t.push(PlayTrace {
                 name: name.to_string(),
+                file,
                 gain,
                 pan,
             });
@@ -502,6 +538,13 @@ impl AudioSystem {
                 looped: def.looped,
             })
         });
+        let taken = match outcome {
+            Some(o) => matches!(o, Outcome::Played | Outcome::AlreadyPlaying),
+            None => true, // tracing without a device: what would have been played
+        };
+        if let (Some(i), true) = (pick, taken) {
+            self.last_variant.insert(name.to_string(), i);
+        }
         self.record(outcome);
     }
 
@@ -886,17 +929,45 @@ impl AudioSystem {
         def.volume * self.effective_volume(category.unwrap_or(def.category))
     }
 
+    /// One of the sound's files for this play (`file` or a variant), never the one it played last.
+    /// Its index among `file` and the variants, and the file (as written in the bank). Files that are not on
+    /// disk are skipped (a missing variant warned when the bank loaded); with none on disk, `file` is played
+    /// and fails like any missing sound.
+    fn pick_file(&mut self, name: &str, def: &SoundDef) -> (usize, String) {
+        let present: Vec<(usize, &str)> = def
+            .files()
+            .enumerate()
+            .filter(|(_, f)| self.root.join(f).is_file())
+            .collect();
+        if present.is_empty() {
+            return (0, def.file.clone());
+        }
+        let last = self
+            .last_variant
+            .get(name)
+            .and_then(|l| present.iter().position(|(i, _)| i == l));
+        let roll = self.next_random();
+        let (i, f) = present[pick_variant(present.len(), last, roll)];
+        (i, f.to_string())
+    }
+
+    fn next_random(&mut self) -> u32 {
+        // xorshift32
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.rng = x;
+        x
+    }
+
     /// Playback rate with the sound's random pitch variation applied.
     fn rate_for(&mut self, def: &SoundDef) -> f64 {
         if def.pitch_variation <= 0.0 {
             return 1.0;
         }
         // xorshift32 -> uniform in [-1, 1]
-        let mut x = self.rng;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.rng = x;
+        let x = self.next_random();
         let unit = f64::from(x) / f64::from(u32::MAX) * 2.0 - 1.0;
         1.0 + unit * f64::from(def.pitch_variation)
     }
@@ -947,7 +1018,7 @@ mod tests {
     fn has_sound_never_warns_and_the_trace_records_gain_and_pan() {
         let mut s = AudioSystem::silent(assets());
         assert!(s.has_sound("test_click"));
-        assert!(!s.has_sound("unit.attack"));
+        assert!(!s.has_sound("building.placed"));
         assert_eq!(s.stats().unknown, 0, "asking is not playing");
         // Not tracing: nothing recorded.
         s.play_at("test_click", [1.0, 0.0, 1.0]);
@@ -965,6 +1036,7 @@ mod tests {
             s.take_trace(),
             vec![PlayTrace {
                 name: "test_click".into(),
+                file: "audio/sfx/test_click.wav".into(),
                 gain: 0.8 * m.gain,
                 pan: m.pan,
             }]
@@ -1119,6 +1191,7 @@ mod tests {
             category: Category::Sfx,
             looped: false,
             original_as_is: false,
+            variants: Vec::new(),
         };
         let rates: Vec<f64> = (0..200).map(|_| s.rate_for(&def)).collect();
         assert!(rates.iter().all(|r| (0.9..=1.1).contains(r)));
@@ -1334,6 +1407,228 @@ mod tests {
             assert_eq!(gain, want, "{e} gain");
         }
         assert_eq!(s.stats().played, 18);
+        assert_eq!(s.stats().unknown, 0);
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    /// The three unit-voice events of the shipped bank, with their files, as literals (WP11.2b).
+    const VOICE_FILES: [(&str, [&str; 3]); 3] = [
+        (
+            "unit.select",
+            [
+                "audio/voice/unit_select_ready.wav",
+                "audio/voice/unit_select_online.wav",
+                "audio/voice/unit_select_standing_by.wav",
+            ],
+        ),
+        (
+            "unit.move",
+            [
+                "audio/voice/unit_move_moving.wav",
+                "audio/voice/unit_move_route_set.wav",
+                "audio/voice/unit_move_on_it.wav",
+            ],
+        ),
+        (
+            "unit.attack",
+            [
+                "audio/voice/unit_attack_engaging.wav",
+                "audio/voice/unit_attack_target_locked.wav",
+                "audio/voice/unit_attack_firing.wav",
+            ],
+        ),
+    ];
+
+    #[test]
+    fn pick_variant_takes_any_but_the_last_one() {
+        assert_eq!(pick_variant(1, None, 7), 0);
+        assert_eq!(pick_variant(1, Some(0), 7), 0);
+        assert_eq!(pick_variant(0, None, 7), 0);
+        // No last pick: the roll over all of them.
+        assert_eq!(
+            (0..6).map(|r| pick_variant(3, None, r)).collect::<Vec<_>>(),
+            [0, 1, 2, 0, 1, 2]
+        );
+        // After 1: only 0 and 2.
+        assert_eq!(
+            (0..4)
+                .map(|r| pick_variant(3, Some(1), r))
+                .collect::<Vec<_>>(),
+            [0, 2, 0, 2]
+        );
+        assert_eq!(pick_variant(2, Some(0), 12345), 1);
+        assert_eq!(pick_variant(2, Some(1), 12345), 0);
+        // A stale last pick (the bank lost variants on a reload) is ignored.
+        assert!(pick_variant(2, Some(5), 3) < 2);
+    }
+
+    /// WP11.2b: the shipped bank plays one of three lines per voice event, every one of them over many
+    /// plays, never the same twice in a row, in category Voice, with the bank's volume.
+    #[test]
+    fn the_voice_events_pick_their_variants_and_never_repeat_one() {
+        let mut s = AudioSystem::silent(assets());
+        s.set_trace(true);
+        for (event, files) in VOICE_FILES {
+            let def = s.bank().get(event).unwrap().clone();
+            assert_eq!(def.files().collect::<Vec<_>>(), files, "{event}");
+            assert_eq!(def.category, Category::Voice, "{event}");
+            assert!(def.original_as_is, "{event}");
+            // The shipped tuning, as literals.
+            assert_eq!(
+                (
+                    def.volume,
+                    def.max_instances,
+                    def.pitch_variation,
+                    def.looped
+                ),
+                (0.35, 1, 0.0, false),
+                "{event}"
+            );
+            let mut seen = BTreeSet::new();
+            let mut last = String::new();
+            for _ in 0..30 {
+                s.play_as(event, Category::Voice);
+                let t = s.take_trace().pop().unwrap();
+                assert_eq!(t.name, event);
+                assert_ne!(t.file, last, "{event} repeated {last}");
+                assert!(files.contains(&t.file.as_str()), "{event}: {}", t.file);
+                assert_eq!(t.gain, def.volume, "{event}");
+                seen.insert(t.file.clone());
+                last = t.file;
+            }
+            assert_eq!(seen.len(), 3, "{event}: {seen:?}");
+        }
+        assert_eq!(s.stats().unknown, 0);
+    }
+
+    /// A play that is dropped (here: too far away to hear) picks no variant and does not count as the last one,
+    /// so two lines that are heard one after the other always differ.
+    #[test]
+    fn a_dropped_play_does_not_count_as_the_last_variant() {
+        let mut s = AudioSystem::silent(assets());
+        s.set_trace(true);
+        s.set_listener(Listener::new([0.0; 3], [1.0, 0.0, 0.0], 30.0));
+        let mut last = String::new();
+        for _ in 0..40 {
+            s.play_as("unit.move", Category::Voice);
+            let heard = s.take_trace().pop().unwrap().file;
+            assert_ne!(heard, last, "the line heard before was repeated");
+            last = heard;
+            for _ in 0..3 {
+                s.play_at("unit.move", [5_000.0, 0.0, 0.0]);
+            }
+            assert!(s.take_trace().is_empty(), "inaudible plays are dropped");
+        }
+        assert_eq!(s.stats().inaudible, 120);
+    }
+
+    /// A variant that is not on disk warned when the bank loaded and is never picked.
+    #[test]
+    fn a_missing_variant_is_never_picked() {
+        let d = scratch(
+            "missing_variant",
+            r#"(sounds: {"v": (file: "audio/sfx/test_click.wav",
+                variants: ["audio/sfx/gone.wav", "audio/sfx/other.wav"], category: Voice)})"#,
+        );
+        std::fs::copy(
+            d.join("audio/sfx/test_click.wav"),
+            d.join("audio/sfx/other.wav"),
+        )
+        .unwrap();
+        let mut s = AudioSystem::silent(&d);
+        s.set_trace(true);
+        let mut seen = BTreeSet::new();
+        for _ in 0..30 {
+            s.play("v");
+            seen.insert(s.take_trace().pop().unwrap().file);
+        }
+        assert_eq!(
+            seen.into_iter().collect::<Vec<_>>(),
+            ["audio/sfx/other.wav", "audio/sfx/test_click.wav"]
+        );
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    /// A mapped original whose bank entry has variants and is *not* `original_as_is` takes the entry's volume, but
+    /// plays the Red Alert sound, never one of the bank's files: the `is_original` guard before the pick.
+    #[test]
+    fn a_mapped_original_with_bank_variants_still_plays_the_original() {
+        let (d, install) = ra_root("ra_variants");
+        std::fs::write(
+            d.join("audio/bank.ron"),
+            r#"(sounds: {"unit.move": (file: "audio/sfx/test_click.wav",
+                variants: ["audio/sfx/test_click.wav"], volume: 0.5, category: Voice)})"#,
+        )
+        .unwrap();
+        let mut s = mock_at(&d);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        wait_for_ra(&mut s);
+        s.set_trace(true);
+        for _ in 0..5 {
+            s.play_as("unit.move", Category::Voice);
+            let t = s.take_trace().pop().unwrap();
+            assert_eq!(t.file, "ra-audio:unit.move");
+            assert_eq!(t.gain, 0.5, "the bank's volume (not original_as_is)");
+        }
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    /// WP11.2b: with the original audio on, a mapped voice event plays the Red Alert line as-is (volume 1, no
+    /// variant), exactly as before; a voice event whose mapped file is not found plays its CC0 lines.
+    #[test]
+    fn the_original_voice_wins_where_found_and_the_cc0_lines_play_otherwise() {
+        use crate::ra::aud::{Compression, Pcm, encode};
+        use crate::ra::mix::{MixFormat, mix_id, write_mix};
+        let bank = std::fs::read_to_string(assets().join("audio/bank.ron")).unwrap();
+        let d = scratch("ra_voice", &bank);
+        std::fs::create_dir_all(d.join("audio/voice")).unwrap();
+        for (_, files) in VOICE_FILES {
+            for f in files {
+                std::fs::copy(assets().join(f), d.join(f)).unwrap();
+            }
+        }
+        std::fs::write(
+            d.join("audio/ra_mapping.ron"),
+            r#"(sounds: {"unit.select": "AWAIT.V01", "unit.move": "GONE.V01"})"#,
+        )
+        .unwrap();
+        let pcm = Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: (0..2000).map(|i| ((i % 50) * 400 - 10000) as i16).collect(),
+        };
+        let mix = write_mix(
+            &[(mix_id("AWAIT.V01"), &encode(&pcm, Compression::Ima))],
+            MixFormat::Plain,
+        );
+        let install = d.join("redalert");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("SOUNDS.MIX"), mix).unwrap();
+        let mut s = mock_at(&d);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        wait_for_ra(&mut s);
+        assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 1 });
+        s.set_trace(true);
+        for _ in 0..5 {
+            s.play_as("unit.select", Category::Voice);
+            let t = s.take_trace().pop().unwrap();
+            assert_eq!(t.file, "ra-audio:unit.select");
+            assert_eq!(t.gain, 1.0, "the original plays as-is");
+        }
+        for (event, files) in &VOICE_FILES[1..] {
+            let volume = s.bank().get(event).unwrap().volume;
+            s.play_as(event, Category::Voice);
+            let t = s.take_trace().pop().unwrap();
+            assert!(files.contains(&t.file.as_str()), "{event}: {}", t.file);
+            assert_eq!(t.gain, volume, "{event}");
+        }
+        assert_eq!(s.stats().played, 7);
         assert_eq!(s.stats().unknown, 0);
         std::fs::remove_dir_all(d).ok();
     }

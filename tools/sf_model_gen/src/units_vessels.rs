@@ -127,16 +127,15 @@ pub fn veyran_gunboat() -> Model {
                 [100, deck + 900, 1480],
                 ACCENT,
             )));
-            // The mast with a radar bar.
-            hull.add(
-                lathe(&[(40, 0), (40, 1300)], 4, &[METAL], None, None).moved([-700, roof_y, 0]),
-            );
             hull.add(closed_box(
                 [-900, roof_y + 1100, -500],
                 [-500, roof_y + 1200, 500],
                 METAL,
             ));
         }
+        // The mast with a radar bar, in every level: it sets the height (art-style §9, WP11.6r
+        // review; before, LOD2 lost 30 % of the height).
+        hull.add(lathe(&[(40, 0), (40, 1300)], 4, &[METAL], None, None).moved([-700, roof_y, 0]));
         // The aft mount: a low gun house with a short fixed barrel.
         if lod.has(1) {
             hull.add(
@@ -313,14 +312,20 @@ pub fn neutral_ferry() -> Model {
                 [1300, deck + 1300, 2100],
                 ACCENT,
             ));
-            hull.add(
-                lathe(&[(220, 0), (220, 900)], 8, &[METAL], Some(RUBBER), None).moved([
-                    800,
-                    deck + 1600,
-                    3400,
-                ]),
-            );
         }
+        // The funnel on the wheelhouse roof, in every level: it sets the height (art-style §9,
+        // WP11.6r review; before, LOD2 lost a quarter of the height).
+        let funnel_segs = if lod.has(1) { 8 } else { 4 };
+        hull.add(
+            lathe(
+                &[(220, 0), (220, 900)],
+                funnel_segs,
+                &[METAL],
+                Some(RUBBER),
+                None,
+            )
+            .moved([800, deck + 1600, 3400]),
+        );
         if lod.has(0) {
             // Rails along both long sides (the wheelhouse side is open at the house), bollards,
             // chain posts at the ramps, a winch drum, life rings and crates.

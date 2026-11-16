@@ -7,6 +7,8 @@
 //   max_instances:   simultaneous voices of this sound, default 8
 //   category:        Sfx | Ui | Music | Voice (volume groups, WP11.5b), default Sfx
 //   looped:          repeat until stopped, default false
+//   variants:        more files of the same sound; each play picks one of file and these, never the last
+//                    one (WP11.2b), default none
 //   original_as_is:  true = a mapped original Red Alert sound plays with volume 1, no pitch spread and the
 //                    default voice cap instead of this entry's values (which suit the CC0 file), default false
 //
@@ -21,9 +23,8 @@
             category: Sfx,
         ),
         // Generic events (WP11.7); ra_mapping.ron can replace them with the
-        // player's original Red Alert sounds. Events without a CC0 sound yet
-        // (unit.select, unit.move, unit.attack, building.placed) are silent
-        // unless mapped.
+        // player's original Red Alert sounds. building.placed has no CC0 sound
+        // yet and is silent unless mapped (no code plays it today).
         "ui.click": (
             file: "audio/sfx/test_click.wav",
             volume: 0.6,
@@ -179,6 +180,38 @@
             pitch_variation: 0.03,
             max_instances: 3,
             category: Sfx,
+            original_as_is: true,
+        ),
+        // Unit voices (WP11.2b): three lines per event, the Piper voice en_US-joe-medium
+        // through our walkie-talkie filter tools/sf_voice_gen (CC0; `cargo run -p
+        // sf_voice_gen` rewrites the files, a test checks they are current). Each play
+        // picks one of `file` and `variants`, never the last one. Same file peak as the
+        // fight sounds; the volume is set by measuring against the 20-tank fight
+        // (`the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound`
+        // in sf_game fx_sound.rs). With Red Alert audio on, a mapped line from
+        // ra_mapping.ron wins and plays as-is.
+        "unit.select": (
+            file: "audio/voice/unit_select_ready.wav",
+            variants: ["audio/voice/unit_select_online.wav", "audio/voice/unit_select_standing_by.wav"],
+            volume: 0.35,
+            max_instances: 1,
+            category: Voice,
+            original_as_is: true,
+        ),
+        "unit.move": (
+            file: "audio/voice/unit_move_moving.wav",
+            variants: ["audio/voice/unit_move_route_set.wav", "audio/voice/unit_move_on_it.wav"],
+            volume: 0.35,
+            max_instances: 1,
+            category: Voice,
+            original_as_is: true,
+        ),
+        "unit.attack": (
+            file: "audio/voice/unit_attack_engaging.wav",
+            variants: ["audio/voice/unit_attack_target_locked.wav", "audio/voice/unit_attack_firing.wav"],
+            volume: 0.35,
+            max_instances: 1,
+            category: Voice,
             original_as_is: true,
         ),
         // The same file as a looping "music" track, to exercise the crossfade.

@@ -136,12 +136,79 @@ fn is_armed(stem: &str) -> bool {
 /// The art brief's budgets (`sf_asset_check::class::budget`), as literals.
 fn budget(stem: &str) -> [usize; 3] {
     if is_building(stem) && !is_decor(stem) {
-        [5000, 1500, 300]
+        [8000, 2400, 500]
     } else if is_infantry(stem) {
         [1500, 250, 60]
-    } else {
+    } else if is_decor(stem) {
         [1500, 500, 150]
+    } else {
+        [4000, 1200, 300]
     }
+}
+
+/// docs/art-style.md section 9, "far levels keep the silhouette" (carried over from the WP11.6b
+/// review), for every unit, finished structure and object: LOD1 and LOD2 span, along every axis, at least `SILHOUETTE_MIN_PERMILLE` of LOD0's
+/// extent and reach at most 5 % of that extent past LOD0 on either side, so a model does not shrink, lose its gun or its
+/// mast, or grow when the level switches.
+#[test]
+fn far_levels_keep_the_silhouette() {
+    const SILHOUETTE_MIN_PERMILLE: i64 = 900;
+    let extent = |n: &sf_model_gen::kit::Node| {
+        let tris = n.world_tris();
+        let mut lo = [i32::MAX; 3];
+        let mut hi = [i32::MIN; 3];
+        for p in tris.iter().flat_map(|t| t.v) {
+            for i in 0..3 {
+                lo[i] = lo[i].min(p[i]);
+                hi[i] = hi[i].max(p[i]);
+            }
+        }
+        (lo, hi)
+    };
+    let mut worst = (1000, String::new());
+    // A state (a stage, a wreck of a mission object) is derived from its finished model's far
+    // level, so its far levels can stand above its own broken LOD0: they are left out here.
+    let state = |stem: &str| {
+        STATES
+            .iter()
+            .chain(&["_no_uplink"])
+            .any(|s| stem.ends_with(s))
+    };
+    // One named exception, measured on this generator (WP11.6r review): the rubble heaps are
+    // decor whose top is the tip of one random chunk, and a far level with fewer, blunter chunks
+    // stands lower (down to 522 per mille of the height, LOD2 of the 2 x 2 heap). Only their
+    // height (axis 1) is exempt; their footprint is checked like everything else. The ferry and
+    // the gunboat keep their funnel and mast in every level and are checked in full.
+    let exempt = |stem: &str, i: usize| is_heap(stem) && i == 1;
+    for m in models().iter().filter(|m| !state(&m.stem)) {
+        let (lo0, hi0) = extent(&m.lods[0]);
+        for k in 1..3 {
+            let (lo, hi) = extent(&m.lods[k]);
+            for i in 0..3 {
+                let e0 = i64::from(hi0[i] - lo0[i]);
+                let e = i64::from(hi[i] - lo[i]);
+                let permille = e * 1000 / e0.max(1);
+                if exempt(&m.stem, i) {
+                    continue;
+                }
+                if permille < worst.0 {
+                    worst = (permille, format!("{} LOD{k} axis {i}", m.stem));
+                }
+                assert!(
+                    permille >= SILHOUETTE_MIN_PERMILLE,
+                    "{} LOD{k}: axis {i} spans {e} mm of LOD0's {e0}",
+                    m.stem
+                );
+                let slack = (hi0[i] - lo0[i]) / 20;
+                assert!(
+                    lo[i] >= lo0[i] - slack && hi[i] <= hi0[i] + slack,
+                    "{} LOD{k}: axis {i} {lo:?}..{hi:?} outside LOD0 {lo0:?}..{hi0:?}",
+                    m.stem
+                );
+            }
+        }
+    }
+    println!("narrowest far level: {} per mille ({})", worst.0, worst.1);
 }
 
 #[test]
@@ -176,8 +243,8 @@ fn buildings_use_their_detail_budget() {
         let t = m.triangles();
         if is_finished_structure(&m.stem) {
             assert!(
-                (2500..=3500).contains(&t[0]),
-                "{}: LOD0 {} not in 2500-3500",
+                (2500..=6000).contains(&t[0]),
+                "{}: LOD0 {} not in 2500-6000",
                 m.stem,
                 t[0]
             );
@@ -204,12 +271,14 @@ fn buildings_use_their_detail_budget() {
                 .chain(&["_no_uplink"])
                 .any(|s| m.stem.ends_with(s));
             let least = if state { 200 } else { 1000 };
-            assert!((least..=3500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+            assert!((least..=6000).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else if is_infantry(&m.stem) {
             // A figure is small: 400 triangles in LOD0 keep LOD2 (60 at most) under 15 %.
             assert!((400..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else {
-            assert!((1200..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+            // WP11.6r: bevels and rounder parts on top of the 1,200 of the tuning round, well
+            // under the 4,000 ceiling (the budget is not a target).
+            assert!((1200..=3000).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         }
     }
 }
@@ -227,8 +296,8 @@ fn the_stage_rules_are_pinned() {
     assert_eq!(stages::TEAM_MIN_TRIS, 12);
     assert_eq!(stages::CHUNK_SIDES, 8);
     assert_eq!(stages::FIT_RES, 400);
-    assert_eq!(buildings::DETAIL_FLOOR, 2650);
     assert_eq!(buildings::DETAIL_CEIL, 3400);
+    assert_eq!(buildings::DETAIL_FLOOR, 2650);
     assert_eq!(objects::OBJECT_FLOOR, 1000);
     assert_eq!(objects::OBJECT_CEIL, 3400);
     assert_eq!(objects::DECOR_CEIL, 1450);
@@ -664,8 +733,12 @@ fn the_states_read_as_their_stage() {
         let finished_roof =
             sf_model_gen::stages::roof_level(&sf_model_gen::stages::split(&m.lods[0]), slab);
         let hb = &heavy.lods[0].find("body").expect("body").mesh.tris;
+        // The walls, not the fallen roof planks on the heap (`stages::PLANK_TONE`; WP11.6r: on the
+        // decoy a plank lay 13 mm above the bound).
+        let plank = sf_model_gen::stages::PLANK_TONE;
         let top = |left: bool| {
             hb.iter()
+                .filter(|t| t.tone != plank)
                 .flat_map(|t| t.v)
                 .filter(|p| (p[0] < 0) == left && p[0] != 0 && p[2].abs() <= 600)
                 .map(|p| p[1])
@@ -674,6 +747,11 @@ fn the_states_read_as_their_stage() {
         };
         let brk = (top(true) + top(false)) / 2;
         let bound = slab + (finished_roof - slab) * 6 / 10 + 120 * 600 / 1000;
+        println!("{}: heavy break slack {} mm", m.stem, bound - brk);
+        if m.stem == "meridian_decoy_emplacement" {
+            // The tightest structure (WP11.6c review asked for the slack after the shape round).
+            assert_eq!(bound - brk, 92, "decoy heavy-break slack");
+        }
         assert!(
             brk <= bound,
             "{}: heavy break at {brk} over {bound} (slab {slab}, finished roof {finished_roof})",
@@ -852,10 +930,138 @@ fn the_lod_knob_halves_segments_and_drops_bevels() {
         [16, 8, 4],
         "segments per level"
     );
-    assert_eq!(Lod::ALL.map(|l| l.segs(8)), [8, 4, 4]);
-    assert_eq!(Lod::ALL.map(|l| l.bevel(40)), [40, 20, 0]);
+    // WP11.6r: LOD0 has at least 16 segments; the far levels keep halving the recipe's number.
+    assert_eq!(Lod::ALL.map(|l| l.segs(8)), [16, 4, 4]);
+    assert_eq!(Lod::ALL.map(|l| l.segs(32)), [32, 16, 8]);
+    assert_eq!(sf_model_gen::kit::ROUND_MIN_SEGS, 16);
+    // WP11.6r: LOD0 widens a recipe's bevel by half, at most 60 mm; a switch (under 10) stays.
+    assert_eq!(Lod::ALL.map(|l| l.bevel(40)), [60, 20, 0]);
+    assert_eq!(Lod::ALL.map(|l| l.bevel(300)), [360, 150, 0]);
+    assert_eq!(Lod::ALL.map(|l| l.bevel(1)), [1, 0, 0]);
+    assert_eq!(sf_model_gen::kit::BEVEL_WIDEN_MAX_MM, 60);
     assert_eq!(Lod::ALL.map(|l| l.has(0)), [true, false, false]);
     assert_eq!(Lod::ALL.map(|l| l.has(1)), [true, true, false]);
+}
+
+/// WP11.6r, the bevel rule: in LOD0 every box of the kit whose smallest side is at least
+/// `BEVEL_MIN_SIDE_MM` gets a bevel of 8 % of that side (20..=120 mm), the closed box on its bottom
+/// edges too; a detail-sized box and every box of the far levels stay plain.
+#[test]
+fn every_lod0_block_is_bevelled_by_the_kit_rule() {
+    use sf_model_gen::kit::{
+        BEVEL_MAX_MM, BEVEL_MIN_MM, BEVEL_MIN_SIDE_MM, BEVEL_PERMILLE, Mat, Model, Node,
+        auto_bevel, closed_box, cuboid,
+    };
+    assert_eq!(
+        (
+            BEVEL_MIN_SIDE_MM,
+            BEVEL_PERMILLE,
+            BEVEL_MIN_MM,
+            BEVEL_MAX_MM
+        ),
+        (240, 80, 20, 120)
+    );
+    assert_eq!(auto_bevel([0, 0, 0], [239, 5000, 5000]), 0, "a detail");
+    assert_eq!(auto_bevel([0, 0, 0], [240, 5000, 5000]), 20, "the floor");
+    assert_eq!(auto_bevel([0, 0, 0], [1000, 600, 2000]), 48, "8 % of 600");
+    assert_eq!(
+        auto_bevel([0, 0, 0], [3000, 4000, 5000]),
+        120,
+        "the ceiling"
+    );
+    // A bevelled face has a normal along no axis; a plain box has none of those.
+    let slanted = |tris: &[sf_model_gen::kit::Tri]| {
+        tris.iter()
+            .filter(|t| t.normal().iter().filter(|c| **c != 0).count() > 1)
+            .count()
+    };
+    let m = Mat(0);
+    let big = closed_box([0, 0, 0], [2000, 1000, 1200], m);
+    assert!(slanted(&big.tris) > 0, "a hull block is bevelled");
+    let low = |t: &sf_model_gen::kit::Tri| t.v.iter().any(|p| p[1] == 0);
+    assert!(
+        big.tris
+            .iter()
+            .any(|t| low(t) && t.normal()[1] < 0 && t.normal()[0] != 0),
+        "the bottom edges are bevelled too"
+    );
+    assert!(slanted(&cuboid([0, 0, 0], [2000, 1000, 1200], m).tris) > 0);
+    assert_eq!(
+        closed_box([0, 0, 0], [2000, 100, 1200], m).len(),
+        12,
+        "a plate"
+    );
+    // Built through a model, the far levels of the same box are plain.
+    let model = Model::new("probe", Vec::new(), |_| {
+        vec![Node::part(
+            "body",
+            [0, 0, 0],
+            closed_box([0, 0, 0], [2000, 1000, 1200], m),
+        )]
+    });
+    assert!(slanted(&model.lods[0].world_tris()) > 0);
+    assert_eq!(slanted(&model.lods[1].world_tris()), 0);
+    assert_eq!(model.triangles()[1..], [12, 12]);
+    // In the set: no sharp box corner on a block of block size in LOD0, except these, which are
+    // not kit boxes but extruded recipe profiles (`extrude_z`): the 24 buttress wedges of the
+    // Veyran fortified bunker (in its states too), and a few on the Veyran vehicle factory and the
+    // amphibious transport. Their corner counts are pinned, so a new sharp block fails.
+    let exceptions = [
+        ("veyran_fortified_bunker", 96),
+        ("veyran_fortified_bunker_scaffolding", 96),
+        ("veyran_fortified_bunker_damaged", 96),
+        ("veyran_fortified_bunker_heavily_damaged", 96),
+        ("veyran_vehicle_factory", 6),
+        ("veyran_vehicle_factory_damaged", 4),
+        ("meridian_amphibious_transport", 6),
+    ];
+    for m in models() {
+        let n = sharp_block_corners(&m.lods[0].world_tris());
+        let allowed = exceptions.iter().find(|e| e.0 == m.stem).map_or(0, |e| e.1);
+        assert_eq!(n, allowed, "{}: sharp block corners in LOD0", m.stem);
+    }
+    // The finder sees a plain block: a closed box of the same size outside LOD0 has 8.
+    let plain = Model::new("probe", Vec::new(), |_| {
+        vec![Node::part(
+            "body",
+            [0, 0, 0],
+            closed_box([0, 0, 0], [2000, 1000, 1200], m),
+        )]
+    });
+    assert_eq!(sharp_block_corners(&plain.lods[0].world_tris()), 0);
+    assert_eq!(sharp_block_corners(&plain.lods[1].world_tris()), 8);
+}
+
+/// Corners where three axis-aligned faces meet, each face at least `BEVEL_MIN_SIDE_MM` across in
+/// both of its directions: the corner of an unbevelled block (WP11.6r review).
+fn sharp_block_corners(tris: &[sf_model_gen::kit::Tri]) -> usize {
+    use sf_model_gen::kit::BEVEL_MIN_SIDE_MM;
+    use std::collections::BTreeMap;
+    // Per corner point: the axis directions (axis * 2 + sign) of the big axis faces that touch it.
+    let mut at: BTreeMap<[i32; 3], u8> = BTreeMap::new();
+    for t in tris {
+        let n = t.normal();
+        let axes: Vec<usize> = (0..3).filter(|&i| n[i] != 0).collect();
+        if axes.len() != 1 {
+            continue;
+        }
+        let a = axes[0];
+        let big = (0..3).filter(|&i| i != a).all(|i| {
+            let lo = t.v.iter().map(|p| p[i]).min().unwrap();
+            let hi = t.v.iter().map(|p| p[i]).max().unwrap();
+            hi - lo >= BEVEL_MIN_SIDE_MM
+        });
+        if !big {
+            continue;
+        }
+        let bit = 1u8 << (a * 2 + usize::from(n[a] > 0));
+        for p in t.v {
+            *at.entry(p).or_default() |= bit;
+        }
+    }
+    at.values()
+        .filter(|&&m| (0..3).all(|a| m & (0b11 << (a * 2)) != 0))
+        .count()
 }
 
 #[test]
