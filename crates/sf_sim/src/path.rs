@@ -466,8 +466,9 @@ impl Pathing {
     /// Breaks one piece of the service's state (save tests): 0..=3 and 15 the job (`Job`, 15 as
     /// its case 4), 4..=8 the planner's memory (`Work`), 9 the start slot, 10 a sector epoch too
     /// many, 11..=14 and 16..=18 the flowfields (`Fields`, as its cases 0..=3 and 4..=6), 19 the
-    /// local search's expansion count at its most (`Work` case 5), 20 and 21 a job searching in a
-    /// stage that runs no search (`Job` cases 5 and 6), 22 the service's epoch one past the job's.
+    /// local search's expansion count at its most (`Work` case 5), 20 a job searching in a stage
+    /// that runs no search and 21 one with its leg ready (`Job` cases 5 and 6), 22 the service's
+    /// epoch one past the job's.
     #[cfg(test)]
     pub(crate) fn corrupt_for_test(&mut self, what: u8) {
         match what {

@@ -227,9 +227,25 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   overlay) off the map, a portal node out of range, rings or overlays longer than they hold, overlay
   cells not strictly ascending, an unknown route state.
 * **Job**: a slot or graph that does not exist, a banned sector out of range or more than `BAN_CAP`,
-  a point or cell off the map, `legs > REFINE_LEGS`, `near_stage > 1`, a ready leg without cells
-  (`push_cells` reads `cells[1..]`), in the smoothing stage a raw route that is empty or cursors past
-  it, an unknown mode or stage.
+  a point or cell off the map, `legs > REFINE_LEGS`, `near_stage > 1`, in the smoothing stage a raw
+  route that is empty or cursors past it, an unknown mode or stage, and a state the planner never
+  saves (below, *Job state*). A job of another epoch than the service's: "a job of another epoch
+  than the path service".
+* **Job state** (`Job::restore`; cases in `every_impossible_job_state_is_corrupt`, each from a real
+  world in the stage it needs). `Pathing::serve` keeps a job only after it yielded, so a saved job
+  is one the planner stopped in. Refused: the stage Begin or Finish, or a leg ready (it is used in
+  the call that made it): "a job stopped where the planner never yields"; `searching` other than
+  exactly in ConnectStart, ConnectGoal, Nearest and Refine (the stages that yield inside a search):
+  "a job's search flag does not match its stage"; Abstract or Nearest without the abstract search
+  begun, Refine without it unless the job is a Refill, an overlay on a job that is not Fresh,
+  `strict` without an overlay: "a job's abstract search was never begun".
+* **Epoch**: only `refresh_sectors` moves the service's epoch, called from the command loop (before
+  the service, which then replans a job of the old epoch at once: the budget is at least 512 and the
+  fields take at most half, so the job always runs) or from a destruction after it (whose tick saves
+  nothing: `Unsupported("destruction")`). So a saved job is of the service's epoch, and its memory
+  was made on the graph the restore rebuilds. **For WP13.1c**: once a save can follow a map change
+  after the service, a job one epoch behind must be allowed (a bound K on the distance), and then
+  the memory checks below must be skipped for it, as it replans without reading its memory.
 * **Search memory** (the local, abstract and corridor searches, the field builder): arrays of
   another size than the map gives, a heap element out of range, in twice or out of heap order, a
   local parent outside the window or a parent chain that goes round, a local heap element never
@@ -258,8 +274,19 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   belong to a stage that goes on with a search: a job searching in a stage that runs none (Begin,
   Direct, Abstract, Smooth, Finish, or a Refine leg that pops, steps, arrives or has used up its
   plan) or in a Refine leg whose cells are ready (which skips the search) is refused the same way;
-  the planner clears `searching` whenever a search ends, so no valid save has it. A job begun in an
-  older epoch than the service's is not judged: it replans without reading its memory.
+  the planner clears `searching` whenever a search ends, so no valid save has it (the stage rule is
+  now in *Job state*; the rectangle rule keeps the Refine legs that need no search). Then the
+  memory the job will read (`Job::memory_fits`): once the abstract search is begun, every node of
+  the start and goal links and every node the search reached (its heap, parents and nearest node;
+  not the goal node) must be a portal of the job's graph, and in ConnectGoal the start links must:
+  "the planner's memory names a portal that does not exist" (otherwise `NO_PORTAL` is taken as a
+  cell: an index past the grid). The abstract search's nearest node must be one the search going on
+  reached (`AbstractSearch::restore`, "an abstract search node or sector"; otherwise `path_to`
+  walks parents never checked). Without the abstract search begun a job may carry an earlier job's
+  links and reads none of them: those are not judged (a Refill job; `a_refill_job_carries_links_it_never_reads`).
+  The job that reached its goal in its own sector (Smooth, not a Refill, no abstract search) must
+  smooth a leg that ends its route: no abstract path, not cut short, the raw route ending on the
+  route's goal: "a job's leg does not end its route".
 * **Formations**: the serial counter at 0, a formation numbered 0 or twice, `turn_wait` at or above
   the longest turn period (40), `patience` above the setting, `loose` above 20 (`LOOSE_TICKS`),
   members not strictly ascending or not slots, a leader that is not a member, a slot whose `form`

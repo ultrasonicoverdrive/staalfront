@@ -3604,6 +3604,11 @@ What it does not settle:
   (`tools/sf_headless/tests/save_paths.rs`). No pin moved.
 * Crowd fix: `attempts + 1` with `stuck_attempts = 255` overflowed; now saturating (same value
   below 255, so no checksum moves).
+* Fix round 3 (16-11-2026): a saved job must be in a state the planner yields in (stage, search
+  flag, leg ready, abstract search begun, overlay), of the service's epoch (the old-epoch exemption
+  is gone; 13.1c must bring it back with a bound once saves can follow a map change), and its
+  memory may name only portals that exist; the abstract search's nearest node must be current.
+  Cases from real worlds (`every_impossible_job_state_is_corrupt`), mutations of each rule.
 * Known gap: in-flight search memory is checked for structure and for fitting the rectangle its stage
   searches, not for being exactly that search. A formation may list a member that left it this tick
   (pruned on the next tick); restore accepts that.
