@@ -1,0 +1,16 @@
+[package]
+name = "sf_voice_gen"
+description = "Filters the committed Piper renders into the CC0 walkie-talkie unit voices (assets/audio/voice/*.wav), integer maths only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Library plus binary, like sf_sound_gen. Its only dependency is sf_sound_gen (in this workspace) for the
+# seeded noise, the sample rate, the file peak and the WAV writer, so the voices and the fight sounds share them.
+[dependencies]
+sf_sound_gen = { path = "../sf_sound_gen" }
