@@ -56,7 +56,7 @@ macro_rules! sample {
 /// The tuning of the VSCO file names: a note name with octave `o` is MIDI `12 * (o + 2) + pitch class`, one
 /// octave below the usual C4 = 60 (checked by measurement, see the test `the_committed_samples_have_their_pitch`).
 /// The timpani files carry no note; their pitch (and the roll's) is what the same test measures.
-pub const SAMPLES: [SampleSpec; 30] = [
+pub const SAMPLES: [SampleSpec; 32] = [
     sample!(
         "tim2_v4_rr1",
         "Percussion/Timpani/Timpani2_Hit_v4_rr1_Sum.wav",
@@ -142,6 +142,20 @@ pub const SAMPLES: [SampleSpec; 30] = [
         500
     ),
     sample!(
+        "tim2_v1_rr1",
+        "Percussion/Timpani/Timpani2_Hit_v1_rr1_Sum.wav",
+        3440,
+        2500,
+        500
+    ),
+    sample!(
+        "tim3_v1_rr1",
+        "Percussion/Timpani/Timpani3_Hit_v1_rr1_Sum.wav",
+        3750,
+        2500,
+        500
+    ),
+    sample!(
         "tim3_roll",
         "Percussion/Timpani/Rolls/Timpani3_Roll_v5_rr1_Sum.wav",
         3750,
@@ -186,14 +200,14 @@ pub const SAMPLES: [SampleSpec; 30] = [
     ),
     sample!(
         "tbn_stac_as1",
-        "Brass/Tenor Trombone/stac/tenortbn_stac_A#1_v2_rr1.wav",
+        "Brass/Tenor Trombone/stac/tenortbn_stac_A#1_v3_rr1.wav",
         4600,
         500,
         40
     ),
     sample!(
         "tbn_stac_f2",
-        "Brass/Tenor Trombone/stac/tenortbn_stac_F2_v2_rr1.wav",
+        "Brass/Tenor Trombone/stac/tenortbn_stac_F2_v3_rr1.wav",
         5300,
         500,
         40
@@ -350,10 +364,13 @@ fn at(step: usize, bpm: u32) -> usize {
 /// go), of velocity layer `vel` (3 or 4) and round robin `rr` (1 or 2).
 fn timpani_hit(bank: &Bank, root: u32, vel: u32, rr: u32, max_len: usize) -> Vec<i32> {
     let target = if root >= 33 { root } else { root + 12 };
-    let ids: Vec<String> = TIMPANI
-        .iter()
-        .map(|t| format!("{t}_v{vel}_rr{rr}"))
-        .collect();
+    // Velocity 1 exists for drums 2 and 3 only (the breakdown never needs drum 5).
+    let drums = if vel == 1 {
+        &TIMPANI[..2]
+    } else {
+        &TIMPANI[..]
+    };
+    let ids: Vec<String> = drums.iter().map(|t| format!("{t}_v{vel}_rr{rr}")).collect();
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     bank.note(&ids, target, max_len)
 }
@@ -390,8 +407,8 @@ pub fn combat_layers(
             }
         }
         if sec == 4 && bar % 2 == 0 {
-            let hit = timpani_hit(&bank, root, 3, 1, usize::MAX);
-            put_ring(&mut timp, t0, &hit, 77);
+            let hit = timpani_hit(&bank, root, 1, 1, usize::MAX);
+            put_ring(&mut timp, t0, &hit, 90);
         }
         // Low brass: held trombone and horn, a short tuba.
         if full || outro_start {
@@ -442,4 +459,20 @@ pub fn combat_layers(
         (Part::Cello, cello),
         (Part::Accents, acc),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::put_ring;
+
+    #[test]
+    fn put_ring_wraps_round_the_end_and_scales_by_the_gain() {
+        let mut ring = vec![0i32; 8];
+        put_ring(&mut ring, 6, &[256, 512, 768, 1024], 128);
+        // 6 and 7 at the end, then 0 and 1 at the start; gain 128/256 halves.
+        assert_eq!(ring, vec![384, 512, 0, 0, 0, 0, 128, 256]);
+        // A second put adds.
+        put_ring(&mut ring, 7, &[256], 256);
+        assert_eq!(ring[7], 512);
+    }
 }

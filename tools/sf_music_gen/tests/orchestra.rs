@@ -5,7 +5,8 @@
 use sf_music_gen::orchestra::{PARTS, Part, SAMPLES};
 use sf_music_gen::sampler::{ImportError, decimate_at, import, parse_wav, pitch_ratio_q16, play};
 use sf_music_gen::{
-    FILE_PEAK, SAMPLE_RATE, TRACKS, combat_base, flac, orchestra_layers, render, samples_of,
+    FILE_PEAK, SAMPLE_RATE, TRACKS, combat_base, combat_limiter_gains, flac, orchestra_layers,
+    render, samples_of,
 };
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -22,7 +23,7 @@ fn ms(ms: usize) -> usize {
 
 /// (id, pitch in cents of a MIDI note, kept ms, fade ms, WAV bytes, FNV-1a 64 of the file), as literals, in
 /// `SAMPLES` order.
-const PINNED: [(&str, i32, u32, u32, usize, u64); 30] = [
+const PINNED: [(&str, i32, u32, u32, usize, u64); 32] = [
     ("tim2_v4_rr1", 3440, 2500, 500, 110294, 0x4b21f6a0ea34b95a),
     ("tim2_v4_rr2", 3440, 2500, 500, 110294, 0x2682ea2d519dc72b),
     ("tim2_v3_rr1", 3440, 2500, 500, 110294, 0x0c85e5158dbf18c6),
@@ -35,6 +36,8 @@ const PINNED: [(&str, i32, u32, u32, usize, u64); 30] = [
     ("tim5_v4_rr2", 4270, 2500, 500, 110294, 0x03284306584c81c8),
     ("tim5_v3_rr1", 4270, 2500, 500, 110294, 0x7e0794892cbe4a83),
     ("tim5_v3_rr2", 4270, 2500, 500, 110294, 0xaa0e42eac46548af),
+    ("tim2_v1_rr1", 3440, 2500, 500, 110294, 0x2de62ce4a72282f4),
+    ("tim3_v1_rr1", 3750, 2500, 500, 110294, 0xcced34c09cf3bcd5),
     ("tim3_roll", 3750, 2000, 100, 88244, 0xd2a4c56ff280de74),
     ("bdrum", 0, 2000, 500, 88244, 0x4c8b3d5eff927921),
     ("crash", 0, 4000, 1500, 176444, 0x495d8c7450843301),
@@ -42,8 +45,8 @@ const PINNED: [(&str, i32, u32, u32, usize, u64); 30] = [
     ("tbn_sus_as1", 4600, 2100, 100, 92654, 0x303cab7f0adca610),
     ("tbn_sus_d2", 5000, 2100, 100, 92654, 0x3e544229536999dc),
     ("tbn_sus_f2", 5300, 2100, 100, 92654, 0x5f3fdcd0ea4a75db),
-    ("tbn_stac_as1", 4600, 500, 40, 22094, 0x8a6878280a977d5e),
-    ("tbn_stac_f2", 5300, 500, 40, 22094, 0x8e8f234590292da9),
+    ("tbn_stac_as1", 4600, 500, 40, 22094, 0x38991ce7a90cf2c4),
+    ("tbn_stac_f2", 5300, 500, 40, 22094, 0x4fc8ba050c8d0c04),
     ("horn_a2", 5700, 2100, 100, 92654, 0x720ecd7ce34638c9),
     ("horn_c3", 6000, 2100, 100, 92654, 0x9dbbbf39fc37769f),
     ("horn_f2", 5300, 2100, 100, 92654, 0x250a81d7d3636795),
@@ -75,8 +78,8 @@ fn every_committed_sample_is_pinned_by_length_and_hash() {
         let peak = data.iter().map(|v| i32::from(*v).abs()).max().unwrap();
         assert_eq!(peak, 32_767, "{id} is normalised to full scale");
     }
-    // PLAN WP11.4c: the samples stay small (target under about 8 MB).
-    assert_eq!(total, 2_761_980);
+    // The samples stay small (the brief of WP11.4c asked for under about 8 MB).
+    assert_eq!(total, 2_982_568);
     assert!(total < 8_000_000);
 }
 
@@ -97,8 +100,8 @@ fn the_samples_dir_holds_exactly_the_pinned_files() {
 
 /// Pitch of `data` near `claim` cents (MIDI x 100) from the autocorrelation of 600 ms of the sample, searched
 /// over six semitones either way. Returns (cents, normalised autocorrelation at the peak, autocorrelation at
-/// half the period). Integer sums, then one log to turn a period into cents (this is a test).
-fn measure(data: &[i16], claim: i32) -> (f64, f64, f64) {
+/// half the period, autocorrelation at twice the period). Integer sums, then one log to turn a period into cents (this is a test).
+fn measure(data: &[i16], claim: i32) -> (f64, f64, f64, f64) {
     let start = ms(60).min(data.len() / 4);
     let len = ms(600).min(data.len() - start);
     let seg: Vec<i64> = data[start..start + len]
@@ -128,7 +131,12 @@ fn measure(data: &[i16], claim: i32) -> (f64, f64, f64) {
     let cents = 100.0 * (69.0 + 12.0 * (f / 440.0).log2());
     let half = (best as f64 * 0.5) as usize;
     let half_v = (half - 2..=half + 2).map(acf).fold(f64::MIN, f64::max);
-    (cents, best_v, half_v)
+    let double_v = if 2 * best + 1 < seg.len() {
+        acf(2 * best)
+    } else {
+        f64::MIN
+    };
+    (cents, best_v, half_v, double_v)
 }
 
 #[test]
@@ -142,9 +150,9 @@ fn the_committed_samples_have_their_pitch() {
             continue;
         }
         let data = parse_wav(s.bytes);
-        let (cents, strength, half) = measure(&data, s.pitch_cents);
+        let (cents, strength, half, double) = measure(&data, s.pitch_cents);
         println!(
-            "{}: measured {:.0} cents against the constant {} (acf {strength:.2}, at half period {half:.2})",
+            "{}: measured {:.0} cents against the constant {} (acf {strength:.2}, at half period {half:.2}, at twice {double:.2})",
             s.id, cents, s.pitch_cents
         );
         if (cents - f64::from(s.pitch_cents)).abs() > 50.0 {
@@ -156,8 +164,13 @@ fn the_committed_samples_have_their_pitch() {
         if strength < 0.3 {
             bad.push(format!("{}: not periodic ({strength:.2})", s.id));
         }
+        // Both octave errors: the claimed pitch an octave too high would have a stronger correlation at twice
+        // the period (the true one), an octave too low at half the period.
         if half >= strength {
             bad.push(format!("{}: an octave too low?", s.id));
+        }
+        if double > strength + 0.05 {
+            bad.push(format!("{}: an octave too high? (acf at twice the period {double:.2} against {strength:.2})", s.id));
         }
     }
     assert!(bad.is_empty(), "{bad:#?}");
@@ -165,11 +178,14 @@ fn the_committed_samples_have_their_pitch() {
 
 #[test]
 fn the_timpani_pitches_are_the_measured_ones_not_the_file_names() {
-    // The timpani files carry no note. The measured pitches (this crate, autocorrelation, 16-11-2026) are
-    // 34.6, 37.3 and 42.3 for drums 2, 3 and 5 and 37.5 for the roll; the constants are those in cents.
+    // The timpani files carry no note. Measured over the committed hits by autocorrelation (16-11-2026), in
+    // MIDI notes: drum 2 34.1 to 34.5, drum 3 37.3 to 37.7, drum 5 42.5 to 43.1, the roll 37.5. The constants
+    // are 34.4, 37.5, 42.7 and 37.5, in cents of a MIDI note: 3440, 3750, 4270, 3750.
     let want = [
         ("tim2_v4_rr1", 3440),
         ("tim2_v3_rr2", 3440),
+        ("tim2_v1_rr1", 3440),
+        ("tim3_v1_rr1", 3750),
         ("tim3_v4_rr1", 3750),
         ("tim3_v3_rr2", 3750),
         ("tim5_v4_rr1", 4270),
@@ -240,14 +256,14 @@ fn the_player_is_deterministic_and_unison_is_a_copy() {
 
 #[test]
 fn a_shifted_sample_has_the_pitch_it_was_asked_for() {
-    // Shift the Timpani3 hit (37.3) up to 42 and the trombone D2 (50) down to 45 and measure the result.
+    // Shift the trombone D2 (50) down to 45 and the horn A2 (57) up to 62 and measure the result.
     let wav = |id: &str| parse_wav(SAMPLES.iter().find(|s| s.id == id).unwrap().bytes);
     for (id, from, to) in [("tbn_sus_d2", 5000, 4500), ("horn_a2", 5700, 6200)] {
         let moved: Vec<i16> = play(&wav(id), to - from, usize::MAX, 0)
             .iter()
             .map(|v| (*v).clamp(-32_767, 32_767) as i16)
             .collect();
-        let (cents, strength, _) = measure(&moved, to);
+        let (cents, strength, _, _) = measure(&moved, to);
         println!("{id} moved to {to}: measured {cents:.0} (acf {strength:.2})");
         assert!((cents - f64::from(to)).abs() <= 20.0, "{id}: {cents}");
     }
@@ -634,4 +650,53 @@ fn the_layer_does_not_make_the_combat_track_quieter_and_the_peak_stays_the_file_
 
 /// RMS of the combat track before and after the layer (measured, pinned).
 const RMS_BEFORE: u64 = 9_120;
-const RMS_AFTER: u64 = 9_165;
+const RMS_AFTER: u64 = 9_158;
+
+#[test]
+fn the_limiter_numbers_quoted_in_the_documents_are_the_measured_ones() {
+    // Measured on the gain the combat limiter applies (Q15 per 5 ms block, 32768 = none). The documents say
+    // how much of the full sections (3, 6 and 7) is more than 1 dB down and how far down it goes; these are
+    // the numbers.
+    let gains = combat_limiter_gains();
+    let block = ms(5);
+    let one_db = 29_204; // 32768 * 10^(-1/20)
+    let mut down = 0;
+    let mut total = 0;
+    let mut lowest = i64::MAX;
+    let mut lowest_bar = 0;
+    for sec in [3usize, 6, 7] {
+        let (mut d, mut n) = (0, 0);
+        let first = bar_start(4 * sec) / block;
+        let last = bar_start(4 * sec + 4) / block;
+        for (b, g) in gains.iter().enumerate().take(last).skip(first) {
+            n += 1;
+            if *g < one_db {
+                d += 1;
+            }
+            if *g < lowest {
+                lowest = *g;
+                lowest_bar = b * block / bar_start(1);
+            }
+        }
+        println!(
+            "limiter section {sec}: {:.1}% more than 1 dB down",
+            100.0 * f64::from(d) / f64::from(n)
+        );
+        assert!(
+            (8.0..=30.0).contains(&(100.0 * f64::from(d) / f64::from(n))),
+            "section {sec}"
+        );
+        down += d;
+        total += n;
+    }
+    let share = 100.0 * f64::from(down) / f64::from(total);
+    let db = 20.0 * (lowest as f64 / 32_768.0).log10();
+    println!(
+        "limiter: {share:.1}% of the full sections more than 1 dB down, lowest {db:.2} dB at bar {lowest_bar}"
+    );
+    assert!((10.0..=30.0).contains(&share), "{share}");
+    assert!((-5.0..=-3.0).contains(&db), "{db}");
+    assert_eq!(lowest_bar, 24);
+    // Outside the full sections it is mostly idle: the intro is untouched.
+    assert!(gains[..bar_start(4) / block].iter().all(|g| *g == 32_768));
+}

@@ -116,10 +116,10 @@ in `assets/LICENSES.md`); nothing is quoted or made to sound like any game's mus
 | Track | BPM | Key | Length | Size | Character |
 |---|---|---|---|---|---|
 | `music.calm` (`calm.flac`) | 84 | D minor | 68.6 s (24 bars) | 1,509,638 bytes | sparse and tense: slow detuned pads, a deep sub bass, a soft heartbeat pulse, a sparse plucked pattern in an echo, far metal hits and a slow lead near the end |
-| `music.combat` (`combat.flac`) | 128 | D minor | 67.5 s (36 bars) | 2,050,089 bytes (2,021,170 before WP11.4c) | driving: four-on-the-floor kick, snare on two and four, 16th hats, a 16th bass ostinato, short chord stabs, a breakdown and a snare-roll build, a square lead in the last third, and since WP11.4c an orchestral layer of real CC0 samples (timpani, trombone, horn, tuba, cello, crash, bass drum, gong) |
+| `music.combat` (`combat.flac`) | 128 | D minor | 67.5 s (36 bars) | 2,052,329 bytes (2,021,170 before WP11.4c) | driving: four-on-the-floor kick, snare on two and four, 16th hats, a 16th bass ostinato, short chord stabs, a breakdown and a snare-roll build, a square lead in the last third, and since WP11.4c an orchestral layer of real CC0 samples (timpani, trombone, horn, tuba, cello, crash, bass drum, gong) |
 
 (`cargo run -p sf_music_gen -- --table` prints the table from the code.) Both are in D minor so a crossfade between them is
-not a clash. Together 3,559,727 bytes against a budget of 4,000,000 (`BUDGET_BYTES` is unchanged: the layer added 28,919 bytes).
+not a clash. Together 3,561,967 bytes against a budget of 4,000,000 (`BUDGET_BYTES` is unchanged: the layer added 31,159 bytes).
 
 * **Format**: mono, 16 bit, 22.05 kHz **FLAC**. A 44.1 kHz WAV would be 6 MB a track; mono 22.05 kHz WAV 3 MB a track. The FLAC encoder is
   ours (`tools/sf_music_gen/src/flac.rs`, fixed predictors and Rice codes, no dependency; the MD5 field is left zero, which the format allows)
@@ -161,14 +161,15 @@ phrase A D D Bb C, phrase B D G Bb A, nine sections of four bars).
 | Cello | sections 5, 6, 7 | spiccato eighths on root + 12, accent on the quarters |
 | Accents | bars 12 and 24 / 16 / 23 | crash and orchestral bass drum / gong into the breakdown / timpani roll over the last bar of the build, tuned up half a semitone to the D |
 
-* **Samples**: 30 files, 2,761,980 bytes together, in `tools/sf_music_gen/samples/` (16-bit mono 22.05 kHz WAV). Each is pinned by length and
-  FNV-1a (`every_committed_sample_is_pinned_by_length_and_hash`). Timpani: 3 drums x velocity 3 and 4 x 2 round robins (12, 110,294 bytes each),
-  the D-roll (88,244), bass drum (88,244), crash (176,444), gong (352,844); trombone sustain 3 and staccato 2 (92,654 and 22,094), horn 3 (92,654), tuba 3 (26,504), cello 3 (17,684).
-  The velocity-1 timpani files peak at 67 of 32768 and would be 7-bit noise once normalised, so the soft hits use velocity 3 at a lower gain (the preview used velocity 1).
+* **Samples**: 32 files, 2,982,568 bytes together, in `tools/sf_music_gen/samples/` (16-bit mono 22.05 kHz WAV). Each is pinned by length and
+  FNV-1a (`every_committed_sample_is_pinned_by_length_and_hash`). Timpani: 3 drums x velocity 3 and 4 x 2 round robins (12) and velocity 1 of drums 2 and 3 (2), 110,294 bytes each,
+  the D-roll (88,244), bass drum (88,244), crash (176,444), gong (352,844); trombone sustain 3 (92,654 each) and staccato 2 (22,094 each), horn 3 (92,654), tuba 3 (26,504), cello 3 (17,684).
+  The velocity-1 hits are used for the soft hits of the breakdown, as in the preview, at gain 0.35 (90/256). (An earlier draft of this WP replaced them with velocity 3 because it
+  believed they peak at 67 of 32768; that figure belongs to drum 5, which the breakdown never uses. Drums 2 and 3 peak at 459 to 801 per channel, comparable to the trombone source that is used.)
 * **Import** (`cargo run -p sf_music_gen -- --import <VSCO 2 CE dir>`; not run in CI, the directory is only read): mono sum, 2:1 decimation
   through a 95-tap integer FIR (-6 dB at 10 kHz, -45 dB at 11.025 kHz, tested), cut to `keep_ms`, linear fade, peak-normalised to 32767, rounded once to 16 bit.
   `the_committed_samples_are_what_the_import_makes_of_the_recordings` redoes it when `SF_VSCO_DIR` points at a checkout (run once on 16-11-2026,
-  commit 440300901dfe, all 30 equal); without the variable it only prints that it was skipped.
+  commit 440300901dfe, all 32 equal); without the variable it only prints that it was skipped.
 * **Player** (`sampler.rs`): integers only. The pitch ratio is `2^(cents/1200)` in Q16 from a Taylor series (pinned literals, within 1 of the float value for -2400..2400 cents);
   the value between two samples is a four-point cubic (Catmull-Rom) in integers; a note cut short ends in an 80 ms linear fade. At unison the output is the input.
   `the_render_path_has_no_float` searches the sources for float types and functions.
@@ -180,13 +181,23 @@ phrase A D D Bb C, phrase B D G Bb A, nine sections of four bars).
 * **Mix**: the layer is a ring of its own at the scale of the track, added to the finished track with the gains of the preview (`put_ring`, in 1/256), then an
   integer look-ahead peak limiter (5 ms blocks, falls at once, rises over about 150 ms, ring-safe) and the same peak normalisation as before. No pan (the track is mono).
 * **Loudness** (`the_layer_does_not_make_the_combat_track_quieter_and_the_peak_stays_the_file_peak`): peak 29,000 before and after (so the 0.531 of
-  `a_20_tank_fight_is_not_louder_than_the_music` is unchanged); RMS 9,120 before, 9,165 after (calm 8,611, so the two tracks stay within 1.5). The layer alone has
-  RMS 1,330 (timpani), 2,361 (low brass), 570 (stabs), 722 (cello), 785 (accents); the sum before the limiter peaks at 45,907, so the limiter takes the peaks down by 4 dB, and the music is not lowered
-  elsewhere. Per section against the old track: -0.1 to +0.3 dB (the float preview: +0.0 to +0.8 dB, the preview limited less).
-* **Re-pin**: `combat.flac` moved from 2,021,170 bytes (FNV 0x95f629a23692dcd9) to 2,050,089 (0x48148f0a0cf7bb62); with the layer off the old bytes come back exactly
+  `a_20_tank_fight_is_not_louder_than_the_music` is unchanged); RMS 9,120 before, 9,158 after (calm 8,611, so the two tracks stay within 1.5). Per section against the old track
+  the RMS is -0.1 to +0.3 dB (the float preview: -0.0 to +0.8 dB, the preview limited less). **The limiter does lower the track at the loud moments**
+  (`the_limiter_numbers_quoted_in_the_documents_are_the_measured_ones`, gain per 5 ms block): in the full sections 3, 6 and 7 it is more than 1 dB down for 11.4%, 17.8% and 15.8% of the blocks
+  (15.0% together) and goes down to -3.99 dB, at bar 24 (the crash, bass drum and timpani together), before the gain returns over about 150 ms. The intro is untouched. Whether this pumps
+  audibly is for the ear to judge; it is not claimed to be inaudible.
+* **Differences from the float preview** (`mix.py`), all deliberate or forced: (1) the track is mono, so the preview's pan is dropped; (2) the preview resampled 44.1 kHz recordings with float
+  interpolation; here they are decimated once at import and shifted by the integer player; (3) the samples are normalised to full scale after the cut (the preview normalised the whole file), so
+  a sample whose peak lies outside the part kept is a little louder than there; (4) the nearest-sample choice is per the committed set, which has fewer notes than the preview's bank: the largest shift is 3 semitones
+  (trombone staccato, 50 from F2 53); in bar 29 (root G, cello on 55) there is no A2 sample, so F2 shifted up 2 semitones plays; (5) the horn, trombone and tuba pick from 3, 3 and 3 samples, the cello from 3;
+  (6) the limiter is the integer one described above (5 ms blocks, look-ahead of one block, gain interpolated per sample, ring-safe), the preview's was a float block limiter of the same shape with a ceiling of 0.89.
+  The gains are the preview's, rounded to 1/256 (timpani 0.55 and 0.4, breakdown 0.35, trombone 0.28, horn 0.22, tuba 0.3, stabs 0.25, cello 0.22 and 0.16, crash 0.3, bass drum 0.5, gong 0.35, roll 0.45).
+  The trombone staccato uses the `v3` recordings, as the preview did.
+* **Re-pin**: `combat.flac` moved from 2,021,170 bytes (FNV 0x95f629a23692dcd9) to 2,052,329 (0x19ee6457d321ba99); with the layer off the old bytes come back exactly
   (`without_the_layer_the_old_combat_track_comes_back_byte_for_byte`). `calm.flac` did not move.
 * **Gaps**: not heard by us in the game (only the float preview was heard; this integer render has not been listened to yet); mono (the preview was panned);
-  the orchestra levels are the preview's gains, not tuned again by ear; the same loop repeats every 67.5 s as before.
+  the loop repeats every 67.5 s as before. The octave guard of the pitch test checks both the half and the double period; a claim an octave too low is caught by the first (tested by mutation), a claim an octave
+  too high was caught by the distance and strength checks (the search window is six semitones either way), not by the double-period check, which no mutation has exercised.
 
 ## 3c. Fight sounds (WP11.3b)
 

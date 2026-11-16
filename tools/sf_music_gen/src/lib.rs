@@ -10,7 +10,9 @@
 //!
 //! **Own composition, nothing borrowed** (B11): the notes are written out below ([`calm`], [`combat`]) from a
 //! plain minor scale and chord roots; the drums are noise and falling sines, the bass and stabs are filtered
-//! saws. Nothing is sampled, quoted or made to imitate any game's music.
+//! saws. Nothing is quoted or made to imitate any game's music. Since WP11.4c the combat track also has an
+//! orchestral layer played from real CC0 recordings (VSCO 2 Community Edition, see [`orchestra`] and
+//! `assets/LICENSES.md`); the calm track and the rest of the combat track are still synthesised here.
 //!
 //! **Seamless loop.** Everything is mixed into a ring: a note, a pad's release or an echo that runs past the
 //! end wraps round to the start (`Song::put`), and the echo and reverb run round the ring two or more times
@@ -697,6 +699,17 @@ pub fn combat_base() -> Vec<i16> {
 
 /// Add the layers to a finished track, limit the sum and bring it back to [`FILE_PEAK`].
 fn layer_over(base: &[i16], layers: &[(orchestra::Part, Vec<i32>)]) -> Vec<i16> {
+    let mut x = summed(base, layers);
+    limit_ring(&mut x, FILE_PEAK);
+    normalise(&mut x);
+    let k = i64::from(FILE_PEAK);
+    x.iter()
+        .map(|s| (i64::from(*s) * k / 32_767) as i16)
+        .collect()
+}
+
+/// The track and its layers added, before the limiter.
+fn summed(base: &[i16], layers: &[(orchestra::Part, Vec<i32>)]) -> Vec<i32> {
     let mut x: Vec<i32> = base.iter().map(|s| i32::from(*s)).collect();
     for (_, l) in layers {
         assert_eq!(l.len(), x.len());
@@ -704,12 +717,14 @@ fn layer_over(base: &[i16], layers: &[(orchestra::Part, Vec<i32>)]) -> Vec<i16> 
             *d += *s;
         }
     }
-    limit_ring(&mut x, FILE_PEAK);
-    normalise(&mut x);
-    let k = i64::from(FILE_PEAK);
-    x.iter()
-        .map(|s| (i64::from(*s) * k / 32_767) as i16)
-        .collect()
+    x
+}
+
+/// The gain of the limiter of the combat track per block of [`LIMIT_BLOCK`] samples, Q15 (32768 = no
+/// reduction). A measurement for the tests and the documents: it is the gain `layer_over` applies.
+pub fn combat_limiter_gains() -> Vec<i64> {
+    let x = summed(&combat_base(), &orchestra_layers());
+    limit_gains(&x, FILE_PEAK)
 }
 
 /// Length of a limiter block (5 ms) in samples.
@@ -722,6 +737,24 @@ const LIMIT_RELEASE_Q15: i64 = 31_696;
 /// interpolated linearly between block centres. The track is a ring, so the gain state is run for two laps
 /// and the last block feeds the first: no step at the loop point.
 fn limit_ring(x: &mut [i32], ceiling: i32) {
+    let gain = limit_gains(x, ceiling);
+    let nb = gain.len();
+    let half = LIMIT_BLOCK / 2;
+    for (i, s) in x.iter_mut().enumerate() {
+        let (b, o) = (i / LIMIT_BLOCK, i % LIMIT_BLOCK);
+        // Between the centre of the neighbour before (or after) and the centre of this block.
+        let (a, c, w) = if o >= half {
+            (gain[b], gain[(b + 1) % nb], o - half)
+        } else {
+            (gain[(b + nb - 1) % nb], gain[b], o + half)
+        };
+        let g = a + (c - a) * w as i64 / LIMIT_BLOCK as i64;
+        *s = (i64::from(*s) * g / 32_768) as i32;
+    }
+}
+
+/// The Q15 gain of every block of [`limit_ring`].
+fn limit_gains(x: &[i32], ceiling: i32) -> Vec<i64> {
     let n = x.len();
     let nb = n.div_ceil(LIMIT_BLOCK);
     let peak: Vec<i64> = (0..nb)
@@ -754,18 +787,7 @@ fn limit_ring(x: &mut [i32], ceiling: i32) {
             }
         }
     }
-    let half = LIMIT_BLOCK / 2;
-    for (i, s) in x.iter_mut().enumerate() {
-        let (b, o) = (i / LIMIT_BLOCK, i % LIMIT_BLOCK);
-        // Between the centre of the neighbour before (or after) and the centre of this block.
-        let (a, c, w) = if o >= half {
-            (gain[b], gain[(b + 1) % nb], o - half)
-        } else {
-            (gain[(b + nb - 1) % nb], gain[b], o + half)
-        };
-        let g = a + (c - a) * w as i64 / LIMIT_BLOCK as i64;
-        *s = (i64::from(*s) * g / 32_768) as i32;
-    }
+    gain
 }
 
 /// The finished 16-bit samples of a track.

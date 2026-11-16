@@ -135,8 +135,8 @@ pub fn decimate_at(x: &[i64], j: usize) -> i64 {
 pub struct ImportError(pub String);
 
 /// The channels of a PCM WAV (16 or 24 bit, any number of channels) summed per frame, in units of the
-/// source's own steps, with its sample rate and bits per sample.
-pub fn read_pcm_sum(bytes: &[u8]) -> Result<(Vec<i64>, u32, u16), ImportError> {
+/// source's own steps, with its sample rate.
+pub fn read_pcm_sum(bytes: &[u8]) -> Result<(Vec<i64>, u32), ImportError> {
     let err = |s: &str| ImportError(s.to_string());
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return Err(err("not a RIFF WAVE file"));
@@ -186,7 +186,7 @@ pub fn read_pcm_sum(bytes: &[u8]) -> Result<(Vec<i64>, u32, u16), ImportError> {
         }
         out.push(sum);
     }
-    Ok((out, rate, bits))
+    Ok((out, rate))
 }
 
 /// Convert a VSCO recording to a committed sample: mono sum, 2:1 decimation from 44.1 kHz through
@@ -194,7 +194,7 @@ pub fn read_pcm_sum(bytes: &[u8]) -> Result<(Vec<i64>, u32, u16), ImportError> {
 /// the recording is longer than that), scaled so the peak is 32767, rounded once to 16 bit. Returns the WAV file
 /// bytes. Integer maths only, so the same recording always gives the same bytes.
 pub fn import(src: &[u8], keep_ms: u32, fade_ms: u32) -> Result<Vec<u8>, ImportError> {
-    let (x, rate, _bits) = read_pcm_sum(src)?;
+    let (x, rate) = read_pcm_sum(src)?;
     if rate != 2 * SAMPLE_RATE {
         return Err(ImportError(format!(
             "sample rate {rate}, expected {}",
