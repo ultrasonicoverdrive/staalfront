@@ -204,6 +204,10 @@ and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_audio` `the_orig
   has one demolition team, so it can have played, but the summary does not show whether it did. The sim has no event for a structure being hit, so there is no such sound.
 * The sim emits no event for a structure placed or finished, or a harvester unloading: those are later WPs; nothing
   was added to `sf_sim`. The replies to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side.
+* Unit voices (WP11.2b): **no longer silent without Red Alert files.** The bank has three lines per event (Piper voice
+  `en_US-joe-medium` through our walkie-talkie filter, `tools/sf_voice_gen`, CC0), picked per play as variants (`variants` in `bank.ron`, never the same twice in a
+  row); `voices.md` section 3a. Tijmen listened to the filtered lines on 15-11-2026 and judged them good; not yet heard in the game. `building.placed` still has no CC0 sound (no code plays it).
+  Music without Red Alert files is WP11.4b, not this WP.
 * The volumes are set in the file (`mix`) and, since WP11.5b, on the settings screen's Sound page (see "Volumes").
 * `audio.ron` is read once at start; no hot reload.
 * A moving unit's sound stops at the place it had when the event happened (no Doppler, no following).

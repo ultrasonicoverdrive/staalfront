@@ -496,23 +496,33 @@ fn assets() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets")
 }
 
-/// The shipped bank has no sound for the three events: without the player's Red Alert files they
-/// are silent, and a silent event is not an error (no unknown-sound count, nothing recorded).
+/// Since WP11.2b the shipped bank has the walkie-talkie lines for the three events: without the player's Red Alert
+/// files each one speaks through `UnitVoices::speak` (the game's call), a line of its own event, in the
+/// voice volume, with no unknown-sound count.
 #[test]
-fn the_shipped_bank_keeps_the_voices_silent_without_red_alert_files() {
+fn the_shipped_bank_speaks_its_lines_without_red_alert_files() {
     let mut audio = AudioSystem::silent(assets());
     audio.set_trace(true);
     let mut v = voices();
     for (i, voice) in UnitVoice::ALL.into_iter().enumerate() {
-        assert!(!audio.has_sound(voice.event()));
-        assert!(!v.speak(voice, 10_000 * (i as u64 + 1), &mut audio));
+        assert!(audio.has_sound(voice.event()));
+        assert!(v.speak(voice, 10_000 * (i as u64 + 1), &mut audio));
     }
-    assert!(audio.take_trace().is_empty());
-    assert_eq!(
-        audio.stats().unknown,
-        0,
-        "silent, and not even an unknown sound"
-    );
+    let trace = audio.take_trace();
+    let got: Vec<(&str, &str)> = trace
+        .iter()
+        .map(|t| (t.name.as_str(), t.file.as_str()))
+        .collect();
+    assert_eq!(got.len(), 3);
+    for ((name, file), prefix) in got.iter().zip([
+        ("unit.select", "audio/voice/unit_select_"),
+        ("unit.move", "audio/voice/unit_move_"),
+        ("unit.attack", "audio/voice/unit_attack_"),
+    ]) {
+        assert_eq!(*name, prefix.0);
+        assert!(file.starts_with(prefix.1), "{name}: {file}");
+    }
+    assert_eq!(audio.stats().unknown, 0);
 }
 
 /// With a CC0 sound in the bank the event plays through the real `AudioSystem` (recorded by its

@@ -184,7 +184,7 @@ files, or with the switch off, the default music plays: our own generated music 
 
 The **unit voices** are part of this: with the switch on, your selected, moving and attacking units answer
 (`unit.select`, `unit.move`, `unit.attack` in `ra_mapping.ron`), one voice at a time and not on every click (the gaps
-are in the `voices` section of `audio.ron`). Without the files they stay silent. Which variant of a voice line you like
+are in the `voices` section of `audio.ron`). Without the files they speak our own lines over a walkie-talkie (WP11.2b). Which variant of a voice line you like
 is a matter of ear: try them in the F1 *Sound browser* and change the name in `ra_mapping.ron`. Rules:
 [`docs/rules/voices.md`](docs/rules/voices.md).
 
@@ -232,6 +232,6 @@ be committed, shared or uploaded (B11).
 `tools/` holds `sf_editor`, `sf_headless`, `sf_demo` (the engine demo and
 benchmark, the same shell with the demo's defaults), `sf_icon_gen` (writes the
 placeholder strategic icons in `assets/icons`), `sf_music_gen` (writes the CC0 music of the calm and combat moods in `assets/audio/music`: `cargo run -p sf_music_gen`, `-- --check`, `-- --table`), `sf_sound_gen` (writes the CC0 fight sounds in
-`assets/audio/sfx`: `cargo run -p sf_sound_gen` to regenerate, `-- --check` to compare, `-- --table` to list them) and `sf_asset_check` (checks
+`assets/audio/sfx`: `cargo run -p sf_sound_gen` to regenerate, `-- --check` to compare, `-- --table` to list them), `sf_voice_gen` (filters the committed Piper renders in `tools/sf_voice_gen/voice_src` into the CC0 unit voices in `assets/audio/voice`: `cargo run -p sf_voice_gen`, `-- --check`, `-- --table`) and `sf_asset_check` (checks
 delivered `.glb` models against the art brief).
 See PLAN.md section 1.1.
