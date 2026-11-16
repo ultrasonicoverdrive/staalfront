@@ -361,7 +361,8 @@ fn at(step: usize, bpm: u32) -> usize {
 }
 
 /// A timpani hit on MIDI note `root` (an octave up when the root is below 33, which is lower than the drums
-/// go), of velocity layer `vel` (3 or 4) and round robin `rr` (1 or 2).
+/// go; no root of today's arrangement is that low, so that branch is unused), of velocity layer `vel`
+/// (1, 3 or 4) and round robin `rr` (1 or 2).
 fn timpani_hit(bank: &Bank, root: u32, vel: u32, rr: u32, max_len: usize) -> Vec<i32> {
     let target = if root >= 33 { root } else { root + 12 };
     // Velocity 1 exists for drums 2 and 3 only (the breakdown never needs drum 5).

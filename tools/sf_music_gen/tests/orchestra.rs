@@ -548,7 +548,7 @@ fn the_trombone_stabs_hit_four_times_in_sections_two_and_seven() {
                     "bar {bar} step {s}: no stab"
                 );
             }
-            // Nothing in the last quarter of the bar: the stabs of 250 ms end before the 16th 12.
+            // Nothing from the 16th 13 on: the last stab (16th 10, 250 ms) ends at about 16th 12.13.
             assert_eq!(
                 energy(&x, step_start(bar, 13), bar_start(bar + 1)),
                 0,
@@ -592,8 +592,7 @@ fn the_accents_fall_on_bars_12_16_23_and_24() {
             "bar {bar}"
         );
     }
-    // Between the crash of bar 12 (4 s) and the gong of bar 16 the accents are quiet; bar 22 is silent (the gong
-    // of bar 16 lasts 8 s) and the roll fills bar 23.
+    // Bar 22 is silent (the gong of bar 16 lasts 8 s) and the roll fills bar 23.
     assert_eq!(energy(&x, bar_start(22), bar_start(23)), 0, "bar 22");
     assert!(
         energy(&x, bar_start(23), bar_start(24)) > 1_000_000_000,
@@ -664,7 +663,7 @@ fn the_limiter_numbers_quoted_in_the_documents_are_the_measured_ones() {
     let mut total = 0;
     let mut lowest = i64::MAX;
     let mut lowest_bar = 0;
-    for sec in [3usize, 6, 7] {
+    for (sec, quoted) in [(3usize, 11.4), (6, 17.8), (7, 15.8)] {
         let (mut d, mut n) = (0, 0);
         let first = bar_start(4 * sec) / block;
         let last = bar_start(4 * sec + 4) / block;
@@ -682,10 +681,8 @@ fn the_limiter_numbers_quoted_in_the_documents_are_the_measured_ones() {
             "limiter section {sec}: {:.1}% more than 1 dB down",
             100.0 * f64::from(d) / f64::from(n)
         );
-        assert!(
-            (8.0..=30.0).contains(&(100.0 * f64::from(d) / f64::from(n))),
-            "section {sec}"
-        );
+        let pct = 100.0 * f64::from(d) / f64::from(n);
+        assert!((pct - quoted).abs() < 0.05, "section {sec}: {pct}");
         down += d;
         total += n;
     }
@@ -694,8 +691,8 @@ fn the_limiter_numbers_quoted_in_the_documents_are_the_measured_ones() {
     println!(
         "limiter: {share:.1}% of the full sections more than 1 dB down, lowest {db:.2} dB at bar {lowest_bar}"
     );
-    assert!((10.0..=30.0).contains(&share), "{share}");
-    assert!((-5.0..=-3.0).contains(&db), "{db}");
+    assert!((share - 15.0).abs() < 0.05, "{share}");
+    assert!((db - -3.99).abs() < 0.005, "{db}");
     assert_eq!(lowest_bar, 24);
     // Outside the full sections it is mostly idle: the intro is untouched.
     assert!(gains[..bar_start(4) / block].iter().all(|g| *g == 32_768));

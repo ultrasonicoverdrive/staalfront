@@ -184,14 +184,19 @@ phrase A D D Bb C, phrase B D G Bb A, nine sections of four bars).
   `a_20_tank_fight_is_not_louder_than_the_music` is unchanged); RMS 9,120 before, 9,158 after (calm 8,611, so the two tracks stay within 1.5). Per section against the old track
   the RMS is -0.1 to +0.3 dB (the float preview: -0.0 to +0.8 dB, the preview limited less). **The limiter does lower the track at the loud moments**
   (`the_limiter_numbers_quoted_in_the_documents_are_the_measured_ones`, gain per 5 ms block): in the full sections 3, 6 and 7 it is more than 1 dB down for 11.4%, 17.8% and 15.8% of the blocks
-  (15.0% together) and goes down to -3.99 dB, at bar 24 (the crash, bass drum and timpani together), before the gain returns over about 150 ms. The intro is untouched. Whether this pumps
+  (15.0% together) and goes down to -3.99 dB, at bar 24 (the crash, bass drum and timpani together), before the gain returns over about 150 ms. The limiter leaves the intro alone; the final normalisation lowers the whole track by about 0.07 dB (sections 0, 1 and 4 come out about -0.07 dB). Whether this pumps
   audibly is for the ear to judge; it is not claimed to be inaudible.
 * **Differences from the float preview** (`mix.py`), all deliberate or forced: (1) the track is mono, so the preview's pan is dropped; (2) the preview resampled 44.1 kHz recordings with float
   interpolation; here they are decimated once at import and shifted by the integer player; (3) the samples are normalised to full scale after the cut (the preview normalised the whole file), so
   a sample whose peak lies outside the part kept is a little louder than there; (4) the nearest-sample choice is per the committed set, which has fewer notes than the preview's bank: the largest shift is 3 semitones
   (trombone staccato, 50 from F2 53); in bar 29 (root G, cello on 55) there is no A2 sample, so F2 shifted up 2 semitones plays; (5) the horn, trombone and tuba pick from 3, 3 and 3 samples, the cello from 3;
-  (6) the limiter is the integer one described above (5 ms blocks, look-ahead of one block, gain interpolated per sample, ring-safe), the preview's was a float block limiter of the same shape with a ceiling of 0.89.
-  The gains are the preview's, rounded to 1/256 (timpani 0.55 and 0.4, breakdown 0.35, trombone 0.28, horn 0.22, tuba 0.3, stabs 0.25, cello 0.22 and 0.16, crash 0.3, bass drum 0.5, gong 0.35, roll 0.45).
+  (6) the limiter is the integer one described above (5 ms blocks, look-ahead of one block, gain interpolated per sample, ring-safe), the preview's was a float block limiter of the same shape with a ceiling of 0.89. (7) **the effective level is hotter than the preview's**: the import normalises the mono sum of the kept part to full scale
+  (`sampler.rs`), while `mix.py` normalised each channel to its loudest channel over the whole file and then folded the stereo mix to (L+R)/2. Measured per sample on the 32 sources
+  (review of PR #154): the layer is +0.3 to +3.4 dB louder per sample, about +3 dB for the held trombones, the horns, timpani 3 and 5 at v4, the roll and the cello, before the
+  preview's pan losses (up to about another 1 dB for trombone, horn and cello). This is the main cause; (3) adds a little. Not compensated in the gains: the render is judged by ear as it is;
+  (8) the timpani tuning constants differ from the preview's by up to about 30 cents; `tim5_v4_rr1` measures 43 cents from its constant (7 cents inside the test's 50-cent limit) and
+  `tim2_v3_rr1` passes the double-period check by 0.01.
+  The gain numbers are the preview's (the effective level is not, see (7)), rounded to 1/256 (timpani 0.55 and 0.4, breakdown 0.35, trombone 0.28, horn 0.22, tuba 0.3, stabs 0.25, cello 0.22 and 0.16, crash 0.3, bass drum 0.5, gong 0.35, roll 0.45).
   The trombone staccato uses the `v3` recordings, as the preview did.
 * **Re-pin**: `combat.flac` moved from 2,021,170 bytes (FNV 0x95f629a23692dcd9) to 2,052,329 (0x19ee6457d321ba99); with the layer off the old bytes come back exactly
   (`without_the_layer_the_old_combat_track_comes_back_byte_for_byte`). `calm.flac` did not move.
