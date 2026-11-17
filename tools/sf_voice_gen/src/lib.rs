@@ -420,10 +420,38 @@ pub const LINES: [Line; 9] = [
     Line { event: "unit.attack", file: "unit_attack_firing.wav", text: "Firing", seed: 209 },
 ];
 
-/// All files as (name, bytes), for the writer and the checker.
+/// The announcements (WP11.2c): the status lines of the player's own base ("Unit ready", "Base under attack"),
+/// one file per event, same voice, same filter, same settings as the unit voices. They are longer than a unit
+/// reply; the longest finished file is 1.31 s, so the unit voices' 1.5 s limit holds for them too (no separate limit,
+/// no word cut). The texts are the ones `piper_lines.py` renders (with a full stop).
+#[rustfmt::skip]
+pub const ANNOUNCEMENTS: [Line; 19] = [
+    Line { event: "announce.structure_ready", file: "announce_structure_ready.wav", text: "Structure ready", seed: 301 },
+    Line { event: "announce.unit_ready", file: "announce_unit_ready.wav", text: "Unit ready", seed: 302 },
+    Line { event: "announce.building", file: "announce_building.wav", text: "Building", seed: 303 },
+    Line { event: "announce.training", file: "announce_training.wav", text: "Training", seed: 304 },
+    Line { event: "announce.on_hold", file: "announce_on_hold.wav", text: "On hold", seed: 305 },
+    Line { event: "announce.cancelled", file: "announce_cancelled.wav", text: "Cancelled", seed: 306 },
+    Line { event: "announce.base_under_attack", file: "announce_base_under_attack.wav", text: "Base under attack", seed: 307 },
+    Line { event: "announce.harvester_under_attack", file: "announce_harvester_under_attack.wav", text: "Harvester under attack", seed: 308 },
+    Line { event: "announce.low_power", file: "announce_low_power.wav", text: "Power low", seed: 309 },
+    Line { event: "announce.insufficient_funds", file: "announce_insufficient_funds.wav", text: "Not enough credits", seed: 310 },
+    Line { event: "announce.storage_full", file: "announce_storage_full.wav", text: "Storage full", seed: 311 },
+    Line { event: "announce.unit_lost", file: "announce_unit_lost.wav", text: "Unit lost", seed: 312 },
+    Line { event: "announce.structure_lost", file: "announce_structure_lost.wav", text: "Structure lost", seed: 313 },
+    Line { event: "announce.new_options", file: "announce_new_options.wav", text: "New options available", seed: 314 },
+    Line { event: "announce.cannot_deploy", file: "announce_cannot_deploy.wav", text: "Cannot build there", seed: 315 },
+    Line { event: "announce.victory", file: "announce_victory.wav", text: "Victory", seed: 316 },
+    Line { event: "announce.defeat", file: "announce_defeat.wav", text: "Defeat", seed: 317 },
+    Line { event: "announce.structure_sold", file: "announce_structure_sold.wav", text: "Structure sold", seed: 318 },
+    Line { event: "announce.repairing", file: "announce_repairing.wav", text: "Repairing", seed: 319 },
+];
+
+/// All files as (name, bytes), for the writer and the checker: the unit voices first, then the announcements.
 pub fn files() -> Vec<(String, Vec<u8>)> {
     LINES
         .iter()
+        .chain(ANNOUNCEMENTS.iter())
         .map(|l| (l.file.to_string(), l.bytes()))
         .collect()
 }

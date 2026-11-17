@@ -106,6 +106,7 @@
 //! three screenshots (close-up, middle, whole map) and exits. Both are what
 //! CI runs on the software adapters. See the README, "Benchmark (M0)".
 
+pub mod announce;
 pub mod args;
 pub mod bench;
 pub mod bench_scene;

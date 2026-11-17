@@ -175,7 +175,7 @@ scenario (every unit stands still at the end, however fast it was made), which i
 ## Not done, on purpose
 
 The AI's response to a shortage (phase 9); a power-plant-first
-build order or a "low power" announcement in sound (audio is another work package); a power cost for a structure while it
+build order or a "low power" announcement in sound (audio is another work package; the announcement came with WP11.2c, `announcements.md`); a power cost for a structure while it
 goes up; a separate rule for the structures of the harvester dock or the radar (a radar that switches off in a shortage is a
 presentation of phase 11); damage stages by state rather than by hit points; counting power in the same tick the structure
 completes.

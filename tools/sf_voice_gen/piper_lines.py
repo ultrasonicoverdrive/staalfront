@@ -1,4 +1,4 @@
-"""Render the raw unit-voice lines of Staalfront with Piper (WP11.2b). Run by hand, offline; CI never runs it.
+"""Render the raw unit-voice lines and announcements of Staalfront with Piper (WP11.2b). Run by hand, offline; CI never runs it.
 
 The WAVs it writes are committed in tools/sf_voice_gen/voice_src/ and are the pinned input of sf_voice_gen
 (`cargo run -p sf_voice_gen` filters them into assets/audio/voice/). Re-render only to change a line or the voice;
@@ -29,6 +29,26 @@ LINES = {
     "unit_attack_engaging": "Engaging.",
     "unit_attack_target_locked": "Target locked.",
     "unit_attack_firing": "Firing.",
+    # Announcements (WP11.2c), the status lines of the player's own base; same voice and settings.
+    "announce_structure_ready": "Structure ready.",
+    "announce_unit_ready": "Unit ready.",
+    "announce_building": "Building.",
+    "announce_training": "Training.",
+    "announce_on_hold": "On hold.",
+    "announce_cancelled": "Cancelled.",
+    "announce_base_under_attack": "Base under attack.",
+    "announce_harvester_under_attack": "Harvester under attack.",
+    "announce_low_power": "Power low.",
+    "announce_insufficient_funds": "Not enough credits.",
+    "announce_storage_full": "Storage full.",
+    "announce_unit_lost": "Unit lost.",
+    "announce_structure_lost": "Structure lost.",
+    "announce_new_options": "New options available.",
+    "announce_cannot_deploy": "Cannot build there.",
+    "announce_victory": "Victory.",
+    "announce_defeat": "Defeat.",
+    "announce_structure_sold": "Structure sold.",
+    "announce_repairing": "Repairing.",
 }
 
 voices, out = Path(sys.argv[1]), Path(sys.argv[2])
