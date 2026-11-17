@@ -63,6 +63,13 @@ pub const DUST: f32 = 0.28;
 pub const DUST_SRGB: [u8; 3] = [118, 104, 82];
 /// A plain face's shade as a share of the material factor: the head room for highlights.
 pub const NOMINAL: f32 = 0.85;
+/// The least material factor (WP11.6p review): a dark slot (rubber, dark metal, glass) gets this
+/// head room in the vertex colour instead of `top / NOMINAL`, so the dust, which lifts it towards a
+/// brighter earth colour, cannot overflow `COLOR_0`'s 0..1 (before: 5-25 % of a tank's metal and
+/// rubber vertices clamped to flat grey). A plain face is still exactly the palette colour (the
+/// vertex colour is divided by the factor); the vertex colour is smaller on a dark slot, which 8-bit
+/// rounding resolves finer in linear light, not coarser.
+pub const FACTOR_FLOOR: f32 = 0.15;
 /// The extra brightness of an upward-sloping bevel or chamfer (the top-edge highlight; WP11.6p:
 /// 0.16 before, now a few per cent).
 pub const HIGHLIGHT: f32 = 0.05;
@@ -228,11 +235,11 @@ fn hits(o: V, d: V, tri: &Occluder) -> bool {
 }
 
 /// The material factor the GLB stores for a linear palette colour: a grey at the colour's
-/// brightest channel over [`NOMINAL`] (at most 1). The hue lives in the vertex colour, so edge wear
+/// brightest channel over [`NOMINAL`], at least [`FACTOR_FLOOR`] and at most 1. The hue lives in the vertex colour, so edge wear
 /// can lift a weak channel (desaturate) without leaving glTF's 0..1 range for `COLOR_0`.
 pub fn factor(lin: [f32; 3]) -> [f32; 3] {
     let top = lin.iter().copied().fold(0.0_f32, f32::max);
-    [(top / NOMINAL).min(1.0); 3]
+    [(top / NOMINAL).max(FACTOR_FLOOR).min(1.0); 3]
 }
 
 /// The vertex colour of every corner of `tris` (all the triangles of one level, in model space),
