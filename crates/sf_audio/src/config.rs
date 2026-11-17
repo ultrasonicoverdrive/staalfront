@@ -7,6 +7,7 @@
 //!   ([`crate::positional`]).
 //! - `music`: the calm/combat mood and the crossfade (WP11.4, [`crate::music`]).
 //! - `voices`: the brake on unit voices (WP11.2, [`crate::voice_brake`]).
+//! - `announce`: the brake and the priorities of the status announcements (WP11.2c).
 //!
 //! The shipped file is also compiled in ([`AudioConfig::embedded`]) and is
 //! the fallback when the file on disk is missing or broken, so there are no
@@ -39,6 +40,8 @@ pub struct AudioConfig {
     pub music: MusicConfig,
     /// The brake on unit voices (WP11.2).
     pub voices: VoiceConfig,
+    /// The status announcements of the base (WP11.2c).
+    pub announce: crate::announce_config::AnnounceConfig,
 }
 
 /// The numbers of [`SpatialParams`], in metres.
@@ -277,6 +280,7 @@ impl AudioConfig {
         }
         self.music.validate()?;
         self.voices.validate()?;
+        self.announce.validate()?;
         let p = &self.positional;
         if p.max_cues_per_frame == 0 {
             return Err("positional.max_cues_per_frame must be at least 1".into());
@@ -384,6 +388,42 @@ mod tests {
                 min_gap_ms: 400,
                 repeat_gap_ms: 1200
             }
+        );
+        // The announcements (WP11.2c), as literals: (event, priority, repeat_gap_ms).
+        let a = &c.announce;
+        assert_eq!(
+            (a.min_gap_ms, a.max_wait_ms, a.queue_len, a.settle_ticks),
+            (2000, 4000, 4, 100)
+        );
+        assert_eq!((a.fallback.priority, a.fallback.repeat_gap_ms), (2, 5000));
+        let rules: Vec<(&str, u8, u32)> = a
+            .events
+            .iter()
+            .map(|(k, r)| (k.as_str(), r.priority, r.repeat_gap_ms))
+            .collect();
+        assert_eq!(
+            rules,
+            [
+                ("announce.base_under_attack", 8, 20000),
+                ("announce.building", 2, 2000),
+                ("announce.cancelled", 2, 2000),
+                ("announce.cannot_deploy", 4, 3000),
+                ("announce.defeat", 10, 60000),
+                ("announce.harvester_under_attack", 7, 15000),
+                ("announce.insufficient_funds", 5, 15000),
+                ("announce.low_power", 6, 30000),
+                ("announce.new_options", 2, 10000),
+                ("announce.on_hold", 3, 10000),
+                ("announce.repairing", 2, 5000),
+                ("announce.storage_full", 2, 30000),
+                ("announce.structure_lost", 7, 6000),
+                ("announce.structure_ready", 3, 2000),
+                ("announce.structure_sold", 3, 2000),
+                ("announce.training", 2, 2000),
+                ("announce.unit_lost", 5, 6000),
+                ("announce.unit_ready", 3, 2000),
+                ("announce.victory", 10, 60000),
+            ]
         );
         assert_eq!(c.music.fallback.calm.as_deref(), Some("music.calm"));
         assert_eq!(c.music.fallback.combat.as_deref(), Some("music.combat"));

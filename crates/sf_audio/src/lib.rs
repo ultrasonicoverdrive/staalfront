@@ -20,6 +20,7 @@
 //! Music crossfades between tracks; positional sounds use `play_at` with a
 //! [`Listener`] derived from the camera each frame.
 
+mod announce_config;
 pub mod bank;
 pub mod config;
 mod live;
@@ -31,6 +32,7 @@ mod system;
 pub mod voice_brake;
 pub mod voices;
 
+pub use announce_config::{AnnounceConfig, AnnounceRule};
 pub use bank::{Bank, BankError, Category, SoundDef};
 pub use config::AudioConfig;
 pub use music::{Mood, MoodTracker};

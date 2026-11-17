@@ -133,6 +133,13 @@ in a real fight is for the ear.
 on 15-11-2026 to the nine filtered lines as committed here (the files written at 19:52 that day, unchanged since) and
 judged them good ("joe klinkt goed"). Not yet heard in a running game over a fight.
 
+### 3b. Announcements (WP11.2c)
+
+The status lines of the base ("Unit ready", "Base under attack") use the same voice, the same filter and the same bank
+settings (Voice category, 0.35, `max_instances: 1`, `original_as_is`). They share the **voice channel** with the unit voices: while an
+announcement sounds, a unit voice that is asked for is skipped (`UnitVoices::speak` sees `busy`), and an announcement waits for
+a quiet channel. Rules: `announcements.md`.
+
 ## 4. Where it is wired
 
 * `crates/sf_audio/src/voice_brake.rs`: `VoiceConfig`, `VoiceBrake`.
@@ -171,4 +178,4 @@ the player's own Red Alert files and a sound device, neither of which CI has.
 * A selection whose first unit is a harvester or a transport speaks like any other: the select line is the same.
 * The F1 sound browser plays any entry, but the three mapped names are defaults, not checked by ear in this repo.
 * Orders given by the sidebar (rally points, repair, sell) and structure commands have no voice.
-* A voice skipped by the brake is lost, not delayed.
+* A voice skipped by the brake is lost, not delayed. Since WP11.2c this includes a unit voice asked for while an announcement sounds.
