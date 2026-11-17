@@ -110,6 +110,7 @@ pub fn play_test_sound(audio: &mut AudioSystem, which: Volume) {
 /// Turns the shown events into sounds. See the module documentation.
 pub struct FxSound {
     voices: sf_audio::VoiceConfig,
+    announce: sf_audio::AnnounceConfig,
     planner: Planner,
     /// `positional.max_summed_gain` of `audio.ron`.
     max_summed_gain: f32,
@@ -132,6 +133,7 @@ impl FxSound {
     pub fn new(config: &AudioConfig) -> FxSound {
         FxSound {
             voices: config.voices,
+            announce: config.announce.clone(),
             planner: Planner::new(config.positional.clone()),
             max_summed_gain: config.positional.max_summed_gain,
             totals: SoundTotals::default(),
@@ -142,6 +144,11 @@ impl FxSound {
     /// The numbers of the unit voices' brake (`voices` of `audio.ron`, WP11.2).
     pub fn voice_config(&self) -> sf_audio::VoiceConfig {
         self.voices
+    }
+
+    /// The numbers of the announcements (`announce` of `audio.ron`, WP11.2c).
+    pub fn announce_config(&self) -> sf_audio::AnnounceConfig {
+        self.announce.clone()
     }
 
     pub fn totals(&self) -> SoundTotals {

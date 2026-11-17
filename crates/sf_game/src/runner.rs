@@ -37,6 +37,7 @@ use sf_render::{
 };
 use sf_sim::{EntityView, World};
 
+use crate::announce::{self, Announcer, Facts};
 use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
 use crate::build_mode::BuildMode;
@@ -270,6 +271,8 @@ pub struct Runner {
     fx_sound: FxSound,
     /// The replies of the player's own units to selecting and ordering (WP11.2).
     unit_voices: UnitVoices,
+    /// The status announcements of the base (WP11.2c).
+    announcer: Announcer,
     /// The last music load printed (WP11.4), so it is printed once.
     music_load_logged: Option<sf_audio::MusicLoad>,
     /// The glTF models the units are drawn with, after the placeholders.
@@ -592,6 +595,7 @@ impl Runner {
             fx: FxPlayer::embedded(),
             fx_sound: FxSound::new(&AudioConfig::embedded()),
             unit_voices: UnitVoices::new(AudioConfig::embedded().voices),
+            announcer: Announcer::new(AudioConfig::embedded().announce),
             music_load_logged: None,
             pack,
             looks,
@@ -862,6 +866,7 @@ impl Runner {
             lod: _,
             fx_sound: _,
             unit_voices: _,
+            announcer: _,
             music_load_logged: _,
             stats: _,
             terrain: _,
@@ -940,6 +945,7 @@ impl Runner {
         self.ticks = 0;
         self.fx_sound.reset();
         self.unit_voices.reset();
+        self.announcer.reset();
     }
 
     /// `--replay`: sends the commands of the record that are due, as the player's own are sent (the tick
@@ -1620,6 +1626,13 @@ impl Runner {
             let new = usize::try_from(total - self.rejected_seen)
                 .unwrap_or(usize::MAX)
                 .min(last.len());
+            if self.options.scene == Scene::Match
+                && let Some(a) =
+                    announce::refusal(&last[last.len() - new..], commands::LOCAL_PLAYER)
+            {
+                let at = self.now_ms();
+                self.announcer.raise_live(a, at);
+            }
             // Only the local player's own refusals go to its top bar.
             for r in last[last.len() - new..]
                 .iter()
@@ -2779,6 +2792,7 @@ impl App for Runner {
             eprintln!("sf_audio: {w}");
         }
         self.unit_voices = UnitVoices::new(fx_sound.voice_config());
+        self.announcer = Announcer::new(fx_sound.announce_config());
         self.fx_sound = fx_sound;
         audio.set_music_trace(true);
         println!(
@@ -3013,6 +3027,7 @@ impl App for Runner {
             }
         }
         let mut sounds_started = 0u32;
+        let announce_ms = self.now_ms();
         // The listener follows the camera (it does not rotate, so right = +X).
         // The camera works in metres, so does the audio.
         let focus = self.camera.focus();
@@ -3029,6 +3044,22 @@ impl App for Runner {
             let mood =
                 self.fx_sound
                     .music_frame(&self.fx, [focus.x as f32, focus.y as f32], now, audio);
+            // The status announcements of the base (WP11.2c), from the same snapshot and the same shown
+            // events; only in a match, where the local player has a base.
+            if self.options.scene == Scene::Match {
+                let tick = self.snap.tick().0;
+                if self.announcer.is_new_tick(tick) {
+                    let facts =
+                        Facts::read(&self.snap, commands::LOCAL_PLAYER, self.catalog.as_ref());
+                    self.announcer.observe(facts, announce_ms);
+                }
+                for a in announce::deaths(self.fx.shown(), commands::LOCAL_PLAYER) {
+                    self.announcer.raise_live(a, announce_ms);
+                }
+                if let Some(said) = self.announcer.speak(announce_ms, audio) {
+                    println!("announce: tick {tick} {}", said.event());
+                }
+            }
             for t in audio.take_music_trace() {
                 println!("music: tick {now} mood {} track {}", t.mood.name(), t.track);
                 self.hitch.note(|| {
@@ -3272,6 +3303,7 @@ impl App for Runner {
         }
         self.write_record(&exit, None);
         println!("summary: fight sounds {:?}", self.fx_sound.totals());
+        println!("summary: announcements {:?}", self.announcer.stats());
         // Summary for the stress test (software rendering: no fps claim).
         println!(
             "summary: {} units requested, {} in the world, {} frames",

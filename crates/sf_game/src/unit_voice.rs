@@ -94,8 +94,8 @@ impl VoiceOut for AudioSystem {
     }
 
     fn busy(&self) -> bool {
-        let names: Vec<&str> = UnitVoice::ALL.iter().map(|v| v.event()).collect();
-        self.is_playing(&names)
+        // One voice at a time over the unit voices and the announcements (WP11.2c).
+        self.is_playing(&crate::announce::voice_channel())
     }
 
     fn play(&mut self, event: &str) {

@@ -202,8 +202,11 @@ and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_audio` `the_orig
   Tijmen listened on 12-11-2026 in `sf_game --sandbox --fight` without `--ra-audio` and judged the sounds good (`progress.md`, WP11.3b
   notes). Still open: `weapon.fire.demolition` (two ticks and a rising beep), for any likeness to a Red Alert sound (B11); that fight
   has one demolition team, so it can have played, but the summary does not show whether it did. The sim has no event for a structure being hit, so there is no such sound.
-* The sim emits no event for a structure placed or finished, or a harvester unloading: those are later WPs; nothing
-  was added to `sf_sim`. The replies to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side.
+* The sim emits no event for a structure placed or finished, or a harvester unloading; nothing was added to `sf_sim`. The replies
+  to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side. **Announcements** ("Unit ready", "Base under
+  attack", "Power low", ...) are played since WP11.2c (`announcements.md`): raised on the UI side from the snapshot, the shown
+  effects events and the sim's refusals, with a brake and a priority; our own Piper lines without Red Alert files, a mapped Red
+  Alert line with `--ra-audio`.
 * Unit voices (WP11.2b): **no longer silent without Red Alert files.** The bank has three lines per event (Piper voice
   `en_US-joe-medium` through our walkie-talkie filter, `tools/sf_voice_gen`, CC0), picked per play as variants (`variants` in `bank.ron`, never the same twice in a
   row); `voices.md` section 3a. Tijmen listened to the filtered lines on 15-11-2026 and judged them good; not yet heard in the game. `building.placed` still has no CC0 sound (no code plays it).
