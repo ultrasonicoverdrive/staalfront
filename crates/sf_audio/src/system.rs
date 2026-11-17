@@ -1411,19 +1411,27 @@ mod tests {
         std::fs::remove_dir_all(d).ok();
     }
 
-    /// The three unit-voice events of the shipped bank, with their files, as literals (WP11.2b).
-    const VOICE_FILES: [(&str, [&str; 3]); 3] = [
+    /// The unit-voice events of the shipped bank, with their files, as literals (WP11.2b; since WP11.2d nine
+    /// select lines for Meridian and the three Veyran events of the voice cori). The first three are the
+    /// Meridian events, the last three the Veyran ones.
+    const VOICE_FILES: [(&str, &[&str]); 6] = [
         (
             "unit.select",
-            [
+            &[
                 "audio/voice/unit_select_ready.wav",
                 "audio/voice/unit_select_online.wav",
                 "audio/voice/unit_select_standing_by.wav",
+                "audio/voice/unit_select_go_ahead.wav",
+                "audio/voice/unit_select_listening.wav",
+                "audio/voice/unit_select_orders.wav",
+                "audio/voice/unit_select_copy_that.wav",
+                "audio/voice/unit_select_your_call.wav",
+                "audio/voice/unit_select_on_the_line.wav",
             ],
         ),
         (
             "unit.move",
-            [
+            &[
                 "audio/voice/unit_move_moving.wav",
                 "audio/voice/unit_move_route_set.wav",
                 "audio/voice/unit_move_on_it.wav",
@@ -1431,10 +1439,40 @@ mod tests {
         ),
         (
             "unit.attack",
-            [
+            &[
                 "audio/voice/unit_attack_engaging.wav",
                 "audio/voice/unit_attack_target_locked.wav",
                 "audio/voice/unit_attack_firing.wav",
+            ],
+        ),
+        (
+            "unit.select.veyran",
+            &[
+                "audio/voice/cori_unit_select_ready_to_go.wav",
+                "audio/voice/cori_unit_select_systems_online.wav",
+                "audio/voice/cori_unit_select_standing_by.wav",
+                "audio/voice/cori_unit_select_go_ahead.wav",
+                "audio/voice/cori_unit_select_listening_in.wav",
+                "audio/voice/cori_unit_select_orders_sir.wav",
+                "audio/voice/cori_unit_select_copy_sir.wav",
+                "audio/voice/cori_unit_select_your_call_sir.wav",
+                "audio/voice/cori_unit_select_on_the_line.wav",
+            ],
+        ),
+        (
+            "unit.move.veyran",
+            &[
+                "audio/voice/cori_unit_move_moving_out.wav",
+                "audio/voice/cori_unit_move_route_set.wav",
+                "audio/voice/cori_unit_move_on_my_way.wav",
+            ],
+        ),
+        (
+            "unit.attack.veyran",
+            &[
+                "audio/voice/cori_unit_attack_opening_fire.wav",
+                "audio/voice/cori_unit_attack_target_locked.wav",
+                "audio/voice/cori_unit_attack_engaging_now.wav",
             ],
         ),
     ];
@@ -1462,8 +1500,8 @@ mod tests {
         assert!(pick_variant(2, Some(5), 3) < 2);
     }
 
-    /// WP11.2b: the shipped bank plays one of three lines per voice event, every one of them over many
-    /// plays, never the same twice in a row, in category Voice, with the bank's volume.
+    /// WP11.2b, WP11.2d: the shipped bank plays one of three (select: nine) lines per voice event of each side,
+    /// every one of them over many plays, never the same twice in a row, in category Voice, with the bank's volume.
     #[test]
     fn the_voice_events_pick_their_variants_and_never_repeat_one() {
         let mut s = AudioSystem::silent(assets());
@@ -1486,7 +1524,7 @@ mod tests {
             );
             let mut seen = BTreeSet::new();
             let mut last = String::new();
-            for _ in 0..30 {
+            for _ in 0..150 {
                 s.play_as(event, Category::Voice);
                 let t = s.take_trace().pop().unwrap();
                 assert_eq!(t.name, event);
@@ -1496,7 +1534,7 @@ mod tests {
                 seen.insert(t.file.clone());
                 last = t.file;
             }
-            assert_eq!(seen.len(), 3, "{event}: {seen:?}");
+            assert_eq!(seen.len(), files.len(), "{event}: {seen:?}");
         }
         assert_eq!(s.stats().unknown, 0);
     }
@@ -1621,7 +1659,8 @@ mod tests {
             assert_eq!(t.file, "ra-audio:unit.select");
             assert_eq!(t.gain, 1.0, "the original plays as-is");
         }
-        for (event, files) in &VOICE_FILES[1..] {
+        // The move and attack events of the Meridian voice (the select event is the mapped one).
+        for (event, files) in &VOICE_FILES[1..3] {
             let volume = s.bank().get(event).unwrap().volume;
             s.play_as(event, Category::Voice);
             let t = s.take_trace().pop().unwrap();

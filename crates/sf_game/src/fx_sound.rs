@@ -1141,12 +1141,21 @@ mod tests {
             }
         }
         let mut audio = tracing_audio(&assets());
-        for event in ["unit.select", "unit.move", "unit.attack"] {
+        // WP11.2d: both sides, every line of each: the Meridian voice (joe) and the Veyran voice (cori).
+        let events = [
+            ("unit.select", 9),
+            ("unit.move", 3),
+            ("unit.attack", 3),
+            ("unit.select.veyran", 9),
+            ("unit.move.veyran", 3),
+            ("unit.attack.veyran", 3),
+        ];
+        for (event, lines) in events {
             let def = bank.get(event).unwrap();
             assert_eq!(def.category, sf_audio::Category::Voice, "{event}");
-            assert_eq!(def.files().count(), 3, "{event}");
+            assert_eq!(def.files().count(), lines, "{event}");
             let mut heard = std::collections::BTreeSet::new();
-            for _ in 0..12 {
+            for _ in 0..120 {
                 audio.play_as(event, sf_audio::Category::Voice);
                 let t = audio.take_trace().pop().unwrap();
                 let voice: Vec<f32> = wav_samples(&t.file)
@@ -1177,7 +1186,7 @@ mod tests {
                     t.file
                 );
             }
-            assert_eq!(heard.len(), 3, "{event}: {heard:?}");
+            assert_eq!(heard.len(), lines, "{event}: {heard:?}");
         }
     }
 
@@ -1626,6 +1635,7 @@ mod tests {
     use crate::settings::SoundSettings;
     use crate::unit_voice::{UnitVoice, UnitVoices};
     use sf_audio::{Category, RaStatus};
+    use sf_data::units::Faction;
 
     fn near(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-6
@@ -1656,7 +1666,7 @@ mod tests {
         // the master volume (the bank entries' own volume is 1.0).
         audio.play("weapon.fire.cannon");
         let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
-        assert!(voices.speak(UnitVoice::Move, 10_000, &mut audio));
+        assert!(voices.speak(UnitVoice::Move, Faction::Meridian, 10_000, &mut audio));
         let gains: Vec<(String, f32)> = audio
             .take_trace()
             .into_iter()
@@ -1776,7 +1786,7 @@ mod tests {
         assert_eq!(audio.original_audio_catalog().unwrap().sound_count(), 0);
         // The event still has the bank's sound, and plays it: no panic, no error.
         let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
-        assert!(voices.speak(UnitVoice::Move, 10_000, &mut audio));
+        assert!(voices.speak(UnitVoice::Move, Faction::Meridian, 10_000, &mut audio));
         assert_eq!(audio.take_trace().len(), 1);
     }
 

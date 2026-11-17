@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 
 use sf_sound_gen::{FILE_PEAK, SAMPLE_RATE};
 use sf_voice_gen::{
-    ANNOUNCEMENTS, BAND_HIGH_HZ, BAND_LOW_HZ, LINES, OPEN_MS, PRESENCE_HZ, TAIL_MS, cos_q30,
-    exp_neg_q30, files, radio_band, read_wav, source_dir, trim,
+    ANNOUNCEMENTS, BAND_HIGH_HZ, BAND_LOW_HZ, LINES, Line, MERIDIAN_SELECT_MORE, OPEN_MS,
+    PRESENCE_HZ, TAIL_MS, VEYRAN_LINES, all_lines, cos_q30, exp_neg_q30, files, radio_band,
+    read_wav, source_dir, trim,
 };
 
 fn voice_dir() -> PathBuf {
@@ -288,7 +289,10 @@ fn every_announcement_has_its_committed_piper_source_and_it_is_the_pinned_one() 
 fn the_announcements_are_pinned_equal_a_fresh_run_and_the_unit_voices_are_still_first() {
     let first = files();
     assert_eq!(first, files(), "two runs differ");
-    assert_eq!(first.len(), LINES.len() + ANNOUNCEMENTS.len());
+    assert_eq!(
+        first.len(),
+        LINES.len() + ANNOUNCEMENTS.len() + MERIDIAN_SELECT_MORE.len() + VEYRAN_LINES.len()
+    );
     for ((name, bytes), (pin, len, hash)) in first[LINES.len()..].iter().zip(ANNOUNCE_PINNED) {
         assert_eq!(name, pin);
         assert_eq!(bytes.len(), len, "{name} length");
@@ -392,4 +396,203 @@ fn the_announcements_have_the_agreed_events_and_words() {
     seeds.sort_unstable();
     seeds.dedup();
     assert_eq!(seeds.len(), 28);
+}
+
+// ---- WP11.2d: six more Meridian select lines and the Veyran voice (cori) ----
+
+/// The six more joe select lines: (file, source length, source FNV-1a 64, output length, output FNV-1a 64), as literals.
+#[rustfmt::skip]
+const MERIDIAN_MORE_PINNED: [(&str, usize, u64, usize, u64); 6] = [
+    ("unit_select_go_ahead.wav", 49196, 0xb8cca545ac1877ca, 30976, 0x781cd0d11a279e2b),
+    ("unit_select_listening.wav", 44588, 0x964cb8aa35d4f637, 28512, 0x2771705af5c4824e),
+    ("unit_select_orders.wav", 44076, 0x09df67de5769ea62, 27738, 0xbd1c5927242f5fcb),
+    ("unit_select_copy_that.wav", 49196, 0x5ec27e4c2ffd09a8, 33142, 0xf5802b559d782a2d),
+    ("unit_select_your_call.wav", 50732, 0xf85cffda74df706a, 32668, 0x63878babca5a92df),
+    ("unit_select_on_the_line.wav", 51756, 0x61407101ac1e6e63, 35188, 0x8c2176e5d0988a43),
+];
+
+/// The fifteen cori lines, same shape: source then output.
+#[rustfmt::skip]
+const VEYRAN_PINNED: [(&str, usize, u64, usize, u64); 15] = [
+    ("cori_unit_select_ready_to_go.wav", 45100, 0x7df07e3108cd3e5e, 46244, 0x79d41712d3641997),
+    ("cori_unit_select_systems_online.wav", 65580, 0x47a2b7baf32981bb, 63584, 0xe60fd6d390dd5907),
+    ("cori_unit_select_standing_by.wav", 51244, 0x17590846d2331740, 48978, 0x9c907db05a8810bc),
+    ("cori_unit_select_go_ahead.wav", 38444, 0xfe4296666ca06970, 38186, 0x60ce241c9e76339a),
+    ("cori_unit_select_listening_in.wav", 42028, 0x624ef8f35e6707b4, 40284, 0x6dce1665e85f3c32),
+    ("cori_unit_select_orders_sir.wav", 51244, 0xac13cef61f11070e, 51650, 0xe3b2f3cb14c4b2d6),
+    ("cori_unit_select_copy_sir.wav", 42028, 0x130abc7512a79c48, 41324, 0x8e0ea092b48cf5f6),
+    ("cori_unit_select_your_call_sir.wav", 65580, 0xa343470c7afe25e6, 62156, 0x2eb42617d9878f50),
+    ("cori_unit_select_on_the_line.wav", 39980, 0xe01d20d80361b922, 37196, 0xd569c884c347a1e3),
+    ("cori_unit_move_moving_out.wav", 47660, 0x8bf01d6323084bb5, 43482, 0xa8c89484962e275b),
+    ("cori_unit_move_route_set.wav", 40492, 0x4fffef3dd239d8ad, 36630, 0x4dca3319f9aaadd6),
+    ("cori_unit_move_on_my_way.wav", 43564, 0xc66dc64c19867e75, 39792, 0xd83bf740c336aac3),
+    ("cori_unit_attack_opening_fire.wav", 47660, 0x0928941589f89412, 46162, 0x5c220049b153f9b9),
+    ("cori_unit_attack_target_locked.wav", 44588, 0xd0ac284fe4b3ecda, 46654, 0x45909d6bb139b1c7),
+    ("cori_unit_attack_engaging_now.wav", 55340, 0x0fc0042b0aee5bce, 51498, 0x88774db7013be98b),
+];
+
+fn check_pinned(lines: &[Line], pins: &[(&str, usize, u64, usize, u64)]) {
+    assert_eq!(lines.len(), pins.len());
+    for (l, (file, slen, shash, olen, ohash)) in lines.iter().zip(pins) {
+        assert_eq!(l.file, *file);
+        let src = std::fs::read(source_dir().join(file))
+            .unwrap_or_else(|e| panic!("{file}: no source ({e})"));
+        assert_eq!(src.len(), *slen, "{file} source length");
+        assert_eq!(fnv1a(&src), *shash, "{file}: the Piper source changed");
+        assert!(
+            read_wav(&src).unwrap().iter().any(|v| v.abs() > 5_000),
+            "{file} is silent"
+        );
+        let out = l.bytes();
+        assert_eq!(out.len(), *olen, "{file} output length");
+        assert_eq!(
+            fnv1a(&out),
+            *ohash,
+            "{file} output hash (filter or source changed?)"
+        );
+        let on_disk = std::fs::read(voice_dir().join(file))
+            .unwrap_or_else(|e| panic!("{file} is not committed: {e}"));
+        assert!(
+            on_disk == out,
+            "{file} is out of date: run `cargo run -p sf_voice_gen`"
+        );
+    }
+}
+
+#[test]
+fn the_new_meridian_and_veyran_lines_are_pinned_from_source_to_committed_output() {
+    check_pinned(&MERIDIAN_SELECT_MORE, &MERIDIAN_MORE_PINNED);
+    check_pinned(&VEYRAN_LINES, &VEYRAN_PINNED);
+    assert!(source_dir().join("MODEL_CARD_cori.md").is_file());
+}
+
+/// The 28 older outputs come first and are untouched (their own pins above did not move); the new ones follow
+/// in the order of `all_lines`.
+#[test]
+fn the_written_files_are_the_old_ones_then_the_new_ones() {
+    let names: Vec<String> = files().into_iter().map(|(n, _)| n).collect();
+    let want: Vec<&str> = LINES
+        .iter()
+        .chain(ANNOUNCEMENTS.iter())
+        .chain(MERIDIAN_SELECT_MORE.iter())
+        .chain(VEYRAN_LINES.iter())
+        .map(|l| l.file)
+        .collect();
+    assert_eq!(names, want);
+    assert_eq!(names.len(), 9 + 19 + 6 + 15);
+    let mut unique = names.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), names.len(), "a file name is used twice");
+}
+
+/// Events, words and seeds of the new lines as literals; every seed in the tool is different (the new lines got
+/// new seeds, the old ones kept theirs, which the old pins prove).
+#[test]
+fn the_new_lines_have_the_agreed_events_words_and_distinct_seeds() {
+    let more: Vec<(&str, &str)> = MERIDIAN_SELECT_MORE
+        .iter()
+        .map(|l| (l.event, l.text))
+        .collect();
+    assert_eq!(
+        more,
+        [
+            ("unit.select", "Go ahead"),
+            ("unit.select", "Listening"),
+            ("unit.select", "Orders"),
+            ("unit.select", "Copy that"),
+            ("unit.select", "Your call"),
+            ("unit.select", "On the line"),
+        ]
+    );
+    let veyran: Vec<(&str, &str)> = VEYRAN_LINES.iter().map(|l| (l.event, l.text)).collect();
+    assert_eq!(
+        veyran,
+        [
+            ("unit.select.veyran", "Ready to go"),
+            ("unit.select.veyran", "Systems online"),
+            ("unit.select.veyran", "Standing by"),
+            ("unit.select.veyran", "Go ahead"),
+            ("unit.select.veyran", "Listening in"),
+            ("unit.select.veyran", "Orders, sir"),
+            ("unit.select.veyran", "Copy, sir"),
+            ("unit.select.veyran", "Your call, sir"),
+            ("unit.select.veyran", "On the line"),
+            ("unit.move.veyran", "Moving out"),
+            ("unit.move.veyran", "Route set"),
+            ("unit.move.veyran", "On my way"),
+            ("unit.attack.veyran", "Opening fire"),
+            ("unit.attack.veyran", "Target locked"),
+            ("unit.attack.veyran", "Engaging now"),
+        ]
+    );
+    let seeds: Vec<u32> = MERIDIAN_SELECT_MORE
+        .iter()
+        .chain(VEYRAN_LINES.iter())
+        .map(|l| l.seed)
+        .collect();
+    let want: Vec<u32> = (210..=215).chain(401..=415).collect();
+    assert_eq!(seeds, want);
+    let mut all: Vec<u32> = all_lines().map(|l| l.seed).collect();
+    let n = all.len();
+    all.sort_unstable();
+    all.dedup();
+    assert_eq!(all.len(), n, "a hiss seed is used twice");
+    assert_eq!(n, 49);
+}
+
+/// The render scripts have the same file names and the same words as the table, whatever the closing
+/// punctuation (`.`, `!` or `?`: it shapes the voice's intonation).
+#[test]
+fn the_render_scripts_have_the_words_of_the_new_lines() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let joe = std::fs::read_to_string(dir.join("piper_lines.py")).unwrap();
+    let cori = std::fs::read_to_string(dir.join("piper_lines_cori.py")).unwrap();
+    let has = |script: &str, key: &str, text: &str| {
+        [".", "!", "?"]
+            .iter()
+            .any(|p| script.contains(&format!("\"{key}\": \"{text}{p}\"")))
+    };
+    for l in &MERIDIAN_SELECT_MORE {
+        let key = l.file.trim_end_matches(".wav");
+        assert!(has(&joe, key, l.text), "{key} not in piper_lines.py");
+    }
+    for l in &VEYRAN_LINES {
+        // The script's keys have no `cori_` prefix (the script adds it when it writes the file).
+        let key = l.file.trim_end_matches(".wav").trim_start_matches("cori_");
+        assert!(has(&cori, key, l.text), "{key} not in piper_lines_cori.py");
+    }
+    // The cori script says which synthesis settings it uses: the defaults, like joe's.
+    assert!(cori.contains("SynthesisConfig()"));
+}
+
+/// Every new file is a usable radio line: mono, unclipped, the file peak, the trimmed source plus the squelch,
+/// at most 1.5 s (the limit of WP11.2b) and a click-free end. The shortest and the longest are pinned.
+#[test]
+fn every_new_line_is_an_unclipped_mono_wav_of_at_most_1_5_s_with_the_same_peak() {
+    let (mut longest, mut shortest) = (0, u64::MAX);
+    for l in MERIDIAN_SELECT_MORE.iter().chain(VEYRAN_LINES.iter()) {
+        let s = read_wav(&l.bytes()).unwrap();
+        let ms = s.len() as u64 * 1000 / u64::from(SAMPLE_RATE);
+        longest = longest.max(ms);
+        shortest = shortest.min(ms);
+        assert!((400..=1500).contains(&ms), "{}: {ms} ms", l.file);
+        let src: Vec<i64> = l.source().iter().map(|v| i64::from(*v)).collect();
+        let extra = u64::from(SAMPLE_RATE) * u64::from(OPEN_MS + TAIL_MS) / 1000;
+        assert_eq!(
+            s.len() as u64,
+            trim(&src).len() as u64 + extra,
+            "{}",
+            l.file
+        );
+        let peak = s.iter().map(|v| i32::from(*v).abs()).max().unwrap();
+        assert_eq!(peak, FILE_PEAK, "{} peak", l.file);
+        assert!(
+            s.iter().all(|v| *v != i16::MAX && *v != i16::MIN),
+            "{} clips",
+            l.file
+        );
+        assert!(s.last().unwrap().abs() < 50, "{} ends with a click", l.file);
+    }
+    assert_eq!((shortest, longest), (627, 1440));
 }

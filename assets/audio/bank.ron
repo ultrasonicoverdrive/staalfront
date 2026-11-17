@@ -190,9 +190,63 @@
         // (`the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound`
         // in sf_game fx_sound.rs). With Red Alert audio on, a mapped line from
         // ra_mapping.ron wins and plays as-is.
+        //
+        // WP11.2d: more select lines, and a voice per side. `unit.select` is the Meridian voice (joe) and has nine
+        // variants. The Veyran units speak with the voice en_GB-cori-high (a British woman) in the events
+        // `unit.select.veyran`, `unit.move.veyran` and `unit.attack.veyran`: which event plays follows the faction
+        // of the unit that speaks (sf_game unit_voice.rs). With Red Alert audio on, the mapped original of the
+        // plain event wins for both sides. Rules: docs/rules/voices.md.
         "unit.select": (
             file: "audio/voice/unit_select_ready.wav",
-            variants: ["audio/voice/unit_select_online.wav", "audio/voice/unit_select_standing_by.wav"],
+            variants: [
+                "audio/voice/unit_select_online.wav",
+                "audio/voice/unit_select_standing_by.wav",
+                "audio/voice/unit_select_go_ahead.wav",
+                "audio/voice/unit_select_listening.wav",
+                "audio/voice/unit_select_orders.wav",
+                "audio/voice/unit_select_copy_that.wav",
+                "audio/voice/unit_select_your_call.wav",
+                "audio/voice/unit_select_on_the_line.wav",
+            ],
+            volume: 0.35,
+            max_instances: 1,
+            category: Voice,
+            original_as_is: true,
+        ),
+        "unit.select.veyran": (
+            file: "audio/voice/cori_unit_select_ready_to_go.wav",
+            variants: [
+                "audio/voice/cori_unit_select_systems_online.wav",
+                "audio/voice/cori_unit_select_standing_by.wav",
+                "audio/voice/cori_unit_select_go_ahead.wav",
+                "audio/voice/cori_unit_select_listening_in.wav",
+                "audio/voice/cori_unit_select_orders_sir.wav",
+                "audio/voice/cori_unit_select_copy_sir.wav",
+                "audio/voice/cori_unit_select_your_call_sir.wav",
+                "audio/voice/cori_unit_select_on_the_line.wav",
+            ],
+            volume: 0.35,
+            max_instances: 1,
+            category: Voice,
+            original_as_is: true,
+        ),
+        "unit.move.veyran": (
+            file: "audio/voice/cori_unit_move_moving_out.wav",
+            variants: [
+                "audio/voice/cori_unit_move_route_set.wav",
+                "audio/voice/cori_unit_move_on_my_way.wav",
+            ],
+            volume: 0.35,
+            max_instances: 1,
+            category: Voice,
+            original_as_is: true,
+        ),
+        "unit.attack.veyran": (
+            file: "audio/voice/cori_unit_attack_opening_fire.wav",
+            variants: [
+                "audio/voice/cori_unit_attack_target_locked.wav",
+                "audio/voice/cori_unit_attack_engaging_now.wav",
+            ],
             volume: 0.35,
             max_instances: 1,
             category: Voice,

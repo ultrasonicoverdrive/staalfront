@@ -123,12 +123,21 @@ fn the_19_events_are_pinned() {
     );
 }
 
-/// One voice at a time covers the unit voices and the announcements: the 22 names `busy` asks about.
+/// One voice at a time covers the unit voices of both sides and the announcements: the 25 names `busy` asks about
+/// (WP11.2d: the three Veyran events joined the three Meridian ones).
 #[test]
 fn the_voice_channel_holds_the_unit_voices_and_every_announcement() {
     let c = voice_channel();
-    assert_eq!(c.len(), 22);
+    assert_eq!(c.len(), 25);
     assert_eq!(&c[..3], ["unit.select", "unit.move", "unit.attack"]);
+    assert_eq!(
+        &c[3..6],
+        [
+            "unit.select.veyran",
+            "unit.move.veyran",
+            "unit.attack.veyran"
+        ]
+    );
     for a in Announcement::ALL {
         assert!(c.contains(&a.event()), "{}", a.event());
     }
