@@ -1633,6 +1633,142 @@ mod tests {
         std::fs::remove_dir_all(d).ok();
     }
 
+    /// The 19 announcements of the shipped bank, with their files, as literals (WP11.2c).
+    const ANNOUNCE_FILES: [(&str, &str); 19] = [
+        (
+            "announce.structure_ready",
+            "audio/voice/announce_structure_ready.wav",
+        ),
+        ("announce.unit_ready", "audio/voice/announce_unit_ready.wav"),
+        ("announce.building", "audio/voice/announce_building.wav"),
+        ("announce.training", "audio/voice/announce_training.wav"),
+        ("announce.on_hold", "audio/voice/announce_on_hold.wav"),
+        ("announce.cancelled", "audio/voice/announce_cancelled.wav"),
+        (
+            "announce.base_under_attack",
+            "audio/voice/announce_base_under_attack.wav",
+        ),
+        (
+            "announce.harvester_under_attack",
+            "audio/voice/announce_harvester_under_attack.wav",
+        ),
+        ("announce.low_power", "audio/voice/announce_low_power.wav"),
+        (
+            "announce.insufficient_funds",
+            "audio/voice/announce_insufficient_funds.wav",
+        ),
+        (
+            "announce.storage_full",
+            "audio/voice/announce_storage_full.wav",
+        ),
+        ("announce.unit_lost", "audio/voice/announce_unit_lost.wav"),
+        (
+            "announce.structure_lost",
+            "audio/voice/announce_structure_lost.wav",
+        ),
+        (
+            "announce.new_options",
+            "audio/voice/announce_new_options.wav",
+        ),
+        (
+            "announce.cannot_deploy",
+            "audio/voice/announce_cannot_deploy.wav",
+        ),
+        ("announce.victory", "audio/voice/announce_victory.wav"),
+        ("announce.defeat", "audio/voice/announce_defeat.wav"),
+        (
+            "announce.structure_sold",
+            "audio/voice/announce_structure_sold.wav",
+        ),
+        ("announce.repairing", "audio/voice/announce_repairing.wav"),
+    ];
+
+    /// WP11.2c: the shipped bank has every announcement, one file each, in the Voice category at the volume of
+    /// the unit voices (0.35), one at a time, `original_as_is`; without Red Alert files each plays that file
+    /// in the voice volume and nothing is unknown.
+    #[test]
+    fn the_shipped_bank_speaks_every_announcement_without_red_alert_files() {
+        let mut s = AudioSystem::silent(assets());
+        s.set_trace(true);
+        for (event, file) in ANNOUNCE_FILES {
+            let def = s.bank().get(event).unwrap().clone();
+            assert_eq!(def.files().collect::<Vec<_>>(), [file], "{event}");
+            assert_eq!(def.category, Category::Voice, "{event}");
+            assert!(def.original_as_is, "{event}");
+            assert_eq!(
+                (
+                    def.volume,
+                    def.max_instances,
+                    def.pitch_variation,
+                    def.looped
+                ),
+                (0.35, 1, 0.0, false),
+                "{event}"
+            );
+            assert!(assets().join(file).is_file(), "{file} is not on disk");
+            assert!(s.has_sound(event), "{event}");
+            s.play_as(event, Category::Voice);
+            let t = s.take_trace().pop().unwrap();
+            assert_eq!((t.file.as_str(), t.gain), (file, 0.35), "{event}");
+        }
+        assert_eq!(s.stats().unknown, 0);
+    }
+
+    /// WP11.2c: with the original audio on, a mapped announcement found in the player's files plays as-is
+    /// (volume 1, no bank file); one whose file is not found, and the one with no Red Alert line at all, play
+    /// our own line.
+    #[test]
+    fn the_original_announcement_wins_where_found_and_our_line_plays_otherwise() {
+        use crate::ra::aud::{Compression, Pcm, encode};
+        use crate::ra::mix::{MixFormat, mix_id, write_mix};
+        let bank = std::fs::read_to_string(assets().join("audio/bank.ron")).unwrap();
+        let d = scratch("ra_announce", &bank);
+        std::fs::create_dir_all(d.join("audio/voice")).unwrap();
+        for (_, f) in ANNOUNCE_FILES {
+            std::fs::copy(assets().join(f), d.join(f)).unwrap();
+        }
+        std::fs::write(
+            d.join("audio/ra_mapping.ron"),
+            r#"(sounds: {"announce.unit_ready": "UNITRDY1.AUD", "announce.base_under_attack": "GONE.AUD"})"#,
+        )
+        .unwrap();
+        let pcm = Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: (0..2000).map(|i| ((i % 50) * 400 - 10000) as i16).collect(),
+        };
+        let mix = write_mix(
+            &[(mix_id("UNITRDY1.AUD"), &encode(&pcm, Compression::Ima))],
+            MixFormat::Plain,
+        );
+        let install = d.join("redalert");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("SOUNDS.MIX"), mix).unwrap();
+        let mut s = mock_at(&d);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        wait_for_ra(&mut s);
+        assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 1 });
+        s.set_trace(true);
+        s.play_as("announce.unit_ready", Category::Voice);
+        let t = s.take_trace().pop().unwrap();
+        assert_eq!(t.file, "ra-audio:announce.unit_ready");
+        assert_eq!(t.gain, 1.0, "the original plays as-is");
+        for event in [
+            "announce.base_under_attack",
+            "announce.harvester_under_attack",
+        ] {
+            s.play_as(event, Category::Voice);
+            let t = s.take_trace().pop().unwrap();
+            let file = ANNOUNCE_FILES.iter().find(|(e, _)| *e == event).unwrap().1;
+            assert_eq!((t.file.as_str(), t.gain), (file, 0.35), "{event}");
+        }
+        assert_eq!(s.stats().unknown, 0);
+        std::fs::remove_dir_all(d).ok();
+    }
+
     #[test]
     fn original_audio_with_a_missing_path_keeps_the_cc0_sounds() {
         let (d, _) = ra_root("ra_missing");
