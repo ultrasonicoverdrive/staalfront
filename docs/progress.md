@@ -3766,3 +3766,36 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
 * **Pins**: only `combat.flac` (length, hash) moved, by the layer (shown by the layer-off test); `calm.flac`, `sf_sim` and all scenarios untouched.
 * **Limiter**: more than 1 dB down for 15.0% of the full sections, down to -3.99 dB at bar 24 (see audio.md section 3d-2). Deviations from the preview are listed there.
 * **Gaps**: the integer render has not been listened to (only the float preview was); mono; the gain numbers are the preview's, but the effective level is +0.3 to +3.4 dB hotter per sample (about +3 dB for trombones, horns, roll and cello) because the import normalises the mono sum of the kept part (audio.md section 3d-2, deviation 7); not compensated, not tuned by ear.
+
+### WP11.2d notes: more select lines, a voice per side (17-11-2026)
+
+* **Verdicts (Tijmen, 16-11-2026).** Previews approved by ear: "Goed, bouw in". Second voice: "Ja, cori" (not norman).
+* **What changed.** `unit.select` has nine lines (the three joe lines plus six new joe lines). The Veyran side has its own
+  voice, Piper `en_GB-cori-high` (LibriVox, public domain; HF rhasspy/piper-voices commit e9ab671f, path en/en_GB/cori/high):
+  15 lines in the bank events `unit.select.veyran` (9), `unit.move.veyran` (3), `unit.attack.veyran` (3), through the
+  unchanged walkie-talkie filter. 21 new sources and 21 new outputs (0.627 to 1.44 s, the 1.5 s limit holds). Presentation
+  only: `git diff origin/main -- crates/sf_sim assets/scenarios` is empty, no checksum moved.
+* **Mechanism.** One bank event per side. `unit_voice::speaker_faction` takes the faction of the lowest-id unit of the
+  selection or order that belongs to a side; Meridian plays the plain event, Veyran the `.veyran` event, Neutral is
+  silent; the plain event's mapped Red Alert original wins for both sides; the brake and the voice channel are shared.
+  Details and the length table: `voices.md` section 3c.
+* **Pins.** The 28 older outputs are byte-equal (their pins unchanged and passing; `git status` after the generator run showed no
+  modified file under `assets/audio/voice`). New: 21 source and output pins as literals, events, words, seeds (210 to 215, 401 to 415),
+  bank files, the 25-name voice channel.
+* **Mutations** (each applied, the named test failed, reverted): Neutral speaks as Meridian:
+  `each_side_has_its_bank_events_and_neutral_has_none`, `the_shipped_bank_speaks_both_sides_each_in_its_own_voice`;
+  Veyran uses the plain event: those two plus `the_original_wins_for_both_sides_...` and `the_two_sides_share_the_brake_and_the_channel`;
+  no original check: `the_original_wins_for_both_sides_and_a_bank_without_a_veyran_voice_falls_back`; highest id leads:
+  `the_faction_of_the_leading_unit_speaks_for_a_mixed_list`; brake keyed by the side's event: `the_two_sides_share_the_brake_and_the_channel`;
+  faction ignored in `speak`: three tests; channel without the Veyran events: `the_voice_channel_holds_the_unit_voices_and_every_announcement`;
+  a cori variant removed from `bank.ron`: `the_voice_events_pick_their_variants_and_never_repeat_one`; cori move volume 0.5: same test;
+  a cori seed 413 -> 999: `the_new_meridian_and_veyran_lines_are_pinned_from_source_to_committed_output` and
+  `the_new_lines_have_the_agreed_events_words_and_distinct_seeds`.
+* **Measured.** Loudness of every line of both sides (extended `the_unit_voices_are_heard_over_a_fight_...`): peak 0.278 for
+  all, RMS 0.055 to 0.114 (joe) and 0.081 to 0.136 (cori); the test conditions hold at the bank volume 0.35.
+* **Gaps.** The local player is always owner 0 = Meridian today, so the Veyran voice is not heard in a game yet (only in tests);
+  the runner glue (`Runner::say` with the units) is read, not run; no screenshots (a sound change); no person heard these exact
+  files or the game; cori's licence rests on its model card (no onderzoeker check); cori is somewhat louder than joe.
+* **Environment.** On this machine `cargo test --workspace` hangs in the GPU tests (`screenshot`, `ai_screenshot`, `bench_scene`; no
+  adapter), so locally I ran `sf_game --lib` (572 passed), `sf_game --test announcements` (8), `sf_audio`, `sf_voice_gen`, `sf_data`;
+  CI runs the rest.
