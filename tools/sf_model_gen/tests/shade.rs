@@ -527,7 +527,7 @@ fn a_panel_line_is_half_as_bright_as_the_plain_face() {
     assert!((0.48..=0.52).contains(&r), "panel line is {r} of plain");
 }
 
-/// Worn paint, not bright metal: the brightest corner of a worn bevel stays within 25 % of the
+/// Worn paint, not bright metal: the brightest corner of a worn bevel stays within 13 % of the
 /// flat top's luminance. (The bright style, wear 0.35 towards 1.25x grey, went well beyond.)
 #[test]
 fn worn_edges_stay_close_to_the_paint() {
@@ -550,7 +550,7 @@ fn worn_edges_stay_close_to_the_paint() {
         "brightest bevel corner / flat top = {:.3}",
         brightest / flat
     );
-    assert!(brightest < flat * 1.25, "{brightest} vs {flat}");
+    assert!(brightest < flat * 1.13, "{brightest} vs {flat}");
 }
 
 /// Measured on the shipped tanks: dE 22.7, dL 12.2 (and 24.1 / 15.2 on the pixels of the M1 shot).
