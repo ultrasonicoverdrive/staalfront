@@ -117,7 +117,7 @@ the material colour:
   Meridian dome showed as light streaks; `a_lathed_dome_gets_no_edge_wear`).
 
 The vertex colour is RGB: the wanted linear colour divided by the material factor, which is a grey at
-the palette colour's brightest channel over 0.85 (`shade::factor`). A plain open face therefore shows
+the palette colour's brightest channel over 0.85, at least `FACTOR_FLOOR` 0.15 (`shade::factor`; WP11.6p review: a dark slot needs head room for the dust, which lifts it towards a brighter earth colour: before the floor 17,471 vertices of the set's rubber and metal clamped to flat grey, after it none, `the_dust_never_clamps_a_vertex_of_the_dark_slots`). A plain open face therefore shows
 the palette colour within the per-facet variation and 8-bit rounding (the test allows 6 %), and highlights and worn edges stay inside glTF's 0..1 range. The team
 material keeps its own factor and ignores `COLOR_0`. Tests: `tools/sf_model_gen/tests/shade.rs`
 (one per rule: plain colour, highlight, wear, no wear on lathes, crease and grime).
