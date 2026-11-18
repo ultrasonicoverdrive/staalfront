@@ -162,7 +162,9 @@ second side ("Ja, cori").
   same filter. `unit.move` and `unit.attack` keep their three lines.
 * **Veyran gets cori**: Piper `en_GB-cori-high`, a British woman (dataset: LibriVox recordings, public domain; Hugging Face
   rhasspy/piper-voices commit e9ab671f2a0e50a701b34361136ba3e6a3a9eb0c, path en/en_GB/cori/high; model card
-  `tools/sf_voice_gen/voice_src/MODEL_CARD_cori.md`; licence row in `assets/LICENSES.md`). Fifteen lines of our own wording,
+  `tools/sf_voice_gen/voice_src/MODEL_CARD_cori.md`; licence row in `assets/LICENSES.md`; onderzoeker, 18-11-2026: Piper's
+  `COMMERCIAL_USE.md` lists `en_GB-cori-high` as public domain, trained from scratch, matching the model card; only the
+  high model is used, `en_GB-cori-medium` is CC BY 4.0 and must not be swapped in). Fifteen lines of our own wording,
   rendered once by `piper_lines_cori.py` with the default synthesis settings, files prefixed `cori_`, through the
   **unchanged** walkie-talkie filter:
 

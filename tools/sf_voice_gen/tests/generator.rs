@@ -541,26 +541,33 @@ fn the_new_lines_have_the_agreed_events_words_and_distinct_seeds() {
     assert_eq!(n, 49);
 }
 
-/// The render scripts have the same file names and the same words as the table, whatever the closing
-/// punctuation (`.`, `!` or `?`: it shapes the voice's intonation).
+/// The render scripts have the same file names and the same words as the table, with the exact closing mark of each
+/// line (`.`, `!` or `?`: it shapes the voice's intonation).
 #[test]
 fn the_render_scripts_have_the_words_of_the_new_lines() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let joe = std::fs::read_to_string(dir.join("piper_lines.py")).unwrap();
     let cori = std::fs::read_to_string(dir.join("piper_lines_cori.py")).unwrap();
-    let has = |script: &str, key: &str, text: &str| {
-        [".", "!", "?"]
-            .iter()
-            .any(|p| script.contains(&format!("\"{key}\": \"{text}{p}\"")))
+    // The exact closing mark of each line, as literals: a question or an exclamation, else a full stop.
+    let mark = |cori: bool, key: &str| match (cori, key) {
+        (false, "unit_select_orders") | (true, "unit_select_orders_sir") => "?",
+        (true, "unit_select_standing_by" | "unit_select_on_the_line") => "!",
+        _ => ".",
+    };
+    let has = |cori: bool, script: &str, key: &str, text: &str| {
+        script.contains(&format!("\"{key}\": \"{text}{}\"", mark(cori, key)))
     };
     for l in &MERIDIAN_SELECT_MORE {
         let key = l.file.trim_end_matches(".wav");
-        assert!(has(&joe, key, l.text), "{key} not in piper_lines.py");
+        assert!(has(false, &joe, key, l.text), "{key} not in piper_lines.py");
     }
     for l in &VEYRAN_LINES {
         // The script's keys have no `cori_` prefix (the script adds it when it writes the file).
         let key = l.file.trim_end_matches(".wav").trim_start_matches("cori_");
-        assert!(has(&cori, key, l.text), "{key} not in piper_lines_cori.py");
+        assert!(
+            has(true, &cori, key, l.text),
+            "{key} not in piper_lines_cori.py"
+        );
     }
     // The cori script says which synthesis settings it uses: the defaults, like joe's.
     assert!(cori.contains("SynthesisConfig()"));

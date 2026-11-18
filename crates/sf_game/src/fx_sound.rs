@@ -1469,6 +1469,57 @@ mod tests {
         Traced { audio, _root: root }
     }
 
+    /// WP11.2d: with a mapped Red Alert original for `unit.select`, a Veyran unit speaks the original too, through a real
+    /// `AudioSystem` (`VoiceOut::original` -> `is_original`); `unit.move` has no original, so the Veyran voice plays its own
+    /// bank event there.
+    #[test]
+    fn a_mapped_original_speaks_for_a_veyran_unit_too() {
+        use sf_audio::ra::RaAudioConfig;
+        use sf_audio::ra::aud::{Compression, Pcm, encode};
+        use sf_audio::ra::mix::{MixFormat, mix_id, write_mix};
+        let root = root_with(
+            "ra_veyran",
+            &[
+                "unit.select",
+                "unit.select.veyran",
+                "unit.move",
+                "unit.move.veyran",
+            ],
+        );
+        let d = &root.0;
+        std::fs::write(
+            d.join("audio/ra_mapping.ron"),
+            r#"(sounds: {"unit.select": "FIX.AUD"})"#,
+        )
+        .unwrap();
+        let pcm = Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: (0..2000).map(|i| ((i % 50) * 400 - 10000) as i16).collect(),
+        };
+        let mix = write_mix(
+            &[(mix_id("FIX.AUD"), &encode(&pcm, Compression::Ima))],
+            MixFormat::Plain,
+        );
+        let install = d.join("fixture_install");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("SOUNDS.MIX"), mix).unwrap();
+        let mut audio = tracing_audio(d);
+        audio.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        assert_eq!(
+            settled_ra_status(&mut audio),
+            sf_audio::RaStatus::Ready { mapped: 1 }
+        );
+        let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
+        assert!(voices.speak(UnitVoice::Select, Faction::Veyran, 10_000, &mut audio));
+        assert!(voices.speak(UnitVoice::Move, Faction::Veyran, 20_000, &mut audio));
+        let names: Vec<String> = audio.take_trace().into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["unit.select", "unit.move.veyran"]);
+    }
+
     /// R4: a mapped original in a loud frame is neither counted in the sum nor turned down; the bank
     /// sounds still add up to the limit by themselves.
     #[test]

@@ -3791,11 +3791,14 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   a cori variant removed from `bank.ron`: `the_voice_events_pick_their_variants_and_never_repeat_one`; cori move volume 0.5: same test;
   a cori seed 413 -> 999: `the_new_meridian_and_veyran_lines_are_pinned_from_source_to_committed_output` and
   `the_new_lines_have_the_agreed_events_words_and_distinct_seeds`.
+* **Review round (18-11-2026).** Rebased on 37002cf (WP11.4c). RA precedence is now also pinned through a real `AudioSystem`
+  (`fx_sound::a_mapped_original_speaks_for_a_veyran_unit_too`; mutation `VoiceOut::original` -> `false` fails it). The words test pins the
+  exact closing mark per line (mutation "Orders, sir?" -> "Orders, sir." in `piper_lines_cori.py` fails `the_render_scripts_have_the_words_of_the_new_lines`).
 * **Measured.** Loudness of every line of both sides (extended `the_unit_voices_are_heard_over_a_fight_...`): peak 0.278 for
   all, RMS 0.055 to 0.114 (joe) and 0.081 to 0.136 (cori); the test conditions hold at the bank volume 0.35.
 * **Gaps.** The local player is always owner 0 = Meridian today, so the Veyran voice is not heard in a game yet (only in tests);
   the runner glue (`Runner::say` with the units) is read, not run; no screenshots (a sound change); no person heard these exact
-  files or the game; cori's licence rests on its model card (no onderzoeker check); cori is somewhat louder than joe.
+  files or the game; cori's licence was checked by onderzoeker on 18-11-2026 (Piper's COMMERCIAL_USE.md lists en_GB-cori-high as public domain, trained from scratch; the model card matches; only the high model is used, cori-medium is CC BY 4.0); cori is somewhat louder than joe.
 * **Environment.** On this machine `cargo test --workspace` hangs in the GPU tests (`screenshot`, `ai_screenshot`, `bench_scene`; no
   adapter), so locally I ran `sf_game --lib` (572 passed), `sf_game --test announcements` (8), `sf_audio`, `sf_voice_gen`, `sf_data`;
   CI runs the rest.
