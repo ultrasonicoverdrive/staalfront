@@ -23,6 +23,13 @@ LINES = {
     "unit_select_ready": "Ready.",
     "unit_select_online": "Online.",
     "unit_select_standing_by": "Standing by.",
+    # Six more select lines (WP11.2d), the same voice and settings.
+    "unit_select_go_ahead": "Go ahead.",
+    "unit_select_listening": "Listening.",
+    "unit_select_orders": "Orders?",
+    "unit_select_copy_that": "Copy that.",
+    "unit_select_your_call": "Your call.",
+    "unit_select_on_the_line": "On the line.",
     "unit_move_moving": "Moving.",
     "unit_move_route_set": "Route set.",
     "unit_move_on_it": "On it.",

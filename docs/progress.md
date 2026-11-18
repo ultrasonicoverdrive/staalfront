@@ -3310,7 +3310,7 @@ What it does not settle:
   `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise`: with a fixture install mapping 14 events, those 14 resolve to
   the original and `weapon.fire.demolition`, `impact.bullet`, `impact.precision`, `impact.miss` play the CC0 file; with the switch off all 18 are CC0.
 * **Volume.** Every file has the same peak (26000 of 32767); the bank volumes are the loudness of the event (0.125 to 0.35), and
-  `a_20_tank_fight_is_not_louder_than_the_music` runs 20 tanks for 10 s (a volley each every 30 ticks, hits, three
+  `a_20_tank_fight_is_at_most_1_8_times_the_music` runs 20 tanks for 10 s (a volley each every 30 ticks, hits, three
   explosions, infantry deaths) through the real planner and audio system, mixes the traced playbacks at sample accuracy from the real
   files and gets a mixed peak of **0.466** of full scale (the music at `music_volume` 0.6 peaks at 0.6 at most). With the first volumes (twice
   these) the peak was 0.932 and the test failed; that is how they were set. The mix ignores pan, pitch and voice limits (an upper bound).
@@ -3699,7 +3699,7 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   file; tempo, length and size budget; no clipping and no flat top; the loop join; the ends are not silent; equal loudness of the two files; the game's
   decoder (kira) reads both files back sample for sample. `sf_audio` `the_shipped_fallback_music_plays_per_mood_without_red_alert_files`: the shipped config and
   bank, no Red Alert files, calm then combat start `music.calm` and `music.combat` (trace), looped, Music category, no failed play. `sf_audio` `config::tests` pin the
-  shipped fallback names. `sf_game` `a_20_tank_fight_is_not_louder_than_the_music` now pins the `music.combat` bank volume (0.885 x 1.0 x 0.6 = 0.531
+  shipped fallback names. `sf_game` `a_20_tank_fight_is_at_most_1_8_times_the_music` now pins the `music.combat` bank volume (0.885 x 1.0 x 0.6 = 0.531
   against the fight's 0.466) and says in its comment that this is peak against peak, guarded only by the pins.
 * **Mutations** (scratch, reverted): `Song::put` without the wrap (`j = start + i; if j >= n { continue }`): `the_loop_joins_without_a_jump` fails (calm: the last and first
   sample are 10,684 apart, music steps of 1,437 are normal). The other mutations are in the PR body.
@@ -3779,3 +3779,72 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   their own (same peak and volume as the unit voices). Details: `announcements.md` section 7.
 * **Environment.** The disk filled up during the work (other worktrees hold 30 to 78 GB of `target` each); one corrupt PDB had to
   be deleted and the test binaries relinked.
+
+## WP11.4c: orchestral layer from real CC0 samples in the combat track (16-11-2026)
+
+* **What**: `tools/sf_music_gen` gets an integer sample player (`sampler.rs`), an import step (`--import <VSCO 2 CE dir>`) and the arrangement (`orchestra.rs`);
+  32 samples (2,982,568 bytes) are committed in `tools/sf_music_gen/samples/`. `combat.flac` is 2,052,329 bytes (was 2,021,170); the two tracks 3,561,967 bytes of 4,000,000, budget unchanged.
+  Rules: `docs/rules/audio.md` section 3d-2. Licence row for VSCO 2 CE (CC0) in `assets/LICENSES.md`.
+* **Measured**: combat peak 29,000 before and after, RMS 9,120 -> 9,158. Timpani pitches (autocorrelation, 12 hits): drum 2 about 34.4, drum 3 37.5, drum 5 42.7, roll 37.5 (MIDI); file-name rule 12 x (octave + 2) + pitch class holds for all used pitched samples.
+* **Tests** (`tools/sf_music_gen/tests/orchestra.rs`, 22): sample pins, pitch measurements, pitch-ratio pins, player determinism and unison, no float in the render path, import filter and import of synthetic 24-bit stereo, per-section layers (timpani onsets per beat, brass held, stabs, cello, accents), old track byte-for-byte with the layer off, loudness.
+  Mutations (each reverted): cello sections 5-6 only, gong at bar 17, ln 2 constant off, brass held a quarter bar, timpani on every breakdown bar: each fails the named section or pin test.
+* **Pins**: only `combat.flac` (length, hash) moved, by the layer (shown by the layer-off test); `calm.flac`, `sf_sim` and all scenarios untouched.
+* **Limiter**: more than 1 dB down for 15.0% of the full sections, down to -3.99 dB at bar 24 (see audio.md section 3d-2). Deviations from the preview are listed there.
+* **Gaps**: the integer render has not been listened to (only the float preview was); mono; the gain numbers are the preview's, but the effective level is +0.3 to +3.4 dB hotter per sample (about +3 dB for trombones, horns, roll and cello) because the import normalises the mono sum of the kept part (audio.md section 3d-2, deviation 7); not compensated, not tuned by ear.
+
+### WP11.2d notes: more select lines, a voice per side (17-11-2026)
+
+* **Verdicts (Tijmen, 16-11-2026).** Previews approved by ear: "Goed, bouw in". Second voice: "Ja, cori" (not norman).
+* **What changed.** `unit.select` has nine lines (the three joe lines plus six new joe lines). The Veyran side has its own
+  voice, Piper `en_GB-cori-high` (LibriVox, public domain; HF rhasspy/piper-voices commit e9ab671f, path en/en_GB/cori/high):
+  15 lines in the bank events `unit.select.veyran` (9), `unit.move.veyran` (3), `unit.attack.veyran` (3), through the
+  unchanged walkie-talkie filter. 21 new sources and 21 new outputs (0.627 to 1.44 s, the 1.5 s limit holds). Presentation
+  only: `git diff origin/main -- crates/sf_sim assets/scenarios` is empty, no checksum moved.
+* **Mechanism.** One bank event per side. `unit_voice::speaker_faction` takes the faction of the lowest-id unit of the
+  selection or order that belongs to a side; Meridian plays the plain event, Veyran the `.veyran` event, Neutral is
+  silent; the plain event's mapped Red Alert original wins for both sides; the brake and the voice channel are shared.
+  Details and the length table: `voices.md` section 3c.
+* **Pins.** The 28 older outputs are byte-equal (their pins unchanged and passing; `git status` after the generator run showed no
+  modified file under `assets/audio/voice`). New: 21 source and output pins as literals, events, words, seeds (210 to 215, 401 to 415),
+  bank files, the 25-name voice channel.
+* **Mutations** (each applied, the named test failed, reverted): Neutral speaks as Meridian:
+  `each_side_has_its_bank_events_and_neutral_has_none`, `the_shipped_bank_speaks_both_sides_each_in_its_own_voice`;
+  Veyran uses the plain event: those two plus `the_original_wins_for_both_sides_...` and `the_two_sides_share_the_brake_and_the_channel`;
+  no original check: `the_original_wins_for_both_sides_and_a_bank_without_a_veyran_voice_falls_back`; highest id leads:
+  `the_faction_of_the_leading_unit_speaks_for_a_mixed_list`; brake keyed by the side's event: `the_two_sides_share_the_brake_and_the_channel`;
+  faction ignored in `speak`: three tests; channel without the Veyran events: `the_voice_channel_holds_the_unit_voices_and_every_announcement`;
+  a cori variant removed from `bank.ron`: `the_voice_events_pick_their_variants_and_never_repeat_one`; cori move volume 0.5: same test;
+  a cori seed 413 -> 999: `the_new_meridian_and_veyran_lines_are_pinned_from_source_to_committed_output` and
+  `the_new_lines_have_the_agreed_events_words_and_distinct_seeds`.
+* **Review round (18-11-2026).** Rebased on 37002cf (WP11.4c). RA precedence is now also pinned through a real `AudioSystem`
+  (`fx_sound::a_mapped_original_speaks_for_a_veyran_unit_too`; mutation `VoiceOut::original` -> `false` fails it). The words test pins the
+  exact closing mark per line (mutation "Orders, sir?" -> "Orders, sir." in `piper_lines_cori.py` fails `the_render_scripts_have_the_words_of_the_new_lines`).
+* **Measured.** Loudness of every line of both sides (extended `the_unit_voices_are_heard_over_a_fight_...`): peak 0.278 for
+  all, RMS 0.055 to 0.114 (joe) and 0.081 to 0.136 (cori); the test conditions hold at the bank volume 0.35.
+* **Gaps.** The local player is always owner 0 = Meridian today, so the Veyran voice is not heard in a game yet (only in tests);
+  the runner glue (`Runner::say` with the units) is read, not run; no screenshots (a sound change); no person heard these exact
+  files or the game; cori's licence was checked by onderzoeker on 18-11-2026 (Piper's COMMERCIAL_USE.md lists en_GB-cori-high as public domain, trained from scratch; the model card matches; only the high model is used, cori-medium is CC BY 4.0); cori is somewhat louder than joe.
+* **Environment.** On this machine `cargo test --workspace` hangs in the GPU tests (`screenshot`, `ai_screenshot`, `bench_scene`; no
+  adapter), so locally I ran `sf_game --lib` (572 passed), `sf_game --test announcements` (8), `sf_audio`, `sf_voice_gen`, `sf_data`;
+  CI runs the rest.
+
+## WP11.3c: more power in the CC0 fight sounds, six sounds redesigned (18-11-2026)
+
+Audio only: `sf_sim` untouched, no checksum or scenario pin moved. Tijmen's verdicts (15 and 16-11-2026, comparing with the Red Alert originals): "alles duidelijk zwakker. meer power er in"; "unit destroyed,
+weapon fire demolition, impact bullet, impact precision en impact miss moeten heel anders"; "fire bullet moet overtuigender". Nobody listened to the result in the build container; everything below is a measurement. **Heard.** Tijmen listened to the release build of the PR head on 18-11-2026 and said "Ja, merge"; he confirmed that a fight may be up to 5 dB louder than the music ("ja en mag 5db hoger zijn").
+Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the music, the limiter, Variants).
+
+* **Generator** (`tools/sf_sound_gen`): new integer building blocks `saturate` (cubic soft clip), `sweep_noise`, `crackle`, `saw`, `Mix::drive`, `Mix::slap`; every recipe has a sub thump, a click, a rumble, saturation and (loud ones) echoes;
+  30 files (18 events, six with three variants), 1,015,612 bytes (was 571,926; budget 2 MB). RMS of every file rose from 2,644-5,737 to 6,569-9,327 at the same peak (26,000).
+* **Volumes**: 0.125-0.35 -> 0.5-1.0 (table in audio.md); a single sound is 15 to 20 dB louder in RMS and peaks at 0.40 to 0.79 (was 0.10 to 0.28).
+* **Six redesigned sounds, three files each**: `unit.destroyed.infantry` (synthesised pain cry, fall, gear), `weapon.fire.demolition` (satchel set down, clunk, fuse hiss), `impact.bullet` (dry thwack, debris, a ricochet variant),
+  `impact.precision` (crack and thud, no ping), `impact.miss` (whiz-by crack and dirt puff), `weapon.fire.bullet` (report, muzzle blast, action click, slap; rifle, machine gun, heavy rifle).
+* **Cue limiter reworked, master limiter added** (beyond the brief, forced by the volumes; the first version of the load limiter, a ceiling of 1.0 with a half-life of 6 ticks, made a dense fight **quieter** than before, found by the pre-review sweep).
+  `FxSound::start_cues` keeps a load (gains started, half-life 4 ticks) and turns a frame down to keep it at `max_load_gain` 1.15, with a floor `min_cue_scale` 0.12 and cues of priority >= `protected_priority` 4 (deaths, explosions) not turned down by the load;
+  `max_summed_gain` 2.0. Measured per cue in the 20-tank fight from tick 40: cannon fire 0.30 of its gain (first version 0.10, old 1.0 of a quieter file), cannon hit 0.20 (0.054), large explosion 1.0 (0.04), lone shot's hit 0.79 (0.47).
+  New `sf_audio::limiter`: a master limiter effect on kira's main track (ceiling 0.95, release 150 ms, `audio.ron` `limiter`): the 20-tank fight + the loudest 13 s of the combat music + two voice lines clip in 1,560 of 286,550 samples (peak 1.680) without it and in none with it (peak 0.950).
+* **Loudness rule restated** (steady state, 2 s to 10 s of the 20-tank fight, after the master limiter): RMS >= 2 x the old 0.108 and <= 1.8 x the music's 0.168; measured 0.272 (2.51 x old, 1.62 x music), peak 0.950. Old fight: steady 0.108, peak 0.466. The fight is now allowed to be louder than the music (by 5 dB at most): a change of Tijmen's decision 3 of WP11.3b, confirmed by him on 18-11-2026 ("ja en mag 5db hoger zijn").
+* **Voices and announcements raised** 0.35 -> 0.95 (joe, cori, the 19 announcements; #156 is merged): every line's RMS is at least half of the steady fight RMS (0.278): joe 0.147-0.303, cori 0.216-0.366, announcements from 0.173. The stale "0.35 / 0.042 / 0.105" of `voices.md` and `announcements.md` are corrected.
+* **Also**: `play_at_scaled` with scale 0 starts nothing (it took a voice slot); config tests for the shipped values, a file without the new fields, the range edges; a mapped original is left alone with the load full; the heavy-moment numbers (0.719, 0.703, 0.627) are pinned.
+* **Mutations** (each reverted, failing tests named in the PR): see the PR body.
+* **Gaps**: not listened to by the builder (Tijmen did, 18-11-2026, see "Heard." above); the cue limiter is a gain model; the master limiter has no attack time (a little distortion on a sharp transient is possible, not judged by ear); the steady fight is 5 dB louder than the music at most, by decision (confirmed by Tijmen 18-11-2026).
