@@ -145,10 +145,10 @@ const LARGE_ROCK: [Boulder; 9] = [
     (-200, 100, 1850, 1450, 2300, 11),
     (1450, -650, 1000, 900, 1300, 12),
     (-1650, -1100, 900, 950, 1100, 13),
-    (700, 1350, 900, 800, 1000, 14),
+    (700, 1250, 900, 800, 1000, 14),
     (-1800, 1150, 700, 650, 700, 15),
     (1650, 1000, 600, 600, 640, 16),
-    (-300, -1550, 650, 600, 620, 17),
+    (-300, -1450, 650, 600, 620, 17),
     (1950, -1600, 450, 400, 420, 18),
     (-1950, -100, 420, 400, 400, 19),
 ];
@@ -189,7 +189,7 @@ pub fn fence() -> Model {
             m.add(closed_box([-1920, y, -40], [1920, y + 70, 40], METAL).toned(BURNT_STEEL));
         }
         if lod.has(1) {
-            let n = if lod.has(0) { 14 } else { 6 };
+            let n = if lod.has(0) { 22 } else { 6 };
             for k in 0..n {
                 let x = -1750 + k * 3500 / (n - 1);
                 // The bars of the torn end stand shorter.
@@ -214,7 +214,7 @@ pub fn cliff_edge() -> Model {
         let mut m = Mesh::new();
         // Strata: `(y0, y1, front z)`, each narrower than the one below.
         let layers: [(i32, i32, i32); 5] = [
-            (0, 800, 1000),
+            (0, 800, 950),
             (800, 1500, 700),
             (1500, 2000, 380),
             (2000, 2350, 80),
@@ -255,9 +255,9 @@ pub fn cliff_edge() -> Model {
             m.add(chunk([x, 2600, z], r, h, s, PAINT, lod));
         }
         for (k, &(x, z, r, h)) in [
-            (-1400, 560, 400, 520),
-            (-300, 600, 380, 420),
-            (1100, 540, 440, 600),
+            (-1400, 480, 400, 520),
+            (-300, 520, 380, 420),
+            (1100, 470, 440, 600),
         ]
         .iter()
         .enumerate()
@@ -276,9 +276,9 @@ pub fn cliff_edge() -> Model {
         if lod.has(0) {
             for k in 0..16u32 {
                 let x = (hash(60 + k) as i32 - 500) * 3400 / 1000;
-                let z = 600 + (hash(70 + k) as i32 / 10) - 50;
+                let z = 540 + (hash(70 + k) as i32 / 10) - 50;
                 m.add(chunk(
-                    [x.clamp(-1800, 1800), 0, z.min(780)],
+                    [x.clamp(-1800, 1800), 0, z.min(700)],
                     160,
                     150,
                     80 + k,

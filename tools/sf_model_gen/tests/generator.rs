@@ -527,13 +527,13 @@ const PINNED_UNITS: [(&str, usize, u64); 14] = [
 /// their bytes: the new `flora` palette entry and the `faction == flora` branch of
 /// `Palette::materials` change no existing model (checked: `--check` against the earlier set).
 const PINNED_DECOR: [(&str, usize, u64); 14] = [
-    ("neutral_cliff_edge.glb", 169680, 0x1f42af3d40017b7b),
-    ("neutral_fence.glb", 67240, 0x3ca6734b9212ec7a),
+    ("neutral_cliff_edge.glb", 169688, 0x108efa20ebdf6087),
+    ("neutral_fence.glb", 78184, 0x995919e27c48e56f),
     ("neutral_ore_field_stage_01.glb", 66152, 0x2737f303fdc49326),
     ("neutral_ore_field_stage_02.glb", 91248, 0x2d965d162d60a0f0),
     ("neutral_ore_field_stage_03.glb", 128888, 0xb95da5095cf1409b),
     ("neutral_ore_field_stage_04.glb", 179056, 0xc8dec64318788c05),
-    ("neutral_rock_large.glb", 189340, 0xedbfc2913118acb2),
+    ("neutral_rock_large.glb", 189340, 0x40f97822c06afd32),
     ("neutral_rock_small.glb", 118188, 0xf740bc1018ee3bfe),
     ("neutral_tree_broadleaf.glb", 82252, 0xcac08d62e8a80cc7),
     (

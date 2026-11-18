@@ -329,7 +329,7 @@ budget (1500 / 500 / 150), the usual LOD, ground and checker rules.
 - **Palette:** rocks, fence, cliff, ore and wrecks use the `neutral` entry (grey-green stone, rust
   accent for ore and wrecks, `paint3` light). The broadleaf needs foliage, so there is one new entry,
   `flora`: foliage `#566246`, sunlit `#687456`, shaded `#3c4630`, bark `#3e342a`, soil `#2e2c28`, dry
-  leaves `#766038` (no channel of a foliage slot above 120, the green at most 16 over the red:
+  leaves `#76603a` (no channel of a foliage slot above 120, the green at most 16 over the red:
   `the_flora_palette_has_the_pinned_values`). The six slots keep their order.
 - **Rule: blobs** (`decor::blob`). A rock-like solid is a loft of rings whose radius is jittered by a
   fixed hash of the *absolute angle*, except at the four compass points, which keep the full radius.
