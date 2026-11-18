@@ -3806,7 +3806,7 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
 ## WP11.3c: more power in the CC0 fight sounds, six sounds redesigned (18-11-2026)
 
 Audio only: `sf_sim` untouched, no checksum or scenario pin moved. Tijmen's verdicts (15 and 16-11-2026, comparing with the Red Alert originals): "alles duidelijk zwakker. meer power er in"; "unit destroyed,
-weapon fire demolition, impact bullet, impact precision en impact miss moeten heel anders"; "fire bullet moet overtuigender". Nobody listened to the result in the build container; everything below is a measurement.
+weapon fire demolition, impact bullet, impact precision en impact miss moeten heel anders"; "fire bullet moet overtuigender". Nobody listened to the result in the build container; everything below is a measurement. **Heard.** Tijmen listened to the release build of the PR head on 18-11-2026 and said "Ja, merge"; he confirmed that a fight may be up to 5 dB louder than the music ("ja en mag 5db hoger zijn").
 Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the music, the limiter, Variants).
 
 * **Generator** (`tools/sf_sound_gen`): new integer building blocks `saturate` (cubic soft clip), `sweep_noise`, `crackle`, `saw`, `Mix::drive`, `Mix::slap`; every recipe has a sub thump, a click, a rumble, saturation and (loud ones) echoes;

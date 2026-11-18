@@ -260,7 +260,8 @@ bytes are the same on every platform. Nothing is sampled from or made to imitate
   of the 20-tank fight (`tank_fight`, from 2 s on to 10 s; the onset, in which the first shots meet an empty load, is left out because it hid the quiet of the steady state in the first version of this WP),
   after the master limiter: **the steady RMS is at least twice what it was before WP11.3c (0.108, measured on commit 37002cf3 with this same harness) and at most 1.8 times the music's**,
   and nothing peaks above the master limiter's ceiling 0.95 (`a_20_tank_fight_is_at_most_1_8_times_the_music`). The name stayed; the fight may now be louder than the music, by 5 dB at most,
-  which is a change of Tijmen's decision 3 of WP11.3b ("not louder than the music") that he should confirm or move: the number to move is 1.8 in that test and `max_load_gain` in `audio.ron`.
+  which changes Tijmen's decision 3 of WP11.3b ("not louder than the music"). **Tijmen confirmed it on 18-11-2026** after listening to the release build of PR #157 ("ja en mag 5db hoger zijn").
+  To move it later: the number is 1.8 in that test and `max_load_gain` in `audio.ron`.
   Measured 18-11-2026 with the shipped files:
 
   | 20-tank fight | peak | RMS, steady state (2 s to 10 s) | against 0.108 before | against the music's 0.168 |
