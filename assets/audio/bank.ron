@@ -430,7 +430,7 @@
         // Both files have the same peak (0.885) and about the same loudness; the volumes here
         // set the mood: combat at 1.0 sits at 0.53 of full scale at the default music volume
         // (0.6). A 20-tank fight has a steady RMS of 1.62 times the music's (at most 1.8, and at least twice what it was
-        // before WP11.3c: a_20_tank_fight_is_not_louder_than_the_music in sf_game fx_sound.rs); calm is 3 dB under it. Looped, one instance each.
+        // before WP11.3c: a_20_tank_fight_is_at_most_1_8_times_the_music in sf_game fx_sound.rs); calm is 3 dB under it. Looped, one instance each.
         "music.calm": (
             file: "audio/music/calm.flac",
             volume: 0.7,

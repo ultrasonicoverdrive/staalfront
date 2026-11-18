@@ -8,7 +8,7 @@ Alert (when each Red Alert line plays there has not been checked).
 * **Without the player's Red Alert files** our own lines play: the Piper voice `en_US-joe-medium` through the same
   walkie-talkie filter as the unit voices (`voices.md` section 3a, `tools/sf_voice_gen`, the filter unchanged: the nine
   unit voice files and their pins are byte-equal).
-* **With `--ra-audio`** a mapped Red Alert line found in the player's own files wins and plays as-is (volume 1, no pitch
+* **With `--ra-audio`** a mapped Red Alert line found in the player's own files wins and plays as-is, apart from the master limiter (volume 1, no pitch
   spread), exactly like the unit voices. A mapped name whose file is not found, and the one event with no Red Alert
   line, play our own line.
 

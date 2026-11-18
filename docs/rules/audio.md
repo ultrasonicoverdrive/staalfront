@@ -180,7 +180,7 @@ phrase A D D Bb C, phrase B D G Bb A, nine sections of four bars).
 * **Mix**: the layer is a ring of its own at the scale of the track, added to the finished track with the gains of the preview (`put_ring`, in 1/256), then an
   integer look-ahead peak limiter (5 ms blocks, falls at once, rises over about 150 ms, ring-safe) and the same peak normalisation as before. No pan (the track is mono).
 * **Loudness** (`the_layer_does_not_make_the_combat_track_quieter_and_the_peak_stays_the_file_peak`): peak 29,000 before and after (so the 0.531 of
-  `a_20_tank_fight_is_not_louder_than_the_music` is unchanged); RMS 9,120 before, 9,158 after (calm 8,611, so the two tracks stay within 1.5). Per section against the old track
+  `a_20_tank_fight_is_at_most_1_8_times_the_music` is unchanged); RMS 9,120 before, 9,158 after (calm 8,611, so the two tracks stay within 1.5). Per section against the old track
   the RMS is -0.1 to +0.3 dB (the float preview: -0.0 to +0.8 dB, the preview limited less). **The limiter does lower the track at the loud moments**
   (`the_limiter_numbers_quoted_in_the_documents_are_the_measured_ones`, gain per 5 ms block): in the full sections 3, 6 and 7 it is more than 1 dB down for 11.4%, 17.8% and 15.8% of the blocks
   (15.0% together) and goes down to -3.99 dB, at bar 24 (the crash, bass drum and timpani together), before the gain returns over about 150 ms. The limiter leaves the intro alone; the final normalisation lowers the whole track by about 0.07 dB (sections 0, 1 and 4 come out about -0.07 dB). Whether this pumps
@@ -218,7 +218,7 @@ bytes are the same on every platform. Nothing is sampled from or made to imitate
   together (571,926 before WP11.3c; budget 2 MB, `every_file_is_a_loud_unclipped_mono_wav_of_its_length_and_all_stay_in_budget`; the largest file is
   `explosion_large.wav`, 105,884 bytes, the smallest `impact_bullet*.wav`, 11,068). Every file is normalised to the same
   peak (26000 of 32767), so **the loudness of an event is its bank `volume`** (0.5 to 1.0 since WP11.3c, was 0.125 to 0.35), not the file (a frame of many is capped by the limiter, below).
-* **A mapped original plays as it did before this WP** (sweep of PR #122): the 18 bank entries carry `original_as_is: true`, so a Red Alert sound that replaces the event plays with volume 1.0, no pitch spread and the default voice cap, **not** with the bank's volume, pitch spread and `max_instances`, which are tuned for the CC0 file. Without that flag `resolve` would give a mapped original the bank entry's 0.5 to 1.0 (0.125 to 0.35 before WP11.3c) and its cap, and its variants. Other bank entries (`ui.click`) keep handing their volume and category to a mapped original as before. Test `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` checks the resolved definition and the traced gain of all 18 (mapped: volume 1.0, pitch spread 0, cap 8; unmapped: the bank's).
+* **A mapped original plays as it did before this WP** (sweep of PR #122): the 18 bank entries carry `original_as_is: true`, so a Red Alert sound that replaces the event plays as-is, apart from the master limiter: volume 1.0, no pitch spread and the default voice cap, **not** with the bank's volume, pitch spread and `max_instances`, which are tuned for the CC0 file. Without that flag `resolve` would give a mapped original the bank entry's 0.5 to 1.0 (0.125 to 0.35 before WP11.3c) and its cap, and its variants. Other bank entries (`ui.click`) keep handing their volume and category to a mapped original as before. Test `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` checks the resolved definition and the traced gain of all 18 (mapped: volume 1.0, pitch spread 0, cap 8; unmapped: the bank's).
 * **Precedence**: unchanged, `AudioSystem::resolve`: with the original audio on and the event mapped in `ra_mapping.ron` the Red Alert
   sound plays (with the bank's volume and category, unless the entry is `original_as_is`, as all 18 fight entries are), otherwise the CC0 sound. The four events Red Alert has no sound for
   (`weapon.fire.demolition`, `impact.bullet`, `impact.precision`, `impact.miss`) play the CC0 sound also with `--ra-audio`.
@@ -259,7 +259,7 @@ bytes are the same on every platform. Nothing is sampled from or made to imitate
   `RMS_AFTER`, times bank volume 1.0 times `music_volume` 0.6), the fight is bursts, so peak against peak says little. The rule is now, measured on the **steady state**
   of the 20-tank fight (`tank_fight`, from 2 s on to 10 s; the onset, in which the first shots meet an empty load, is left out because it hid the quiet of the steady state in the first version of this WP),
   after the master limiter: **the steady RMS is at least twice what it was before WP11.3c (0.108, measured on commit 37002cf3 with this same harness) and at most 1.8 times the music's**,
-  and nothing peaks above the master limiter's ceiling 0.95 (`a_20_tank_fight_is_not_louder_than_the_music`). The name stayed; the fight may now be louder than the music, by 5 dB at most,
+  and nothing peaks above the master limiter's ceiling 0.95 (`a_20_tank_fight_is_at_most_1_8_times_the_music`). The name stayed; the fight may now be louder than the music, by 5 dB at most,
   which is a change of Tijmen's decision 3 of WP11.3b ("not louder than the music") that he should confirm or move: the number to move is 1.8 in that test and `max_load_gain` in `audio.ron`.
   Measured 18-11-2026 with the shipped files:
 
@@ -275,7 +275,7 @@ bytes are the same on every platform. Nothing is sampled from or made to imitate
   10 s RMS of 0.130 hid all of it because it contained the loud first frame. The reworked limiter is below; `the_cue_limiter_keeps_every_cue_audible_in_a_dense_fight` pins the per-cue shares.
 * **Clipping against the music (WP11.3c).** One howitzer peaks at 0.793, the combat music at 0.53 and a unit voice at 0.75; kira does not limit and the sound device cuts a sample above full scale flat. Measured
   (`fight_music_and_voice_together_clip_without_the_master_limiter_and_not_with_it`, at sample accuracy): the 20-tank fight, the loudest 13 s window of `combat.flac` at its bank volume times the music volume (0.6) and two voice
-  lines at 5 s and 8 s sum to a peak of 1.664 and **1,540 of 286,550 samples above full scale**; through the master limiter the peak is 0.950 and no sample is above full scale. So the earlier text of this section, that a fight peak on a music peak was "a coincidence of two peaks, not a measured clip",
+  lines at 5 s and 8 s sum to a peak of 1.680 and **1,560 of 286,550 samples above full scale**; through the master limiter the peak is 0.950 and no sample is above full scale. So the earlier text of this section, that a fight peak on a music peak was "a coincidence of two peaks, not a measured clip",
   was wrong: it clips with ordinary loud fights. The fix is a **master limiter on kira's main track** (`sf_audio::limiter`, a kira `Effect` of our own because kira's compressor has a smoothed envelope and lets the first
   milliseconds through): it follows the peak of each frame at once (no attack time) and lets go over `release_ms`, so no output sample is above the `ceiling`; numbers in `audio.ron` `limiter` (ceiling 0.95, release 150 ms; range-checked, pinned,
   `set` on the running effect by `fx_sound::start_audio_with`, test `start_audio_follows_the_file_on_disk`, a missing section gives the same numbers). It limits everything the output plays (fight, music, voices, interface sounds) and
@@ -351,7 +351,7 @@ of the six, `weapon.fire.bullet` and `unit.destroyed.infantry` are mapped, the o
 Tests: `sf_sound_gen` `tests/generator.rs` (determinism and a pinned length and hash per file, the committed files equal a fresh run,
 each file loud, unclipped, the right length, under budget, each event's bank entry points at its first file and lists the rest as `variants`, `every_file_has_power_rms_and_low_end`, `impact_precision_has_no_ping_in_any_variant`, `the_infantry_death_starts_with_a_cry`, `the_six_redesigned_sounds_have_exactly_these_variants_and_nothing_else_has_any`); `sf_game` `fx_sound::tests`
 `every_fight_event_has_a_non_silent_cc0_sound_in_the_shipped_bank` (literal event to file list, volume, the game's own `has_sound`
-and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_game` `the_six_redesigned_sounds_play_their_variants_and_never_repeat`; `sf_audio` `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` (now also: a mapped original has no variants).
+and trace), `a_20_tank_fight_is_at_most_1_8_times_the_music`; `sf_game` `the_six_redesigned_sounds_play_their_variants_and_never_repeat`; `sf_audio` `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` (now also: a mapped original has no variants).
 
 ## 4. Gaps
 
@@ -359,8 +359,7 @@ and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_game` `the_six_r
 * Fight sounds (WP11.3b, WP11.3c): twelve events still have one file, so their only
   variety is `pitch_variation`; six have three files since WP11.3c (the variants above). Not heard by the author (WP11.3c): the new files and volumes await Tijmen's comparison with the Red Alert originals in the sandbox fight; the redesigned six are a first try to the verdicts quoted above, not a result. The volumes come from a measured mix, the character of each sound from the table in 3c above.
   Tijmen listened on 12-11-2026 in `sf_game --sandbox --fight` without `--ra-audio` and judged the sounds good (`progress.md`, WP11.3b
-  notes). Still open: `weapon.fire.demolition` (two ticks and a rising beep), for any likeness to a Red Alert sound (B11); that fight
-  has one demolition team, so it can have played, but the summary does not show whether it did. The sim has no event for a structure being hit, so there is no such sound.
+  notes). Still open: `weapon.fire.demolition`, since WP11.3c a satchel thrown down and a burning fuse (three variants), for any likeness to a Red Alert sound (B11); not yet heard by Tijmen in a fight. The sim has no event for a structure being hit, so there is no such sound.
 * The sim emits no event for a structure placed or finished, or a harvester unloading; nothing was added to `sf_sim`. The replies
   to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side. **Announcements** ("Unit ready", "Base under
   attack", "Power low", ...) are played since WP11.2c (`announcements.md`): raised on the UI side from the snapshot, the shown

@@ -61,7 +61,7 @@ file mapped, nothing in `bank.ron`) is silent, prints nothing, counts no unknown
   three events with three lines each, nine for `unit.select` since WP11.2d (section 3a), and the three `.veyran` events
   (section 3c), category `Voice`, `max_instances: 1`, `original_as_is: true`.
 * With `--ra-audio` (or `ra_audio` in `audio.ron`) the mapped Red Alert voice plays, exactly as before WP11.2b: the
-  event is in the loaded mapping, so `resolve` gives the Red Alert sound with volume 1, no pitch spread and the
+  event is in the loaded mapping, so `resolve` gives the Red Alert sound as-is, apart from the master limiter: volume 1, no pitch spread and the
   default cap (`original_as_is`), and no variant is picked. A mapped name whose file is not found is not in the
   loaded mapping, so that event plays its own lines. `ra_mapping.ron` has had defaults for the three events since
   WP11.7 (voice lines carry a variant as extension, `V01` etc.); they were not changed. Which variant sounds right is
@@ -138,6 +138,12 @@ settings, each line through `play_as(.., Voice)`): every line's peak (0.754 of f
 at the focus (0.793), and its loudness (RMS while it sounds) is at least half (-6 dB) the **steady-state** RMS of the 20-tank fight (from 2 s on, 0.278): joe's lines 0.147 to 0.303,
 cori's 0.216 to 0.366 (the rule `VOICE_OVER_FIGHT_MIN` 0.5, pinned; the old rule "above the loudest fight sound's RMS" is dropped, the howitzer's is 0.268). Whether a line is clearly heard in a real fight is for the ear; the master limiter
 (`audio.md` section 3c) catches the sum of voice, fight and music.
+
+**Heard.** The tests show the band, the levels and the pins, not that a person understands the words. Tijmen listened
+on 15-11-2026 to the nine filtered lines as committed here (the files written at 19:52 that day, unchanged since) and
+judged them good ("joe klinkt goed"). Not yet heard in a running game over a fight.
+
+### 3b. Announcements (WP11.2c)
 
 The status lines of the base ("Unit ready", "Base under attack") use the same voice, the same filter and the same bank
 settings (Voice category, 0.95 since WP11.3c, `max_instances: 1`, `original_as_is`). They share the **voice channel** with the unit voices: while an
