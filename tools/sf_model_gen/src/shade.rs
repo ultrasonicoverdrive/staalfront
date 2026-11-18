@@ -239,7 +239,7 @@ fn hits(o: V, d: V, tri: &Occluder) -> bool {
 /// can lift a weak channel (desaturate) without leaving glTF's 0..1 range for `COLOR_0`.
 pub fn factor(lin: [f32; 3]) -> [f32; 3] {
     let top = lin.iter().copied().fold(0.0_f32, f32::max);
-    [(top / NOMINAL).max(FACTOR_FLOOR).min(1.0); 3]
+    [(top / NOMINAL).clamp(FACTOR_FLOOR, 1.0); 3]
 }
 
 /// The vertex colour of every corner of `tris` (all the triangles of one level, in model space),
