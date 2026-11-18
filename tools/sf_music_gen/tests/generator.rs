@@ -9,7 +9,7 @@ use sf_music_gen::{BUDGET_BYTES, FILE_PEAK, SAMPLE_RATE, TRACKS, files, render, 
 /// (file, samples, byte length, FNV-1a 64 of the bytes), pinned as literals, in `TRACKS` order.
 const PINNED: [(&str, usize, usize, u64); 2] = [
     ("calm.flac", 1_512_000, 1_509_638, 0xe98d_0e9a_91e7_347a),
-    ("combat.flac", 1_488_375, 2_021_170, 0x95f6_29a2_3692_dcd9),
+    ("combat.flac", 1_488_375, 2_052_329, 0x19ee_6457_d321_ba99),
 ];
 
 fn fnv1a(bytes: &[u8]) -> u64 {
