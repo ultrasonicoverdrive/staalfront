@@ -513,6 +513,12 @@ impl Pathing {
         job.corrupt_for_test(what, &mut self.work);
     }
 
+    /// Sets the ticket of the job in flight (save tests).
+    #[cfg(test)]
+    pub(crate) fn set_job_ticket_for_test(&mut self, ticket: u32) {
+        self.job.as_mut().expect("a job in flight").ticket = ticket;
+    }
+
     /// Gives the job's memory a node that is no portal (save tests, `Job` memory case `what`).
     #[cfg(test)]
     pub(crate) fn corrupt_job_memory_for_test(&mut self, what: u8) {
@@ -648,8 +654,12 @@ impl Pathing {
         self.graph_index(class).is_some()
     }
 
+    /// The next request ticket. The counter skips 0 when it wraps: ticket 0 is the ticket of every
+    /// route a command writes ([`Route::IDLE`], a flowfield member), so no job is ever for ticket 0
+    /// and a route that is not owned by the job cannot become owned before the next `serve`
+    /// (docs/rules/save.md).
     fn new_ticket(&mut self) -> u32 {
-        self.next_ticket = self.next_ticket.wrapping_add(1);
+        self.next_ticket = next_ticket_after(self.next_ticket);
         self.next_ticket
     }
 
@@ -924,7 +934,7 @@ impl Pathing {
         };
         match route.state {
             RouteState::Idle => {
-                self.next_ticket = self.next_ticket.wrapping_add(1);
+                self.next_ticket = next_ticket_after(self.next_ticket);
                 *route = Route::IDLE;
                 route.want = want;
                 route.state = RouteState::Wanted;
@@ -939,7 +949,7 @@ impl Pathing {
                 }
                 e.crowd[i].retarget = self.replan.retarget_cooldown;
                 self.stats.target_replans += 1;
-                self.next_ticket = self.next_ticket.wrapping_add(1);
+                self.next_ticket = next_ticket_after(self.next_ticket);
                 let cautious = route.cautious;
                 *route = Route::IDLE;
                 route.cautious = cautious;
@@ -957,7 +967,7 @@ impl Pathing {
                 // for the cooldown: the unit follows the route it has meanwhile.
                 e.crowd[i].retarget = self.replan.retarget_cooldown;
                 self.stats.target_replans += 1;
-                self.next_ticket = self.next_ticket.wrapping_add(1);
+                self.next_ticket = next_ticket_after(self.next_ticket);
                 route.want = want;
                 route.state = RouteState::Wanted;
                 route.ticket = self.next_ticket;
@@ -984,7 +994,7 @@ impl Pathing {
             let pos = Pathing::cell_index(g, e.pos[i]);
             if self.touched(g, &e.route[i], pos, since) {
                 self.stats.map_replans += 1;
-                self.next_ticket = self.next_ticket.wrapping_add(1);
+                self.next_ticket = next_ticket_after(self.next_ticket);
                 let route = &mut e.route[i];
                 route.clear_plan();
                 route.state = RouteState::Wanted;
@@ -1055,7 +1065,7 @@ impl Pathing {
             route.state = RouteState::Stranded;
             return;
         }
-        self.next_ticket = self.next_ticket.wrapping_add(1);
+        self.next_ticket = next_ticket_after(self.next_ticket);
         route.clear_plan();
         route.cautious = true;
         route.state = RouteState::Wanted;
@@ -1106,7 +1116,7 @@ impl Pathing {
             let route = &mut e.route[i];
             route.overlay = overlay;
             route.state = RouteState::Wanted;
-            self.next_ticket = self.next_ticket.wrapping_add(1);
+            self.next_ticket = next_ticket_after(self.next_ticket);
             route.ticket = self.next_ticket;
             self.scan = true;
             return;
@@ -1127,7 +1137,7 @@ impl Pathing {
         // The unit keeps following the waypoints it has until the new route is
         // ready, as when its destination moves: standing still to wait for a search
         // would only make the crowd more stuck.
-        self.next_ticket = self.next_ticket.wrapping_add(1);
+        self.next_ticket = next_ticket_after(self.next_ticket);
         route.state = RouteState::Wanted;
         route.ticket = self.next_ticket;
         self.scan = true;
@@ -1611,4 +1621,12 @@ fn class_grid(
         }
     }
     grid
+}
+
+/// The ticket after `t`, skipping 0 at the wrap (see [`Pathing::new_ticket`]).
+pub(crate) fn next_ticket_after(t: u32) -> u32 {
+    match t.wrapping_add(1) {
+        0 => 1,
+        n => n,
+    }
 }

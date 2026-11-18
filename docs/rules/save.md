@@ -239,6 +239,14 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   "a job's search flag does not match its stage"; Abstract or Nearest without the abstract search
   begun, Refine without it unless the job is a Refill, an overlay on a job that is not Fresh,
   `strict` without an overlay: "a job's abstract search was never begun".
+  A job with ticket 0: "a job ticket at zero". The ticket counter skips 0 when it wraps
+  (`next_ticket_after`), and every route a command writes (`Route::IDLE`, a flowfield member in
+  `Pathing::group_order`) has ticket 0. So a route that is not owned by the saved job cannot become
+  owned before the next `serve` (commands run first), and skipping the checks of such a job is
+  safe. No job is made from a ticket-0 route: `next_job` takes `Wanted` routes (always given a
+  ticket) and `Active` routes that are not complete (made by a job, with its ticket); flowfield
+  routes are complete. A saved `next_ticket` of 0 stays valid: it is the state before the first
+  request.
 * **Epoch**: only `refresh_sectors` moves the service's epoch, called from the command loop (before
   the service, which then replans a job of the old epoch at once: the budget is at least 512 and the
   fields take at most half, so the job always runs) or from a destruction after it (whose tick saves

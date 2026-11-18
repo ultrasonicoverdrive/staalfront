@@ -1315,6 +1315,8 @@ impl Job {
     pub(crate) fn restore(r: &mut ByteReader<'_>, b: &Bounds, work: &Work) -> SaveResult<Job> {
         let slot = r.u32()?;
         let ticket = r.u32()?;
+        // The counter skips 0 (`next_ticket_after`): ticket 0 belongs to the routes commands write.
+        ensure(ticket != 0, "a job ticket at zero")?;
         let graph = r.u32()? as usize;
         let mode = match r.u8()? {
             0 => Mode::Fresh,

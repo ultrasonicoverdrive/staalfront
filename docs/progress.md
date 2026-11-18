@@ -3617,6 +3617,8 @@ What it does not settle:
   searches, not for being exactly that search. A formation may list a member that left it this tick
   (pruned on the next tick); restore accepts that.
 
+* **Fix round 5 (B4).** The ticket counter skips 0 (`next_ticket_after`, used by all eight increments in `path.rs`) and `Job::restore` refuses a job with ticket 0, so a command's route (ticket 0) can never make an unowned, unchecked job owned before `serve`. Case in `every_impossible_job_state_is_corrupt`, `the_ticket_counter_skips_zero`; no pin moved.
+
 ### WP9.3c notes: the defence lock gate (14-11-2026)
 
 * **What changed.** Data only: `assets/ai/normal.ron`, both goal lists end at the second refinery (no tower, advanced defences, radar or bunker). Tests re-pinned with cause (below); `docs/rules/ai.md` "Defence lock (WP9.3c)"; PLAN note of 14-11-2026; screenshots `docs/screenshots/wp9.3c/`.

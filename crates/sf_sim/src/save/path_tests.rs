@@ -922,6 +922,13 @@ fn job_cases() -> Vec<JobCase> {
             || job_in(moving(fresh()), REFINE, FRESH, true),
             |w| w.pathing.corrupt_job_for_test(11),
         ),
+        // A job for ticket 0: the counter skips 0, which is the ticket of the routes commands
+        // write, so such a job could become owned again before the next service (B4).
+        (
+            "a job ticket at zero",
+            || job_in(moving(fresh()), CONNECT_GOAL, FRESH, false),
+            |w| w.pathing.set_job_ticket_for_test(0),
+        ),
         // The abstract search's memory naming a node that is no portal of the graph.
         (
             "an abstract search node or sector",
@@ -1010,4 +1017,13 @@ fn a_job_whose_route_was_reset_restores() {
             assert_eq!(back.checksum(), w.checksum(), "{name}: tick {t}");
         }
     }
+}
+
+/// The ticket counter skips 0 at the wrap: no request ever gets the ticket of a command's route.
+#[test]
+fn the_ticket_counter_skips_zero() {
+    use crate::path::next_ticket_after;
+    assert_eq!(next_ticket_after(u32::MAX), 1);
+    assert_eq!(next_ticket_after(0), 1);
+    assert_eq!(next_ticket_after(41), 42);
 }
