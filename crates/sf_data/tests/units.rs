@@ -865,7 +865,7 @@ fn every_role_is_wired_to_its_art_set() {
         ("automated_gun", "set_v5/network_automated_gun"),
         ("generator", "set_v5/neutral_generator"),
         ("unmanned_artillery", "set_v5/network_unmanned_artillery"),
-        ("ore_field", "set_v4/neutral_ore_field"),
+        ("ore_field", "set_v5/neutral_ore_field_stage_04"),
     ] {
         let def = get(id);
         assert!(def.models.is_empty(), "{id}");
@@ -902,11 +902,11 @@ fn every_role_is_wired_to_its_art_set() {
     // faction files of the pairs and 7 single files (transport truck, light transport,
     // amphibious transport, gunboat, supply truck, ferry, heavy gun team); WP11.6c: the other 15
     // structure looks of both factions, the ore silo (2), the decoy, the bunker and nine mission
-    // objects (11).
+    // objects (11); WP11.6d: the ore field (1).
     assert_eq!(counted[0], 8 + 6, "the set v3 infantry files");
     assert_eq!(
         counted[2],
-        v5_pairs.len() + 7 + 15 + 2 + 11,
+        v5_pairs.len() + 7 + 15 + 2 + 11 + 1,
         "the set v5 files"
     );
 }

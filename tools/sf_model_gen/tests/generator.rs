@@ -522,6 +522,43 @@ const PINNED_UNITS: [(&str, usize, u64); 14] = [
     ("veyran_transport_truck.glb", 224872, 0xb84a74fd741234e9),
 ];
 
+/// WP11.6d: the 14 decor and wreck files (4 wrecks, 2 rocks, a fence, a cliff edge, 4 ore field
+/// stages, 2 broadleaf trees), first pinned on this branch. The files of the other tables kept
+/// their bytes: the new `flora` palette entry and the `faction == flora` branch of
+/// `Palette::materials` change no existing model (checked: `--check` against the earlier set).
+const PINNED_DECOR: [(&str, usize, u64); 14] = [
+    ("neutral_cliff_edge.glb", 169680, 0x1f42af3d40017b7b),
+    ("neutral_fence.glb", 67240, 0x3ca6734b9212ec7a),
+    ("neutral_ore_field_stage_01.glb", 66152, 0x2737f303fdc49326),
+    ("neutral_ore_field_stage_02.glb", 91248, 0x2d965d162d60a0f0),
+    ("neutral_ore_field_stage_03.glb", 128888, 0xb95da5095cf1409b),
+    ("neutral_ore_field_stage_04.glb", 179056, 0xc8dec64318788c05),
+    ("neutral_rock_large.glb", 189340, 0xedbfc2913118acb2),
+    ("neutral_rock_small.glb", 118188, 0xf740bc1018ee3bfe),
+    ("neutral_tree_broadleaf.glb", 82252, 0xcac08d62e8a80cc7),
+    (
+        "neutral_tree_broadleaf_fallen.glb",
+        84172,
+        0xbcd02ed80df73d79,
+    ),
+    (
+        "neutral_wreck_heavy_vehicle.glb",
+        156596,
+        0xaded55d870736944,
+    ),
+    (
+        "neutral_wreck_light_vehicle.glb",
+        133152,
+        0xf93d7fcdb4e2be04,
+    ),
+    (
+        "neutral_wreck_medium_vehicle.glb",
+        209752,
+        0xb40137b663d348d3,
+    ),
+    ("neutral_wreck_vessel.glb", 127972, 0x1626849e1e3c48f8),
+];
+
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for b in bytes {
@@ -550,11 +587,16 @@ fn two_runs_give_the_same_bytes_and_every_file_is_pinned() {
     let second = files();
     assert!(first == second.as_slice(), "two runs differ");
     // The units of WP11.6b are pinned in their own table; a file is in exactly one.
-    assert_eq!(first.len(), PINNED.len() + PINNED_UNITS.len());
+    // The decor and the wrecks of WP11.6d are pinned in their own table.
+    assert_eq!(
+        first.len(),
+        PINNED.len() + PINNED_UNITS.len() + PINNED_DECOR.len()
+    );
     for (name, bytes) in first {
         let (_, len, hash) = PINNED
             .iter()
             .chain(PINNED_UNITS.iter())
+            .chain(PINNED_DECOR.iter())
             .find(|p| p.0 == name)
             .unwrap_or_else(|| panic!("{name} is not pinned"));
         assert_eq!(bytes.len(), *len, "{name} length");

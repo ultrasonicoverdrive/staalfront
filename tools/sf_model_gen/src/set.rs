@@ -108,6 +108,8 @@ pub fn structure_recipes() -> Vec<fn() -> Model> {
     v.push(|| o::rubble(3, 4));
     v.push(|| o::rubble(4, 4));
     v.push(|| o::rubble(4, 5));
+    // Decor and wrecks of WP11.6d.
+    v.extend(crate::decor::recipes());
     v
 }
 

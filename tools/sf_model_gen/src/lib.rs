@@ -18,6 +18,7 @@
 
 pub mod buildings;
 pub mod cutout;
+pub mod decor;
 pub mod glb;
 pub mod kit;
 pub mod models;

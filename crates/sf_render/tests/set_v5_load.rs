@@ -98,6 +98,25 @@ fn is_building(file: &str) -> bool {
     STRUCTURES.iter().any(|b| file.contains(b))
 }
 
+/// A wreck of a vehicle or a boat (WP11.6d): hull, turret and barrel parts and the smoke and
+/// fire anchors, but no muzzle.
+fn is_wreck(file: &str) -> bool {
+    file.starts_with("neutral_wreck_")
+}
+
+/// Rocks, fences, cliff edges, ore field stages and trees (WP11.6d): one body, no anchors.
+fn is_scenery(file: &str) -> bool {
+    [
+        "neutral_rock_",
+        "neutral_fence",
+        "neutral_cliff_edge",
+        "neutral_ore_field_",
+        "neutral_tree_",
+    ]
+    .iter()
+    .any(|p| file.starts_with(p))
+}
+
 /// The state of a structure that has no gun: a building stage or a heap.
 fn is_unarmed_state(file: &str) -> bool {
     ["_foundation", "_scaffolding", "_rubble"]
@@ -128,7 +147,9 @@ fn is_neutral(file: &str) -> bool {
 
 /// The contact sheet a model goes on.
 fn sheet_of(file: &str) -> &'static str {
-    if file.starts_with("neutral_") || file.starts_with("network_") {
+    if is_wreck(file) || is_scenery(file) {
+        "decor"
+    } else if file.starts_with("neutral_") || file.starts_with("network_") {
         "objects"
     } else if ["_foundation.glb", "_scaffolding.glb"]
         .iter()
@@ -157,7 +178,9 @@ fn the_folder_holds_the_models_and_the_pack_lists_them() {
     let on_disk = files();
     // WP11.6a: 6; WP11.6b: 14 units; WP11.6c: 22 structures x 5 states less the 3 finished ones
     // of WP11.6a, 24 mission objects and states, 6 heaps.
-    assert_eq!(on_disk.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6);
+    // WP11.6d: 14 decor and wreck files (4 wrecks, 2 rocks, fence, cliff edge, 4 ore field
+    // stages, 2 broadleaf trees).
+    assert_eq!(on_disk.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6 + 14);
     let config = std::fs::read_to_string(assets().join(glb::MODELS_CONFIG)).unwrap();
     let file: PackFile = ron::from_str(&config).unwrap();
     let spec = file
@@ -185,7 +208,7 @@ fn every_model_loads_with_three_levels_parts_and_anchors() {
         assert!(tris[0] > tris[1] && tris[1] > tris[2], "{file}: {tris:?}");
         for (n, level) in m.levels.iter().enumerate() {
             let names: Vec<&str> = level.anchors.iter().map(|a| a.name.as_str()).collect();
-            let building = is_building(file);
+            let building = is_building(file) || is_wreck(file);
             assert_eq!(
                 names.contains(&"fx_smoke_0") && names.contains(&"fx_fire_0"),
                 building,
@@ -345,6 +368,7 @@ fn every_model_is_drawn_in_its_player_colour_and_the_contact_sheet_is_written_on
             "build_stages",
             "damage_stages",
             "objects",
+            "decor",
             "units",
         ] {
             let picked: Vec<usize> = (0..names.len())
