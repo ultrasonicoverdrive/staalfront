@@ -360,7 +360,7 @@ and trace), `a_20_tank_fight_is_at_most_1_8_times_the_music`; `sf_game` `the_six
 * Fight sounds (WP11.3b, WP11.3c): twelve events still have one file, so their only
   variety is `pitch_variation`; six have three files since WP11.3c (the variants above). Not heard by the author (WP11.3c). Tijmen listened to the release build of PR #157 on 18-11-2026 and said "Ja, merge"; the new files and volumes are what he heard. The volumes come from a measured mix, the character of each sound from the table in 3c above.
   Tijmen listened on 12-11-2026 in `sf_game --sandbox --fight` without `--ra-audio` and judged the sounds good (`progress.md`, WP11.3b
-  notes). Still open: `weapon.fire.demolition`, since WP11.3c a satchel thrown down and a burning fuse (three variants), for any likeness to a Red Alert sound (B11); not yet heard by Tijmen in a fight. The sim has no event for a structure being hit, so there is no such sound.
+  notes). Still open: `weapon.fire.demolition`, since WP11.3c a satchel thrown down and a burning fuse (three variants), for any likeness to a Red Alert sound (B11); Tijmen approved the WP11.3c sounds on 18-11-2026 ("Ja, merge"); whether this one played in the fight he listened to is not recorded. The sim has no event for a structure being hit, so there is no such sound.
 * The sim emits no event for a structure placed or finished, or a harvester unloading; nothing was added to `sf_sim`. The replies
   to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side. **Announcements** ("Unit ready", "Base under
   attack", "Power low", ...) are played since WP11.2c (`announcements.md`): raised on the UI side from the snapshot, the shown
