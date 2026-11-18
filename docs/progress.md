@@ -3802,3 +3802,21 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
 * **Environment.** On this machine `cargo test --workspace` hangs in the GPU tests (`screenshot`, `ai_screenshot`, `bench_scene`; no
   adapter), so locally I ran `sf_game --lib` (572 passed), `sf_game --test announcements` (8), `sf_audio`, `sf_voice_gen`, `sf_data`;
   CI runs the rest.
+
+## WP11.3c: more power in the CC0 fight sounds, six sounds redesigned (18-11-2026)
+
+Audio only: `sf_sim` untouched, no checksum or scenario pin moved. Tijmen's verdicts (15 and 16-11-2026, comparing with the Red Alert originals): "alles duidelijk zwakker. meer power er in"; "unit destroyed,
+weapon fire demolition, impact bullet, impact precision en impact miss moeten heel anders"; "fire bullet moet overtuigender". Nobody listened to the result in the build container; everything below is a measurement.
+Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the music, the limiter, Variants).
+
+* **Generator** (`tools/sf_sound_gen`): new integer building blocks `saturate` (cubic soft clip), `sweep_noise`, `crackle`, `saw`, `Mix::drive`, `Mix::slap`; every recipe has a sub thump, a click, a rumble, saturation and (loud ones) echoes;
+  30 files (18 events, six with three variants), 1,015,612 bytes (was 571,926; budget 2 MB). RMS of every file rose from 2,644-5,737 to 6,569-9,327 at the same peak (26,000).
+* **Volumes**: 0.125-0.35 -> 0.5-1.0 (table in audio.md); a single sound is 15 to 20 dB louder in RMS and peaks at 0.40 to 0.79 (was 0.10 to 0.28).
+* **Six redesigned sounds, three files each**: `unit.destroyed.infantry` (synthesised pain cry, fall, gear), `weapon.fire.demolition` (satchel set down, clunk, fuse hiss), `impact.bullet` (dry thwack, debris, a ricochet variant),
+  `impact.precision` (crack and thud, no ping), `impact.miss` (whiz-by crack and dirt puff), `weapon.fire.bullet` (report, muzzle blast, action click, slap; rifle, machine gun, heavy rifle).
+* **Limiter looks back in time** (a change beyond the brief, forced by the volumes): with the new volumes the per-frame limiter alone let the 20-tank fight peak at 2.180 (no limiter 2.575), because frames overlap. `FxSound::start_cues` now keeps a load
+  (gains started, faded with a 6-tick half-life) and turns a frame down to keep it at `max_load_gain` 1.0 (new `audio.ron` fields with defaults, range-checked, pinned); `max_summed_gain` 1.2 -> 1.0. Result: peak 0.805.
+* **Loudness rule restated**: fight RMS <= the music's (0.168) and >= half of it, fight peak <= 0.85. Measured: 20-tank fight peak 0.466 -> 0.805, RMS 0.105 -> 0.130 (0.78 of the music's); volley 0.782 / 0.222 (bound 1.5 x).
+* **Voices restated**: voices (0.35, not touched, #156 edits those entries) against the louder fight: the ratio limits went from 0.5 and "above the loudest sound" to 0.35 and 0.15 (measured 0.42 to 0.69 of the fight's RMS). A gap, see audio.md.
+* **Mutations** (each reverted, failing tests named in the PR): no `drive`, a ping back in `impact.precision`, no cry, no sub thump, a bank without variants, the variant pick fixed on the first file, no load fade, no load limit, `max_load_gain` 1.2, one volume changed.
+* **Gaps**: not listened to; the sum of fight and music is not limited; the limiter is a gain model, not sample peak tracking; voices relatively quieter; no timing of the limiter (a few flops per frame, not benchmarked).

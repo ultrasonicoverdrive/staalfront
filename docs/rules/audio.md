@@ -138,8 +138,7 @@ not a clash. Together 3,561,967 bytes against a budget of 4,000,000 (`BUDGET_BYT
   (`the_ends_have_music_in_them_...`), so the test does not pass on silence.
 * **Loudness**: both files have the same peak (29,000 of 32,767, `FILE_PEAK`, no flat top: `nothing_clips_and_the_peak_is_the_file_peak`)
   and about the same RMS (calm 8,612, combat 9,120). The mood is set by the bank volume: combat 1.0, calm 0.7. At the default settings
-  (`music_volume` 0.6) combat peaks at 0.53 of full scale, calm at 0.37; the 20-tank fight peaks at 0.466
-  (`a_20_tank_fight_is_not_louder_than_the_music` now pins the combat bank volume 1.0 and says in its comment that the music side (0.531) is guarded only by pins: peak against peak, the fight's `<= 0.5` is the real assertion).
+  (`music_volume` 0.6) combat peaks at 0.53 of full scale, calm at 0.37; the 20-tank fight peaked at 0.466 until WP11.3c; since then the rule against the music is about RMS, section 3c "Volume", and the fight peaks at 0.805)
 * **Loading**: a bank sound is decoded when it is first needed and then kept (`Live::data`), never up front with the effects: the music
   is not in the list of sounds started at launch. This path decodes **on the calling thread** (unlike a Red Alert track, which decodes on a
   background thread): `the_shipped_fallback_music_plays_per_mood_without_red_alert_files` prints the first start, 298 ms for calm and 245 ms for combat in a
@@ -215,49 +214,139 @@ bytes are the same on every platform. Nothing is sampled from or made to imitate
 * **Regenerate**: `cargo run -p sf_sound_gen` writes `assets/audio/sfx/*.wav`; `-- --check` compares the files with a fresh run
   (exit code 1 when one is out of date); `-- --table` prints the table below. A new sound is a recipe and a `SOUNDS` entry in
   `tools/sf_sound_gen/src/lib.rs`, its bank entry, and its pinned hash in `tools/sf_sound_gen/tests/generator.rs`.
-* **Format**: mono, 16-bit, 22.05 kHz WAV, 18 files, 571,926 bytes together (budget 2 MB). Every file is normalised to the same
-  peak (26000 of 32767), so **the loudness of an event is its bank `volume`** (0.125 to 0.35), not the file (a frame of many is capped by the limiter, section 3c).
-* **A mapped original plays as it did before this WP** (sweep of PR #122): the 18 bank entries carry `original_as_is: true`, so a Red Alert sound that replaces the event plays with volume 1.0, no pitch spread and the default voice cap, **not** with the bank's volume, pitch spread and `max_instances`, which are tuned for the CC0 file. Without that flag `resolve` would give a mapped original the bank entry's 0.125 to 0.35 and its cap. Other bank entries (`ui.click`) keep handing their volume and category to a mapped original as before. Test `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` checks the resolved definition and the traced gain of all 18 (mapped: volume 1.0, pitch spread 0, cap 8; unmapped: the bank's).
+* **Format**: mono, 16-bit, 22.05 kHz WAV, 30 files (18 events; six of them have three files each, "Variants" below), 1,015,612 bytes
+  together (571,926 before WP11.3c; budget 2 MB, `every_file_is_a_loud_unclipped_mono_wav_of_its_length_and_all_stay_in_budget`; the largest file is
+  `explosion_large.wav`, 105,884 bytes, the smallest `impact_bullet*.wav`, 11,068). Every file is normalised to the same
+  peak (26000 of 32767), so **the loudness of an event is its bank `volume`** (0.5 to 1.0 since WP11.3c, was 0.125 to 0.35), not the file (a frame of many is capped by the limiter, below).
+* **A mapped original plays as it did before this WP** (sweep of PR #122): the 18 bank entries carry `original_as_is: true`, so a Red Alert sound that replaces the event plays with volume 1.0, no pitch spread and the default voice cap, **not** with the bank's volume, pitch spread and `max_instances`, which are tuned for the CC0 file. Without that flag `resolve` would give a mapped original the bank entry's 0.5 to 1.0 (0.125 to 0.35 before WP11.3c) and its cap, and its variants. Other bank entries (`ui.click`) keep handing their volume and category to a mapped original as before. Test `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` checks the resolved definition and the traced gain of all 18 (mapped: volume 1.0, pitch spread 0, cap 8; unmapped: the bank's).
 * **Precedence**: unchanged, `AudioSystem::resolve`: with the original audio on and the event mapped in `ra_mapping.ron` the Red Alert
   sound plays (with the bank's volume and category, unless the entry is `original_as_is`, as all 18 fight entries are), otherwise the CC0 sound. The four events Red Alert has no sound for
   (`weapon.fire.demolition`, `impact.bullet`, `impact.precision`, `impact.miss`) play the CC0 sound also with `--ra-audio`.
-* **Volume**: the mixed peak of a 20-tank fight at the default settings is 0.466 of full scale, below the music (`music_volume`
-  0.6; since WP11.4b the combat track peaks at 0.53 there, section 3d); 0.466 is asserted by `the_limiter_leaves_the_20_tank_fights_as_they_were`, and `a_20_tank_fight_is_not_louder_than_the_music` asserts 0.15 to 0.5. The positional and zoom rules (section 1 and 2) and the
-  Effects and master sliders apply to these sounds like to any other.
-* **The limiter** (WP11.3b follow-up, `FxSound::start_cues`): the planned playbacks of one frame are summed (bank volume x category x master x spatial gain, `AudioSystem::gain_at`); above `positional.max_summed_gain` (`audio.ron`, 1.2) all of them are turned down by the same factor (`max_summed_gain / sum`, `play_at_scaled`), a quieter frame plays unchanged, and a mapped original sound is neither counted nor turned down (`a_mapped_original_is_not_counted_and_not_turned_down`, with a fixture install made from our own encoder). Measured peaks (`a_heavy_moment_does_not_clip`, which also switches the limiter off to show the old numbers): eight kinds on one tick at one spot 1.13 before and 0.582 now, all 18 kinds 1.37 before and 0.384 now (the test asserts only that both stay at or below 1.0 and the before numbers; 0.582 and 0.384 are printed, measured 14-11-2026); four kinds 0.485 (asserted), the staggered 20-tank fight 0.466 (`the_limiter_leaves_the_20_tank_fights_as_they_were`) and the simultaneous volley 0.238 (asserted, `a_simultaneous_volley_of_20_tanks_is_not_louder_than_the_music`) are below the limit and unchanged. The limits of the rule are in section 4.
+* **Power (WP11.3c).** Tijmen compared these sounds with the Red Alert originals (switch "Use original audio" in the sandbox fight) on
+  15-11-2026: "geluid alles duidelijk zwakker. meer power er in". Two things made them weak: the bank volumes (0.125 to 0.35, where an original plays at 1.0)
+  and thin files (a falling sine and filtered noise with no body). Now (a) every recipe has a **sub thump** under its body, a harder first 12 ms (a click
+  of full-band noise with no attack), a **rumble** under every boom and, on the loud ones, one to three **slap echoes** (`Mix::slap`, a low-passed copy of the sound 75 to 520 ms later),
+  longer files (cannon 0.6 -> 0.8 s, howitzer 1.0 -> 1.3 s, large explosion 2.0 -> 2.4 s); (b) **soft saturation** of the sum (`Mix::drive`: scale to 1.4 to 3.2 times full scale, then a
+  cubic soft clip, then back to the file peak), which raises the RMS at the same peak: every file's RMS rose from 2,644-5,737 to 6,569-9,327
+  (`every_file_has_power_rms_and_low_end`: RMS >= 6,000 and RMS below 250 Hz >= 4,000 for all 30); (c) the volumes went toward the original's 1.0. Still integer maths, the files deterministic and committed.
+  The numbers, measured 18-11-2026 (the RMS is of the whole file, 16-bit units; the last column is the change of RMS x volume, the loudness of a single sound):
+
+| Event | old volume | new volume | file RMS old | file RMS new | RMS x volume, change |
+|---|---|---|---|---|---|
+| `weapon.fire.bullet` | 0.225 | 0.7 | 2644 | 6838 | +18.1 dB |
+| `weapon.fire.precision` | 0.3 | 0.85 | 2891 | 9326 | +19.2 dB |
+| `weapon.fire.cannon` | 0.3 | 0.95 | 4394 | 8287 | +15.5 dB |
+| `weapon.fire.rocket` | 0.275 | 0.85 | 4377 | 9082 | +16.1 dB |
+| `weapon.fire.shell` | 0.275 | 0.85 | 3025 | 7173 | +17.3 dB |
+| `weapon.fire.howitzer` | 0.325 | 1.0 | 4795 | 8755 | +15.0 dB |
+| `weapon.fire.demolition` | 0.25 | 0.8 | 4244 | 6962 | +14.4 dB |
+| `impact.bullet` | 0.15 | 0.55 | 2928 | 7412 | +19.4 dB |
+| `impact.precision` | 0.175 | 0.7 | 3163 | 8024 | +20.1 dB |
+| `impact.cannon` | 0.25 | 0.85 | 3916 | 7117 | +15.8 dB |
+| `impact.rocket` | 0.275 | 0.9 | 3816 | 8247 | +17.0 dB |
+| `impact.shell` | 0.25 | 0.85 | 3557 | 8069 | +17.7 dB |
+| `impact.demolition` | 0.3 | 1.0 | 4704 | 8522 | +15.6 dB |
+| `impact.miss` | 0.125 | 0.5 | 5737 | 7791 | +14.7 dB |
+| `unit.destroyed.infantry` | 0.2 | 0.7 | 3433 | 8222 | +18.5 dB |
+| `explosion.small` | 0.25 | 0.8 | 3861 | 6698 | +14.9 dB |
+| `explosion.medium` | 0.3 | 0.95 | 4328 | 7246 | +14.5 dB |
+| `explosion.large` | 0.35 | 1.0 | 3721 | 7288 | +15.0 dB |
+
+  A single sound is now 15 to 20 dB louder in RMS and its peak at the focus is 0.40 to 0.79 of full scale (was 0.10 to 0.28), close to a full-scale original; the loudest
+  single sound, `weapon.fire.howitzer`, peaks at 0.793. `every_fight_event_alone_is_audible_and_modest` asserts 0.35 to 0.80 for all 18.
+* **Volume against the music (WP11.3c, restates the rule of WP11.3b/11.4b).** The old rule was fight peak <= 0.5 against a combat music peak of 0.531 (about 1 dB of headroom,
+  no room to get louder). The music is a steady wall (RMS 0.168 at the default settings: the combat track's RMS 9,158 of 32,768, pinned in `sf_music_gen`
+  `RMS_AFTER`, times bank volume 1.0 times `music_volume` 0.6), the fight is bursts, so peak against peak says little. The rule is now:
+  **the 20-tank fight (`tank_fight`, ten seconds) has an RMS, measured over the time it sounds, of at most the music's and at least half of it, and peaks at most 0.85 of full scale**
+  (`a_20_tank_fight_is_not_louder_than_the_music`, `FIGHT_PEAK_CEILING`). Measured with the shipped files and limiter:
+
+  | | peak | RMS (while it sounds) | RMS against the music's 0.168 |
+  |---|---|---|---|
+  | 20-tank fight, before WP11.3c (volumes 0.125-0.35, per-frame limiter only) | 0.466 | 0.105 | 0.63 |
+  | 20-tank fight, after | 0.805 | 0.130 | 0.78 |
+  | simultaneous 20-tank volley, after (the artificial worst case, bound: RMS <= 1.5 x the music's) | 0.782 | 0.222 | 1.32 |
+  | the same fight with only the per-frame limiter (the time-aware part off) | 2.180 | not measured | not measured |
+  | the same fight with no limiter at all | 2.575 | not measured | not measured |
+
+  So the dense fight is held by the limiter below, which is why its RMS rose only 1.9 dB while a single shot rose by 15 to 20 dB: **a lone cannon is now loud, a 20-tank fight is a wall
+  held at the ceiling, never quieter than the music's half and never louder than the music**. Other ordinary fights lie between these. What the rule does not guarantee: the **sum of
+  the fight and the music** is not limited anywhere (the engine mixes them as they come; `play`/`play_as` and the music were never limited, section 4), so a fight peak (0.805) that falls on a
+  music peak (0.531) can exceed 1.0; the music's RMS is 0.168, its crest about 3.2, so this is a coincidence of two peaks, not a measured clip. Not measured with the music decoded
+  and mixed; that needs a live run. The music side of the rule is guarded only by the pins (bank volume 1.0, `music_volume` 0.6, the RMS literal and `sf_music_gen`'s pin of the file RMS): change one and the test must be looked at again.
+* **Unit voices and announcements** (WP11.2b/c) were not made louder (bank volume 0.35, peak 0.278, RMS 0.055 to 0.090), so against the louder fight they are relatively quieter.
+  `the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound` is **restated**: the voice's RMS must be at least 0.35 of the 20-tank fight's RMS (was 0.5, measured
+  now 0.42 to 0.69: the quietest line, `unit_attack_engaging`, 0.055 against the fight's 0.130) and at least 0.15 of the loudest single fight sound's RMS (was "above it": the howitzer's RMS is 0.268, the voices' 0.055 to 0.090, so the old rule
+  cannot hold with sounds at the original's level); the peak rule (a voice peaks no higher than the loudest fight sound alone) is unchanged. The reason for accepting a lower ratio is
+  that the voice is speech in a band of about 300 Hz to 3 kHz and the fight sounds sit mostly below 300 Hz (RMS below 250 Hz is 61 to 95% of every fight file's RMS), which is an argument, not a
+  listening result. If the voices prove too quiet in the sandbox fight, the fix is the `volume` of the voice and announcement entries (one number each, 0.35 now); not done here because PR #156 (voices per side) is editing those entries.
+* **The limiter** has two parts (`FxSound::start_cues`; numbers in `audio.ron` `positional`). (1) **Per frame** (WP11.3b follow-up): the planned playbacks of one frame are summed (bank volume x category x master x spatial gain, `AudioSystem::gain_at`); above `max_summed_gain` all of them are turned down by the same factor (`play_at_scaled`). (2) **Over time** (WP11.3c): the gains started so far fade with a half-life of `load_half_life_ticks` into a *load*, by the sim ticks of the cues, and a frame is turned down further so that the load stays at or below `max_load_gain`; the load limit is what holds frames that overlap in time. Both numbers are 1.0 (the per-frame one was 1.2; a file peaks at 0.79, so 1.0 keeps one frame under 0.79) and the half-life is 6 ticks (0.3 s, about how fast the tails of the files fall to a third); `the_shipped_audio_ron_is_these_numbers` pins them and the range checks refuse 0, NaN, over 4 and a half-life outside 0.5 to 200. A quiet fight plays unchanged, a mapped original sound is neither counted nor turned down (`a_mapped_original_is_not_counted_and_not_turned_down`, with a fixture install made from our own encoder). Tests: `the_load_limiter_fades_with_its_half_life` (load 1.0 after a cue, 0.5 six ticks later, no room on the same tick, fully faded after 400 ticks, `reset` forgets), `the_limiter_holds_the_20_tank_fight_below_full_scale` (peak 0.805 against 2.180 with only the per-frame bound, so the time-aware part is what prevents the clipping), `a_heavy_moment_does_not_clip` (four kinds 0.633, eight kinds 0.623, all 18 kinds 0.577 with the shipped limiter against 2.505, 4.654 and 7.928 without, repeated four times 10 ticks apart). The limits of the rule are in section 4. The 1.2 of WP11.3b with the old volumes also left the per-frame bound alone enough, because no sound was loud; with the new volumes it is not (the same fight clips at 2.18).
+
 * **Hidden events are audible** (current rule, `fog_look.md`): the audio plays `FxPlayer::shown()`, so a shot or an explosion in the shroud is heard at its distance volume, and with these sounds that is now true in the shipped game. Tijmen may change this ("no sound from what I cannot see"); it is a design choice, not a defect.
+
+### Variants and the six redesigned sounds (WP11.3c)
+
+Tijmen on 15 and 16-11-2026: "de unit destroyed, weapon fire demolition, impact bullet en impact precision en impact miss moeten heel anders", "impact precision moet anders",
+"unit destroyed ook", "fire bullet moet overtuigender". Six events got new recipes and **three files each**, played through the bank's `variants` (each play picks one of `file` and `variants`,
+never the one before; `pick_variant`, tests `pick_variant_takes_any_but_the_last_one` and, for these six through the game's `play_at`, `the_six_redesigned_sounds_play_their_variants_and_never_repeat`):
+
+| Event | Files (first is `file`) | What it is |
+|---|---|---|
+| `unit.destroyed.infantry` | `unit_destroyed_infantry.wav`, `_shout`, `_grunt` | a short, rough, **synthesised** pain cry (a glided sawtooth, two formants, slow-noise roughness, saturation; no Piper, no voice data, no speech) then the body falling (thud and sub) and gear (three metal ticks and a rattle): a falling cry, a rising shout cut short, a low grunt |
+| `weapon.fire.demolition` | `weapon_fire_demolition.wav`, `_drop`, `_slow` | a heavy satchel set down (thud and canvas), a metal clunk (two tones that do not fit, a tick) and a second small clunk, then a fuse hiss with sparks; dropped from higher, or a lower thud and a longer fuse |
+| `impact.bullet` | `impact_bullet.wav`, `_metal`, `_ricochet` | a dry thwack (noise, a thump, a sub) with falling debris grains: into dirt, into metal (a dull ring), and with a short rough ricochet whine |
+| `impact.precision` | `impact_precision.wav`, `_deep`, `_slap` | a sharp crack and a heavy thud, nothing tonal above 300 Hz (**no ping**); a bigger thud with a low tail; a slap back |
+| `impact.miss` | `impact_miss.wav`, `_far`, `_skip` | a whiz-by that brightens up to a crack as it passes and darkens after it, then a puff of dirt: close, farther (softer crack, longer whiz), close with a bigger puff |
+| `weapon.fire.bullet` | `weapon_fire_bullet.wav`, `_mg`, `_heavy` | a sharp report with body, a muzzle blast with low end (a thump and a sub), a mechanical action click and a short outdoor slap: rifle, three quick machine-gun reports, a heavy rifle |
+
+Nothing here is made to imitate a specific game's sound (B11) and nothing was listened to by the author: the table says what each should sound like, and the checks are measurements
+(RMS, low end, a spectral peak test for the ping, the band energy of the cry). Measured: the three infantry files have 6,492 to 9,942 RMS between 300 Hz and 2 kHz in their first 150 ms, the old one 3,251;
+the old `impact.precision` had a spectral peak-to-mean of 29.2 over 800 Hz to 4 kHz, the new three 11.5, 6.9 and 6.3 (the test's limit is 16). A variant file that is a copy of another fails
+`the_six_redesigned_sounds_have_exactly_these_variants_...` (three different hashes). The pitch spread of the entry applies to every variant. **With `--ra-audio`** a mapped original plays as-is (volume 1.0, no pitch spread, the default cap, **and none of the variants**);
+of the six, `weapon.fire.bullet` and `unit.destroyed.infantry` are mapped, the other four have no Red Alert sound and always play ours.
 
 | Event | File | Length | Character |
 |---|---|---|---|
-| `weapon.fire.bullet` | `weapon_fire_bullet.wav` | 0.25 s | dry, sharp crack with a short low thump |
-| `weapon.fire.precision` | `weapon_fire_precision.wav` | 0.5 s | harder crack, a body and two soft echoes |
-| `weapon.fire.cannon` | `weapon_fire_cannon.wav` | 0.6 s | deep boom (150 to 40 Hz) with a rumble and a small crack |
-| `weapon.fire.rocket` | `weapon_fire_rocket.wav` | 0.9 s | pop, then a swelling whoosh that dies away |
-| `weapon.fire.shell` | `weapon_fire_shell.wav` | 0.5 s | mid-pitched thump (220 to 75 Hz), shorter than the cannon |
-| `weapon.fire.howitzer` | `weapon_fire_howitzer.wav` | 1 s | very deep, long boom (100 to 28 Hz) and a low echo |
-| `weapon.fire.demolition` | `weapon_fire_demolition.wav` | 0.45 s | two ticks and a rising beep: a charge being set |
-| `impact.bullet` | `impact_bullet.wav` | 0.15 s | very short tick with a high ping |
-| `impact.precision` | `impact_precision.wav` | 0.25 s | ping (1.1 kHz falling) over a dull thud |
-| `impact.cannon` | `impact_cannon.wav` | 0.7 s | small blast: low body, noise and a crack |
-| `impact.rocket` | `impact_rocket.wav` | 0.9 s | bigger blast with a rumbling tail |
-| `impact.shell` | `impact_shell.wav` | 0.6 s | medium blast, shorter and higher than the rocket's |
-| `impact.demolition` | `impact_demolition.wav` | 1.2 s | heavy blast (80 to 25 Hz) with a long rumble |
-| `impact.miss` | `impact_miss.wav` | 0.3 s | thin falling zing (2.6 kHz to 900 Hz): a near miss |
-| `unit.destroyed.infantry` | `unit_destroyed_infantry.wav` | 0.5 s | dull thud and a rattle with a faint falling tone |
-| `explosion.small` | `explosion_small.wav` | 0.8 s | small explosion, no tail |
-| `explosion.medium` | `explosion_medium.wav` | 1.2 s | medium explosion with a rumbling tail |
-| `explosion.large` | `explosion_large.wav` | 2 s | large explosion (80 to 26 Hz), long rumble |
+| `weapon.fire.bullet` | `weapon_fire_bullet.wav` | 0.45 s | rifle: sharp report, muzzle blast with low end, action click, outdoor slap |
+| `weapon.fire.bullet` | `weapon_fire_bullet_mg.wav` | 0.5 s | machine gun: three quick reports, each with body, click and slap |
+| `weapon.fire.bullet` | `weapon_fire_bullet_heavy.wav` | 0.5 s | heavy rifle: a lower, harder report with more body |
+| `weapon.fire.precision` | `weapon_fire_precision.wav` | 0.6 s | harder crack, a heavy body and two echoes |
+| `weapon.fire.cannon` | `weapon_fire_cannon.wav` | 0.8 s | deep boom (150 to 40 Hz) with sub, rumble, crack and a slap echo |
+| `weapon.fire.rocket` | `weapon_fire_rocket.wav` | 1 s | pop, then a swelling whoosh with a low body that dies away |
+| `weapon.fire.shell` | `weapon_fire_shell.wav` | 0.65 s | mid-pitched thump (220 to 75 Hz) with sub and echo, shorter than the cannon |
+| `weapon.fire.howitzer` | `weapon_fire_howitzer.wav` | 1.3 s | very deep, long boom (100 to 28 Hz), a sub and three low echoes |
+| `weapon.fire.demolition` | `weapon_fire_demolition.wav` | 0.8 s | a heavy satchel set down, a metal clunk, then a fuse hiss with sparks |
+| `weapon.fire.demolition` | `weapon_fire_demolition_drop.wav` | 0.8 s | the satchel dropped from higher: a harder thud, an early second clunk, a fuse hiss |
+| `weapon.fire.demolition` | `weapon_fire_demolition_slow.wav` | 1 s | a lower thud, a clunk, a slower and longer fuse |
+| `impact.bullet` | `impact_bullet.wav` | 0.25 s | dry thwack into dirt, with falling debris |
+| `impact.bullet` | `impact_bullet_metal.wav` | 0.25 s | a sharper thwack into metal with a dull ring and a few bits |
+| `impact.bullet` | `impact_bullet_ricochet.wav` | 0.25 s | thwack, debris and a short rough ricochet whine |
+| `impact.precision` | `impact_precision.wav` | 0.4 s | a sharp crack and a heavy thud, nothing tonal above 300 Hz |
+| `impact.precision` | `impact_precision_deep.wav` | 0.5 s | a crack and a bigger, deeper thud with a low tail |
+| `impact.precision` | `impact_precision_slap.wav` | 0.5 s | a crack, a thud and a slap back |
+| `impact.cannon` | `impact_cannon.wav` | 0.9 s | blast: low body, sub, noise, crack and a tail |
+| `impact.rocket` | `impact_rocket.wav` | 1.1 s | bigger blast with a long rumbling tail |
+| `impact.shell` | `impact_shell.wav` | 0.75 s | medium blast, shorter and higher than the rocket's |
+| `impact.demolition` | `impact_demolition.wav` | 1.5 s | heavy blast (80 to 25 Hz) with a sub and a long rumble |
+| `impact.miss` | `impact_miss.wav` | 0.4 s | whiz-by that cracks as it passes, then a puff of dirt |
+| `impact.miss` | `impact_miss_far.wav` | 0.45 s | a farther pass: a longer whiz, a softer crack, a puff |
+| `impact.miss` | `impact_miss_skip.wav` | 0.45 s | a close pass with a bigger puff of dirt |
+| `unit.destroyed.infantry` | `unit_destroyed_infantry.wav` | 0.7 s | a rough falling pain cry, then the body falls and gear rattles |
+| `unit.destroyed.infantry` | `unit_destroyed_infantry_shout.wav` | 0.6 s | a short rising shout cut off, a fall, gear |
+| `unit.destroyed.infantry` | `unit_destroyed_infantry_grunt.wav` | 0.7 s | a low grunt, a heavy fall, gear |
+| `explosion.small` | `explosion_small.wav` | 1 s | small explosion with sub and a short tail |
+| `explosion.medium` | `explosion_medium.wav` | 1.5 s | medium explosion with a rumbling tail and echo |
+| `explosion.large` | `explosion_large.wav` | 2.4 s | large explosion (80 to 26 Hz), sub, long rumble and echoes |
 
 Tests: `sf_sound_gen` `tests/generator.rs` (determinism and a pinned length and hash per file, the committed files equal a fresh run,
-each file loud, unclipped, the right length, under budget, each event's bank entry points at its file); `sf_game` `fx_sound::tests`
+each file loud, unclipped, the right length, under budget, each event's bank entry points at its first file and lists the rest as `variants`, `every_file_has_power_rms_and_low_end`, `impact_precision_has_no_ping_in_any_variant`, `the_infantry_death_starts_with_a_cry`, `the_six_redesigned_sounds_have_exactly_these_variants_and_nothing_else_has_any`); `sf_game` `fx_sound::tests`
 `every_fight_event_has_a_non_silent_cc0_sound_in_the_shipped_bank` (literal event to file list, volume, the game's own `has_sound`
-and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_audio` `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise`.
+and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_game` `the_six_redesigned_sounds_play_their_variants_and_never_repeat`; `sf_audio` `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` (now also: a mapped original has no variants).
 
 ## 4. Gaps
 
-* Clipping (limiter, rule in section 3c): it works per frame, so frames that overlap in time are not limited together (the test frames are 10 ticks apart; the sim runs at 20 ticks a second and a file lasts up to 2 s, 40 ticks, so up to four frames overlap; the measured peaks do include that overlap because the mix is summed over time, but nothing proves a real fight stays below 1.0); the summed gain counts a cue that the voice cap (`max_instances`) later drops, so a frame can be turned down more than needed; `play`/`play_as` (UI, voices, announcements, the settings test sounds) and the music are not limited; the whole frame is turned down, not only the excess, so all 18 kinds come out quieter (0.384) than eight (0.582); a mapped original sound is not counted, so it can still add to a loud frame; it is not known whether anybody has heard it act (the sandbox fight Tijmen listened to on 12-11-2026 does not show whether it turned a frame down, and nothing counts that: `progress.md`, WP11.3b notes).
-* Fight sounds (WP11.3b): the bank has one file per event, no variants (the bank format has one file per name), so the only
-  variety is `pitch_variation`. The volumes come from a measured mix, the character of each sound from the table in 3c above.
+* Clipping (limiter, rule in section 3c): since WP11.3c the limiter also looks back in time (the load), so frames that overlap are limited together, but it works on **gains, not on the samples**: the load is the sum of gains of what started, faded with one half-life for every sound, while a file's tail fades at its own speed, so it is a model; the 20-tank fight, the heavy moments and the volley are measured against the real files (peaks 0.58 to 0.81), a real fight is not. The summed gain counts a cue that the voice cap (`max_instances`) later drops, so a frame can be turned down more than needed; a dense fight is turned down hard (by how much per cue was not measured; one frame of all 18 kinds is turned down by a factor of 0.074); `play`/`play_as` (UI, voices, announcements, the settings test sounds) and the music are not limited and **the fight and the music are not limited together** (section 3c, "Volume against the music"); a mapped original sound is not counted, so it can still add to a loud frame; it is not known whether anybody has heard the limiter act (the sandbox fight Tijmen listened to on 12-11-2026 does not show whether it turned a frame down, and nothing counts that: `progress.md`, WP11.3b notes).
+* Fight sounds (WP11.3b, WP11.3c): twelve events still have one file, so their only
+  variety is `pitch_variation`; six have three files since WP11.3c (the variants above). Not heard by the author (WP11.3c): the new files and volumes await Tijmen's comparison with the Red Alert originals in the sandbox fight; the redesigned six are a first try to the verdicts quoted above, not a result. The volumes come from a measured mix, the character of each sound from the table in 3c above.
   Tijmen listened on 12-11-2026 in `sf_game --sandbox --fight` without `--ra-audio` and judged the sounds good (`progress.md`, WP11.3b
   notes). Still open: `weapon.fire.demolition` (two ticks and a rising beep), for any likeness to a Red Alert sound (B11); that fight
   has one demolition team, so it can have played, but the summary does not show whether it did. The sim has no event for a structure being hit, so there is no such sound.
