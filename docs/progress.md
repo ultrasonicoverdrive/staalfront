@@ -3609,6 +3609,10 @@ What it does not settle:
   is gone; 13.1c must bring it back with a bound once saves can follow a map change), and its
   memory may name only portals that exist; the abstract search's nearest node must be current.
   Cases from real worlds (`every_impossible_job_state_is_corrupt`), mutations of each rule.
+* Fix round 4 (18-11-2026): the checks that read the unit's route (the search rectangle, the
+  same-sector leg) apply only to a job its route still belongs to (`Job::owns`: its ticket, Wanted
+  or Active). An arrival, a formation or a replan after the service may reset that route; the next
+  service drops the job unread, so the save is valid (`a_job_whose_route_was_reset_restores`).
 * Known gap: in-flight search memory is checked for structure and for fitting the rectangle its stage
   searches, not for being exactly that search. A formation may list a member that left it this tick
   (pruned on the next tick); restore accepts that.

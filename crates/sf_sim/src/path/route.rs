@@ -328,6 +328,11 @@ impl Routes {
         self.0.len()
     }
 
+    /// The route of slot `i`, if the slot has one.
+    pub fn get(&self, i: usize) -> Option<&Route> {
+        self.0.get(i)
+    }
+
     /// Makes slot `i` idle (no growth).
     pub fn reset(&mut self, i: usize) {
         if let Some(r) = self.0.get_mut(i) {

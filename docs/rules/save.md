@@ -287,6 +287,13 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   The job that reached its goal in its own sector (Smooth, not a Refill, no abstract search) must
   smooth a leg that ends its route: no abstract path, not cut short, the raw route ending on the
   route's goal: "a job's leg does not end its route".
+  The two checks that read the unit's route (the rectangle of a Refine leg and this one) apply
+  only to a job its route still belongs to (`Job::owns`: the route has the job's ticket and is
+  Wanted or Active). After the service an arrival (`orders`), a formation (`forget_way`) or a
+  stuck replan may reset or re-ticket the route while the job stays; the next service drops that
+  job unread (`Job::run`), so its save is valid (`a_job_whose_route_was_reset_restores`). The
+  stage rules, the epoch rule and the portal checks apply to every job; the portal checks rest on
+  the epoch rule (see *Epoch* above, for WP13.1c).
 * **Formations**: the serial counter at 0, a formation numbered 0 or twice, `turn_wait` at or above
   the longest turn period (40), `patience` above the setting, `loose` above 20 (`LOOSE_TICKS`),
   members not strictly ascending or not slots, a leader that is not a member, a slot whose `form`

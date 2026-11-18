@@ -985,3 +985,29 @@ fn a_refill_job_carries_links_it_never_reads() {
         back.step();
     }
 }
+
+/// After the service ran, an arrival resets the unit's route (`orders`) while its job stays; the
+/// next service drops the job unread. Such a save restores and runs on as the original.
+#[test]
+fn a_job_whose_route_was_reset_restores() {
+    for (name, world) in [
+        (
+            "refine",
+            (|| job_in(moving(fresh()), REFINE, FRESH, true)) as fn() -> World,
+        ),
+        ("same-sector smooth", || {
+            job_in(same_sector_goals(), SMOOTH, FRESH, false)
+        }),
+    ] {
+        let mut w = world();
+        let slot = w.pathing.job_slot_for_test();
+        w.entities.route.reset(slot);
+        let mut back =
+            World::restore(fresh(), &w.save().unwrap()).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        for t in 1..=60 {
+            w.step();
+            back.step();
+            assert_eq!(back.checksum(), w.checksum(), "{name}: tick {t}");
+        }
+    }
+}

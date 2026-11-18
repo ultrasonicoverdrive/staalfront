@@ -419,6 +419,13 @@ impl Job {
         self.slot == slot && self.ticket == ticket
     }
 
+    /// Whether `route` (the route of the unit in `slot`) still belongs to this job: its request
+    /// and still wanted. [`Job::run`] drops a job that fails this, unread.
+    pub(crate) fn owns(&self, slot: u32, route: &Route) -> bool {
+        self.is_for(slot, route.ticket)
+            && matches!(route.state, RouteState::Wanted | RouteState::Active)
+    }
+
     /// The epoch of the graph the job began in.
     pub fn epoch(&self) -> u32 {
         self.epoch
@@ -434,9 +441,7 @@ impl Job {
         rem: &mut u32,
         epoch: u32,
     ) -> Progress {
-        if route.ticket != self.ticket
-            || !matches!(route.state, RouteState::Wanted | RouteState::Active)
-        {
+        if !self.owns(self.slot, route) {
             return Progress::Dropped;
         }
         if self.epoch != epoch {
@@ -1595,8 +1600,15 @@ impl Job {
     /// cell. In ConnectGoal only the start links are this job's already. Without the abstract
     /// search begun, a job may carry an earlier job's links, and reads none of them: a Refill job
     /// refines its route, and the job that reached its goal in its own sector (saved only in
-    /// Smooth) must have a leg that ends that route.
-    pub(crate) fn memory_fits(&self, g: &ClassGraph, route: &Route, work: &Work) -> SaveResult<()> {
+    /// Smooth) must have a leg that ends that route. `route` is `None` when the unit's route no
+    /// longer belongs to the job ([`Job::owns`]): that job is dropped unread, so its leg is not
+    /// judged; its portals are.
+    pub(crate) fn memory_fits(
+        &self,
+        g: &ClassGraph,
+        route: Option<&Route>,
+        work: &Work,
+    ) -> SaveResult<()> {
         let exists = |n: u32| {
             g.sector
                 .get(node_sector(n) as usize)
@@ -1616,6 +1628,9 @@ impl Job {
         )?;
         let shortcut =
             self.phase == Phase::Smooth && self.mode != Mode::Refill && !self.abs_started;
+        let Some(route) = route else {
+            return Ok(());
+        };
         ensure(
             !shortcut
                 || (route.abs_len() == 0

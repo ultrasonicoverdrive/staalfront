@@ -500,6 +500,12 @@ impl Pathing {
         self.job.as_ref().map(Job::shape_for_test)
     }
 
+    /// The slot of the unit whose job is in flight (save tests).
+    #[cfg(test)]
+    pub(crate) fn job_slot_for_test(&self) -> usize {
+        self.job.as_ref().expect("a job in flight").slot as usize
+    }
+
     /// Breaks the job in flight as [`Job`]'s case `what` (save tests).
     #[cfg(test)]
     pub(crate) fn corrupt_job_for_test(&mut self, what: u8) {
@@ -551,11 +557,20 @@ impl Pathing {
         // The job is of the service's epoch (`Pathing::restore`), so the rebuilt graph is the one
         // its memory was made on.
         if let Some(job) = self.job.as_ref() {
-            let (g, route) = (&self.graphs[job.graph], &e.route[job.slot as usize]);
-            crate::save::ensure(
-                job.search_fits(g, route, &self.work),
-                "a job's search does not fit its stage",
-            )?;
+            let g = &self.graphs[job.graph];
+            // After the service ran, an arrival, a formation or a replan may have reset or
+            // re-ticketed the unit's route; the next service drops such a job unread
+            // (`Job::run`), so only a job its route still belongs to is judged against it.
+            let route = e
+                .route
+                .get(job.slot as usize)
+                .filter(|r| job.owns(job.slot, r));
+            if let Some(route) = route {
+                crate::save::ensure(
+                    job.search_fits(g, route, &self.work),
+                    "a job's search does not fit its stage",
+                )?;
+            }
             job.memory_fits(g, route, &self.work)?;
         }
         if let (Some(c), Some(s)) = (&self.fields.cur, &self.fields.scratch) {
