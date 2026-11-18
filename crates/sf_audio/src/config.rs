@@ -96,6 +96,14 @@ pub struct MixConfig {
     pub voice_volume: Option<f32>,
 }
 
+fn default_max_load_gain() -> f32 {
+    1.0
+}
+
+fn default_load_half_life_ticks() -> f32 {
+    6.0
+}
+
 fn one() -> f32 {
     1.0
 }
@@ -136,6 +144,16 @@ pub struct PositionalConfig {
     /// (`FxSound::start_cues`), so a heavy moment does not clip; a frame below it plays unchanged. The
     /// bound holds per frame only: playbacks of frames that overlap in time are not limited together.
     pub max_summed_gain: f32,
+    /// The time-aware part of the limiter (WP11.3c): the "load" is the gains of the playbacks of the last
+    /// moments, each fading with the half-life below; a new frame is turned down so that the load stays at
+    /// or below this (`FxSound::start_cues`). It is what keeps a long, dense fight from clipping when the
+    /// sounds overlap in time, which the per-frame bound cannot. In full-scale units like `max_summed_gain`.
+    #[serde(default = "default_max_load_gain")]
+    pub max_load_gain: f32,
+    /// Half-life of the load, in sim ticks (20 a second). The tails of the fight sounds fall to a third in
+    /// 0.1 to 0.5 s, so a few ticks.
+    #[serde(default = "default_load_half_life_ticks")]
+    pub load_half_life_ticks: f32,
     /// The rule of an event that no entry of `events` covers.
     pub fallback: EventRule,
     /// Rules by event name. A rule for `weapon.fire` covers `weapon.fire.bullet`
@@ -288,6 +306,15 @@ impl AudioConfig {
         if !(p.max_summed_gain.is_finite() && p.max_summed_gain > 0.0 && p.max_summed_gain <= 4.0) {
             return Err("positional.max_summed_gain must be in (0, 4]".into());
         }
+        if !(p.max_load_gain.is_finite() && p.max_load_gain > 0.0 && p.max_load_gain <= 4.0) {
+            return Err("positional.max_load_gain must be in (0, 4]".into());
+        }
+        if !(p.load_half_life_ticks.is_finite()
+            && p.load_half_life_ticks >= 0.5
+            && p.load_half_life_ticks <= 200.0)
+        {
+            return Err("positional.load_half_life_ticks must be in [0.5, 200]".into());
+        }
         check_rule("positional.fallback", &p.fallback)?;
         for (name, rule) in &p.events {
             let ok = !name.is_empty()
@@ -429,7 +456,9 @@ mod tests {
         assert_eq!(c.music.fallback.combat.as_deref(), Some("music.combat"));
         let p = &c.positional;
         assert_eq!(p.max_cues_per_frame, 16);
-        assert_eq!(p.max_summed_gain, 1.2);
+        assert_eq!(p.max_summed_gain, 1.0);
+        assert_eq!(p.max_load_gain, 1.0);
+        assert_eq!(p.load_half_life_ticks, 6.0);
         assert_eq!(p.fallback, rule(1, 3, 1, 6, 6.0));
         let want: Vec<(&str, EventRule)> = vec![
             ("explosion", rule(4, 3, 1, 6, 10.0)),
@@ -522,6 +551,20 @@ mod tests {
             ("cap", Box::new(|c| c.positional.max_cues_per_frame = 0)),
             ("sum0", Box::new(|c| c.positional.max_summed_gain = 0.0)),
             ("sum5", Box::new(|c| c.positional.max_summed_gain = 5.0)),
+            ("load0", Box::new(|c| c.positional.max_load_gain = 0.0)),
+            ("load5", Box::new(|c| c.positional.max_load_gain = 5.0)),
+            (
+                "loadnan",
+                Box::new(|c| c.positional.max_load_gain = f32::NAN),
+            ),
+            (
+                "half0",
+                Box::new(|c| c.positional.load_half_life_ticks = 0.0),
+            ),
+            (
+                "half999",
+                Box::new(|c| c.positional.load_half_life_ticks = 999.0),
+            ),
             (
                 "sumnan",
                 Box::new(|c| c.positional.max_summed_gain = f32::NAN),

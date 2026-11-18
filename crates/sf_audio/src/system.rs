@@ -1396,6 +1396,8 @@ mod tests {
                     (1.0, 0.0, crate::bank::DEFAULT_MAX_INSTANCES),
                     "{e}"
                 );
+                // And none of the CC0 entry's variants (WP11.3c) come with it.
+                assert!(def.variants.is_empty(), "{e}");
             }
             s.play(e);
             let gain = s.take_trace().last().unwrap().gain;

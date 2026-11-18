@@ -141,14 +141,21 @@
     // The bank's `max_instances` still caps the voices alive at once.
     positional: (
         max_cues_per_frame: 16,
-        // The limiter (follow-up of WP11.3b): what the playbacks of one frame may add up to, each counted
-        // as bank volume x category volume x master volume x spatial gain (so at a lower master or
+        // The limiter (follow-up of WP11.3b, WP11.3c): what the playbacks of one frame may add up to, each
+        // counted as bank volume x category volume x master volume x spatial gain (so at a lower master or
         // Effects slider it engages later in terms of the sounds, not sooner). Above it the frame's cues
         // are all turned down by the same factor; below it nothing changes. A file peaks at 0.79 of full
-        // scale, so 1.2 keeps ONE frame under 0.95 even if all its peaks met. It holds per frame only:
-        // frames that overlap in time (a file lasts up to 2 s, 40 ticks) are not limited together.
-        // Mapped original sounds are neither counted nor turned down.
-        max_summed_gain: 1.2,
+        // scale, so 1.0 keeps ONE frame under 0.79. Since WP11.3c (bank volumes 0.5 to 1.0 instead of 0.125
+        // to 0.35) it was lowered from 1.2 to 1.0, equal to the load below. Mapped original sounds are
+        // neither counted nor turned down.
+        max_summed_gain: 1.0,
+        // WP11.3c, the time-aware limiter: the gains of what played in the last moments, each fading with
+        // a half-life of load_half_life_ticks (20 ticks a second), may add up to max_load_gain; a frame
+        // that would go above it is turned down to fit. Frames that overlap in time (a file lasts up to
+        // 2.4 s) are limited together this way, which the per-frame bound cannot do. One shot is loud, a
+        // dense fight is held at the ceiling instead of clipping (audio.md 3c).
+        max_load_gain: 1.0,
+        load_half_life_ticks: 6.0,
         fallback: (priority: 1, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 6, merge_radius_m: 6.0),
         // A name covers the names below it ("weapon.fire" covers "weapon.fire.bullet"); the longest wins.
         events: {
