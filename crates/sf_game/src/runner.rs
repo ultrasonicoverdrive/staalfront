@@ -60,7 +60,9 @@ use crate::settings::{Settings, Store};
 use crate::sidebar::Catalog;
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::{SimConfig, SimCounters, SimHandle, interpolation_alpha};
-use crate::unit_voice::{UnitVoice, UnitVoices, order_voice, selection_frame};
+use crate::unit_voice::{
+    UnitVoice, UnitVoices, order_units, order_voice, selection_frame, speaker_faction,
+};
 
 // The walking speed of the demo's units (`bench_scene::DEMO_SPEED`) lives next to the world's
 // configuration there, where the headless twin of the benchmark scene builds the same world.
@@ -1412,17 +1414,21 @@ impl Runner {
             let before: Vec<_> = before_ids.iter().copied().filter(can_speak).collect();
             let after = self.selection.orderable(&self.snap);
             if let Some(voice) = selection_frame(acted, additive_step, &before, &after) {
-                self.say(voice);
+                self.say(voice, &after);
             }
         }
     }
 
     /// A unit voice (WP11.2): `unit.select`, `unit.move` or `unit.attack` of the own units, through the
-    /// brake of [`UnitVoices`]. Silent without a sound for the event or without audio.
-    fn say(&mut self, voice: UnitVoice) {
+    /// brake of [`UnitVoices`], in the voice of the side of `units` ([`speaker_faction`], WP11.2d: Meridian
+    /// joe, Veyran cori). Silent without a sound for the event, without audio or without a unit of a side.
+    fn say(&mut self, voice: UnitVoice, units: &[sf_sim::EntityId]) {
         let now = self.now_ms();
+        let Some(faction) = speaker_faction(&self.snap, units) else {
+            return;
+        };
         if let Some(audio) = &mut self.audio {
-            self.unit_voices.speak(voice, now, audio);
+            self.unit_voices.speak(voice, faction, now, audio);
         }
     }
 
@@ -1508,9 +1514,10 @@ impl Runner {
             let rally = commands::rally_clicks(&self.snap, &self.selection, &self.hover, modifiers);
             if let Some(command) = unit_order {
                 let voice = order_voice(&command);
+                let units = order_units(&command).to_vec();
                 commands::issue(&self.sim, command);
                 if let Some(voice) = voice {
-                    self.say(voice);
+                    self.say(voice, &units);
                 }
             }
             for command in rally {

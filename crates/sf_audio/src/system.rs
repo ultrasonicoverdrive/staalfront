@@ -43,6 +43,8 @@ pub struct AudioSystem {
     player: Option<Box<dyn Player>>,
     listener: Listener,
     params: SpatialParams,
+    /// The master limiter numbers as last set (WP11.3c).
+    limiter: crate::config::LimiterConfig,
     crossfade: Duration,
     category_volume: [f32; 4],
     master_volume: f32,
@@ -243,6 +245,7 @@ impl AudioSystem {
             player: None,
             listener: Listener::default(),
             params: SpatialParams::default(),
+            limiter: crate::config::LimiterConfig::default(),
             crossfade: DEFAULT_CROSSFADE,
             category_volume: [1.0; 4],
             master_volume: 1.0,
@@ -330,6 +333,20 @@ impl AudioSystem {
     /// The listener as last set.
     pub fn listener(&self) -> Listener {
         self.listener
+    }
+
+    /// The numbers of the master limiter on the main track (`audio.ron` `limiter`, WP11.3c). Without an output
+    /// device there is nothing to set.
+    pub fn set_limiter(&mut self, limiter: crate::config::LimiterConfig) {
+        self.limiter = limiter;
+        if let Some(p) = self.player.as_mut() {
+            p.set_limiter(limiter.ceiling, limiter.release_ms);
+        }
+    }
+
+    /// The master limiter numbers as last set (the shipped ones until [`set_limiter`](Self::set_limiter)).
+    pub fn limiter(&self) -> crate::config::LimiterConfig {
+        self.limiter
     }
 
     pub fn set_spatial_params(&mut self, params: SpatialParams) {
@@ -490,6 +507,10 @@ impl AudioSystem {
         let Some((def, mut path)) = self.resolve(name) else {
             return;
         };
+        // A play turned down to nothing starts nothing: it would be silent and still take a voice slot (`max_instances`).
+        if scale <= 0.0 {
+            return;
+        }
         if self.player.is_none() && self.trace.is_none() {
             return;
         }
@@ -1252,6 +1273,22 @@ mod tests {
         (d, install)
     }
 
+    /// WP11.3c: a play turned down to nothing (scale 0) starts nothing: it is not traced, not counted, and does not
+    /// take the voice slot of a sound with `max_instances: 1`, so the next real play of it is heard.
+    #[test]
+    fn a_cue_at_scale_zero_takes_no_voice_slot() {
+        let bank = r#"(sounds: {"s": (file: "audio/sfx/test_click.wav", max_instances: 1)})"#;
+        let d = scratch("scale0", bank);
+        let mut s = mock_at(&d);
+        s.set_trace(true);
+        s.play_at_scaled("s", [0.0; 3], 0.0);
+        assert!(s.take_trace().is_empty());
+        assert_eq!(s.stats().played, 0);
+        s.play("s");
+        assert_eq!(s.take_trace().len(), 1);
+        assert_eq!((s.stats().played, s.stats().limited), (1, 0));
+    }
+
     fn mock_at(root: &Path) -> AudioSystem {
         let settings = AudioManagerSettings::<MockBackend> {
             backend_settings: MockBackendSettings { sample_rate: 22050 },
@@ -1396,6 +1433,8 @@ mod tests {
                     (1.0, 0.0, crate::bank::DEFAULT_MAX_INSTANCES),
                     "{e}"
                 );
+                // And none of the CC0 entry's variants (WP11.3c) come with it.
+                assert!(def.variants.is_empty(), "{e}");
             }
             s.play(e);
             let gain = s.take_trace().last().unwrap().gain;
@@ -1411,19 +1450,27 @@ mod tests {
         std::fs::remove_dir_all(d).ok();
     }
 
-    /// The three unit-voice events of the shipped bank, with their files, as literals (WP11.2b).
-    const VOICE_FILES: [(&str, [&str; 3]); 3] = [
+    /// The unit-voice events of the shipped bank, with their files, as literals (WP11.2b; since WP11.2d nine
+    /// select lines for Meridian and the three Veyran events of the voice cori). The first three are the
+    /// Meridian events, the last three the Veyran ones.
+    const VOICE_FILES: [(&str, &[&str]); 6] = [
         (
             "unit.select",
-            [
+            &[
                 "audio/voice/unit_select_ready.wav",
                 "audio/voice/unit_select_online.wav",
                 "audio/voice/unit_select_standing_by.wav",
+                "audio/voice/unit_select_go_ahead.wav",
+                "audio/voice/unit_select_listening.wav",
+                "audio/voice/unit_select_orders.wav",
+                "audio/voice/unit_select_copy_that.wav",
+                "audio/voice/unit_select_your_call.wav",
+                "audio/voice/unit_select_on_the_line.wav",
             ],
         ),
         (
             "unit.move",
-            [
+            &[
                 "audio/voice/unit_move_moving.wav",
                 "audio/voice/unit_move_route_set.wav",
                 "audio/voice/unit_move_on_it.wav",
@@ -1431,10 +1478,40 @@ mod tests {
         ),
         (
             "unit.attack",
-            [
+            &[
                 "audio/voice/unit_attack_engaging.wav",
                 "audio/voice/unit_attack_target_locked.wav",
                 "audio/voice/unit_attack_firing.wav",
+            ],
+        ),
+        (
+            "unit.select.veyran",
+            &[
+                "audio/voice/cori_unit_select_ready_to_go.wav",
+                "audio/voice/cori_unit_select_systems_online.wav",
+                "audio/voice/cori_unit_select_standing_by.wav",
+                "audio/voice/cori_unit_select_go_ahead.wav",
+                "audio/voice/cori_unit_select_listening_in.wav",
+                "audio/voice/cori_unit_select_orders_sir.wav",
+                "audio/voice/cori_unit_select_copy_sir.wav",
+                "audio/voice/cori_unit_select_your_call_sir.wav",
+                "audio/voice/cori_unit_select_on_the_line.wav",
+            ],
+        ),
+        (
+            "unit.move.veyran",
+            &[
+                "audio/voice/cori_unit_move_moving_out.wav",
+                "audio/voice/cori_unit_move_route_set.wav",
+                "audio/voice/cori_unit_move_on_my_way.wav",
+            ],
+        ),
+        (
+            "unit.attack.veyran",
+            &[
+                "audio/voice/cori_unit_attack_opening_fire.wav",
+                "audio/voice/cori_unit_attack_target_locked.wav",
+                "audio/voice/cori_unit_attack_engaging_now.wav",
             ],
         ),
     ];
@@ -1462,8 +1539,8 @@ mod tests {
         assert!(pick_variant(2, Some(5), 3) < 2);
     }
 
-    /// WP11.2b: the shipped bank plays one of three lines per voice event, every one of them over many
-    /// plays, never the same twice in a row, in category Voice, with the bank's volume.
+    /// WP11.2b, WP11.2d: the shipped bank plays one of three (select: nine) lines per voice event of each side,
+    /// every one of them over many plays, never the same twice in a row, in category Voice, with the bank's volume.
     #[test]
     fn the_voice_events_pick_their_variants_and_never_repeat_one() {
         let mut s = AudioSystem::silent(assets());
@@ -1481,12 +1558,12 @@ mod tests {
                     def.pitch_variation,
                     def.looped
                 ),
-                (0.35, 1, 0.0, false),
+                (0.95, 1, 0.0, false),
                 "{event}"
             );
             let mut seen = BTreeSet::new();
             let mut last = String::new();
-            for _ in 0..30 {
+            for _ in 0..150 {
                 s.play_as(event, Category::Voice);
                 let t = s.take_trace().pop().unwrap();
                 assert_eq!(t.name, event);
@@ -1496,7 +1573,7 @@ mod tests {
                 seen.insert(t.file.clone());
                 last = t.file;
             }
-            assert_eq!(seen.len(), 3, "{event}: {seen:?}");
+            assert_eq!(seen.len(), files.len(), "{event}: {seen:?}");
         }
         assert_eq!(s.stats().unknown, 0);
     }
@@ -1621,7 +1698,8 @@ mod tests {
             assert_eq!(t.file, "ra-audio:unit.select");
             assert_eq!(t.gain, 1.0, "the original plays as-is");
         }
-        for (event, files) in &VOICE_FILES[1..] {
+        // The move and attack events of the Meridian voice (the select event is the mapped one).
+        for (event, files) in &VOICE_FILES[1..3] {
             let volume = s.bank().get(event).unwrap().volume;
             s.play_as(event, Category::Voice);
             let t = s.take_trace().pop().unwrap();
@@ -1684,7 +1762,7 @@ mod tests {
     ];
 
     /// WP11.2c: the shipped bank has every announcement, one file each, in the Voice category at the volume of
-    /// the unit voices (0.35), one at a time, `original_as_is`; without Red Alert files each plays that file
+    /// the unit voices (0.95), one at a time, `original_as_is`; without Red Alert files each plays that file
     /// in the voice volume and nothing is unknown.
     #[test]
     fn the_shipped_bank_speaks_every_announcement_without_red_alert_files() {
@@ -1702,14 +1780,14 @@ mod tests {
                     def.pitch_variation,
                     def.looped
                 ),
-                (0.35, 1, 0.0, false),
+                (0.95, 1, 0.0, false),
                 "{event}"
             );
             assert!(assets().join(file).is_file(), "{file} is not on disk");
             assert!(s.has_sound(event), "{event}");
             s.play_as(event, Category::Voice);
             let t = s.take_trace().pop().unwrap();
-            assert_eq!((t.file.as_str(), t.gain), (file, 0.35), "{event}");
+            assert_eq!((t.file.as_str(), t.gain), (file, 0.95), "{event}");
         }
         assert_eq!(s.stats().unknown, 0);
     }
@@ -1763,7 +1841,7 @@ mod tests {
             s.play_as(event, Category::Voice);
             let t = s.take_trace().pop().unwrap();
             let file = ANNOUNCE_FILES.iter().find(|(e, _)| *e == event).unwrap().1;
-            assert_eq!((t.file.as_str(), t.gain), (file, 0.35), "{event}");
+            assert_eq!((t.file.as_str(), t.gain), (file, 0.95), "{event}");
         }
         assert_eq!(s.stats().unknown, 0);
         std::fs::remove_dir_all(d).ok();
@@ -2181,6 +2259,7 @@ mod tests {
         fn tick(&mut self) {}
         fn clear_cache(&mut self) {}
         fn inject(&mut self, _: PathBuf, _: StaticSoundData) {}
+        fn set_limiter(&mut self, _: f32, _: f32) {}
     }
 
     #[test]

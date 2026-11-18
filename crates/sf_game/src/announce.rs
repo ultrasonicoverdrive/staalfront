@@ -430,12 +430,14 @@ pub trait AnnounceOut {
     fn play(&mut self, event: &str);
 }
 
-/// The events of every voice that shares the one channel: the three unit voices and the announcements.
-/// What [`AudioSystem::is_playing`] is asked, by the unit voices and by the announcer.
+/// The events of every voice that shares the one channel: the three unit voices of each side (the Meridian
+/// and the Veyran events, WP11.2d) and the announcements. What [`AudioSystem::is_playing`] is asked, by the
+/// unit voices and by the announcer.
 pub fn voice_channel() -> Vec<&'static str> {
     UnitVoice::ALL
         .iter()
         .map(|v| v.event())
+        .chain(UnitVoice::ALL.iter().map(|v| v.veyran_event()))
         .chain(Announcement::ALL.iter().map(|a| a.event()))
         .collect()
 }
