@@ -268,6 +268,19 @@ pub struct ArmyRules {
     /// armed enemy seen). Left out: false, off.
     #[serde(default)]
     pub harvester_threat: bool,
+    /// WP9.3e-1, the formation march: with this above 0 the staging leg of a strike is sent as a `Move` (the simulation
+    /// then keeps 3 to 19 units of one ground family together at the pace of the slowest) instead of an `AttackMove`, and
+    /// the group breaks to the `AttackMove` on the goal when an enemy the AI sees stands within this many cells (Chebyshev)
+    /// of a member, or when it leaves the staging cell. 0 to 32; left out: 0, off (the strike marches as before). Needs
+    /// `stage_distance` above 0 (checked): the staging leg is the one that is sent as a `Move`.
+    #[serde(default)]
+    pub march_break_radius: u8,
+    /// WP9.3e-1, the staging search: when the staging point on the line from the gather cell to the target is not open
+    /// ground and the three rings round it hold none, the nearest open cell on that line is the staging cell (toward the
+    /// target first, then toward the gather cell). Left out: false, off (no cell, so no staging). Needs `stage_distance`
+    /// above 0 (checked).
+    #[serde(default)]
+    pub stage_search: bool,
 }
 
 impl ArmyRules {
@@ -285,6 +298,11 @@ impl ArmyRules {
     /// off the digest of the profile has the layout it had before.
     pub fn gather_rules_on(&self) -> bool {
         self.gather_refinery_gap != 0 || self.gather_everyone
+    }
+
+    /// Whether a number of WP9.3e-1 (the formation march or the staging search) is set. Off, the digest keeps its layout.
+    pub fn cohesion_on(&self) -> bool {
+        self.march_break_radius != 0 || self.stage_search
     }
 
     /// Whether the counter mix of WP9.2b-1 is on. Off, nothing is tallied and the digest keeps its layout.
@@ -494,6 +512,13 @@ impl AiProfile {
                 "army.stage_patience {} is not below army.attack_patience {}: with staging on the attack could end while it stages",
                 a.stage_patience, a.attack_patience
             ));
+        }
+        range("army.march_break_radius", a.march_break_radius, 0, 32)?;
+        if a.cohesion_on() && a.stage_distance == 0 {
+            return err(
+                "army.march_break_radius and army.stage_search need army.stage_distance above 0: they act on the staging leg"
+                    .to_string(),
+            );
         }
         range("army.reinforce_value", a.reinforce_value, 0, 1_000_000)?;
         range(

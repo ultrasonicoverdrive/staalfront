@@ -82,6 +82,8 @@ struct Clash {
     shots: [u32; 2],
     unarmed: [u32; 2],
     armed: BTreeMap<EntityId, bool>,
+    /// The seat that was shot at first, its strike members and how many of them were on a `Move` at that tick.
+    shot_at: (usize, usize, usize),
     left: Option<[u64; 2]>,
     /// The whole strike group of each side at the contact (alive members): units, value, spread.
     group: [(usize, u64, i64); 2],
@@ -153,6 +155,7 @@ fn find_clash(
         shots: [0; 2],
         unarmed: [0; 2],
         armed: BTreeMap::new(),
+        shot_at: (0, 0, 0),
         left: None,
         group: [0, 1].map(|seat| {
             let ids: Vec<EntityId> = strikers[seat]
@@ -196,6 +199,7 @@ fn trace_line(
     launches: [Option<u64>; 2],
     world: &World,
     clash: Option<&Clash>,
+    recalled: [u32; 2],
 ) -> String {
     let first = match launches {
         [Some(a), Some(b)] if a < b => "0".to_string(),
@@ -210,8 +214,9 @@ fn trace_line(
         tick_text(launches[0]),
         tick_text(launches[1])
     );
+    let tail = format!("| {} {}", recalled[0], recalled[1]);
     let Some(c) = clash else {
-        return format!("{head} -");
+        return format!("{head} - | - - - {tail}");
     };
     // The game ended inside the window: what was left at the end.
     let left = c.left.unwrap_or_else(|| {
@@ -227,7 +232,7 @@ fn trace_line(
     };
     let dist = |d: Option<i64>| d.map_or("-".to_string(), |d| d.to_string());
     format!(
-        "{head} {} {} {} {} | {} {} {} {} | {} {} {} {} | {} {} {} | {} {} {} {} | {} {} {} {} {} {}",
+        "{head} {} {} {} {} | {} {} {} {} | {} {} {} {} | {} {} {} | {} {} {} {} | {} {} {} {} {} {} | {} {} {} {tail}",
         c.tick,
         c.contact.0,
         c.contact.1,
@@ -253,6 +258,9 @@ fn trace_line(
         c.group[1].0,
         c.group[1].1,
         c.group[1].2,
+        c.shot_at.0,
+        c.shot_at.1,
+        c.shot_at.2,
     )
 }
 
@@ -268,6 +276,57 @@ struct Watch {
     struct_hit: Option<u64>,
     launched: u32,
     launches: Vec<(u32, u64, u64)>,
+    /// Strike groups seen so far, by id: whether the group has been `Engaged`, and whether it was called back.
+    strikes: BTreeMap<u32, (bool, bool)>,
+    /// Strikes called back before they were ever `Engaged`.
+    recalled_early: u32,
+}
+
+/// Notes the strike groups of one think: a strike that turns `Returning` (the same group id) without ever having been `Engaged`
+/// is a strike recalled early (WP9.3e-1).
+fn note_strikes(w: &mut Watch, groups: &[sf_ai::state::Group]) {
+    use sf_ai::state::GroupStage;
+    for g in groups.iter().filter(|g| g.merge_into.is_none()) {
+        match g.stage {
+            GroupStage::Returning => {
+                if let Some(entry) = w.strikes.get_mut(&g.id)
+                    && !entry.1
+                {
+                    entry.1 = true;
+                    if !entry.0 {
+                        w.recalled_early += 1;
+                    }
+                }
+            }
+            stage => {
+                let entry = w.strikes.entry(g.id).or_insert((false, false));
+                entry.0 |= stage == GroupStage::Engaged;
+            }
+        }
+    }
+}
+
+/// The seat that was shot at first: the members of its strike groups (as the AI last saw them) and how many of them stand on a
+/// `Move` in the world now (their observed order).
+fn shot_at(world: &World, ais: &[sf_ai::Ai], seat: usize) -> (usize, usize, usize) {
+    let members: BTreeSet<EntityId> = ais[seat]
+        .state()
+        .groups
+        .iter()
+        .filter(|g| g.merge_into.is_none())
+        .flat_map(|g| g.members.iter().copied())
+        .collect();
+    let obs = Observation::build(
+        world,
+        ais[seat].player(),
+        &ais[seat].state().known_structures,
+    );
+    let on_move = obs
+        .own
+        .iter()
+        .filter(|o| members.contains(&o.id) && matches!(o.order, sf_sim::Order::Move(_)))
+        .count();
+    (seat, members.len(), on_move)
 }
 
 #[test]
@@ -338,6 +397,7 @@ fn play_one_row() {
                     wanted.clear();
                     ai.think(&world, &mut wanted);
                     let st = ai.state();
+                    note_strikes(w, &st.groups);
                     if st.attacks_launched > w.launched {
                         w.launched = st.attacks_launched;
                         let value = st.groups.last().map_or(0, |g| g.launch_value);
@@ -380,6 +440,7 @@ fn play_one_row() {
                         if let Some(c) = clash.as_mut() {
                             note_armed(&world, c);
                             count_shots(&world, c);
+                            c.shot_at = shot_at(&world, &ais, 1 - c.shooter);
                         }
                     }
                     Some(c) if world.tick().0 <= c.tick + WINDOW => {
@@ -445,7 +506,14 @@ fn play_one_row() {
             writeln!(
                 t,
                 "{}",
-                trace_line(index, swapped, first_launch, &world, clash.as_ref())
+                trace_line(
+                    index,
+                    swapped,
+                    first_launch,
+                    &world,
+                    clash.as_ref(),
+                    [watch[0].recalled_early, watch[1].recalled_early]
+                )
             )
             .unwrap();
             t.flush().unwrap();

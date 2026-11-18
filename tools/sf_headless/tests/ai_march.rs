@@ -319,3 +319,188 @@ fn with_the_rules_off_the_wave_leaves_the_staging_cell_spread_out() {
         assert_eq!(exit_spread(game, true), off, "game {game}, rules off");
     }
 }
+
+// ---- WP9.3e-1: the formation march on the two start sites -------------------------------------------------------------
+
+/// The break radius of the rows that were measured (`fm8`, the one with the break outside every sight of the mix).
+const BREAK_RADIUS: u8 = 8;
+
+/// `m1_duel` game `game` with both seats on the formation march (`march_break_radius` [`BREAK_RADIUS`] and the staging search).
+fn duel_with_the_march(game: u32) -> (Box<World>, Vec<Ai>) {
+    let (world, mut ais) = duel(game, false);
+    for ai in &mut ais {
+        let old = ai.state().clone();
+        let mut profile = old.profile.clone();
+        profile.army.march_break_radius = BREAK_RADIUS;
+        profile.army.stage_search = true;
+        *ai = Ai::new(
+            old.player,
+            profile,
+            seeds_for(458_758, game).1,
+            old.start_sites,
+        );
+    }
+    (world, ais)
+}
+
+/// What the first strike of a seat did on its staging leg, read from the world: the tick of the staging exit (the first turn
+/// the group is no longer `Staging`), how many members stood on a `Move` at most while it staged, how many members it had,
+/// the largest Chebyshev distance of a member from the staging cell at the exit, and the Chebyshev distance of the nearest
+/// seen enemy to any member at the exit (`None`: none seen).
+#[derive(Debug, PartialEq, Eq)]
+struct Leg {
+    exit_tick: u64,
+    most_on_move: usize,
+    members: usize,
+    exit_spread: u32,
+    /// The largest Chebyshev distance of a member from the mean cell of the members at the exit (the group's own spread).
+    group_spread: u32,
+    enemy_seen_at: Option<u32>,
+}
+
+fn staging_legs(game: u32, march: bool) -> [Option<Leg>; 2] {
+    let (mut world, mut ais) = if march {
+        duel_with_the_march(game)
+    } else {
+        duel(game, false)
+    };
+    let mut wanted = Vec::new();
+    let mut most = [0usize; 2];
+    let mut legs: [Option<Leg>; 2] = [None, None];
+    while world.tick().0 < 20_000 && legs.iter().any(|l| l.is_none()) {
+        step(&mut world, &mut ais, &mut wanted);
+        for (seat, ai) in ais.iter().enumerate() {
+            let st = ai.state();
+            if legs[seat].is_some() {
+                continue;
+            }
+            let Some(g) = st.groups.iter().find(|g| g.id == 0) else {
+                continue;
+            };
+            let Some(cell) = g.staging else { continue };
+            let obs = Observation::build(&world, st.player, &BTreeMap::new());
+            let mine = |o: &&sf_ai::Own| g.members.binary_search(&o.id).is_ok();
+            if g.stage == sf_ai::state::GroupStage::Staging {
+                let on_move = obs
+                    .own
+                    .iter()
+                    .filter(mine)
+                    .filter(|o| matches!(o.order, sf_sim::Order::Move(_)))
+                    .count();
+                most[seat] = most[seat].max(on_move);
+                continue;
+            }
+            let enemy_seen_at = obs
+                .own
+                .iter()
+                .filter(mine)
+                .flat_map(|o| {
+                    obs.visible
+                        .iter()
+                        .filter(|s| s.owner != st.player)
+                        .map(move |s| cheb(o.cell, s.cell))
+                })
+                .min();
+            legs[seat] = Some(Leg {
+                exit_tick: world.tick().0,
+                most_on_move: most[seat],
+                members: obs.own.iter().filter(mine).count(),
+                exit_spread: obs
+                    .own
+                    .iter()
+                    .filter(mine)
+                    .map(|o| cheb(o.cell, cell))
+                    .max()
+                    .unwrap_or(0),
+                group_spread: {
+                    let cells: Vec<Cell> = obs.own.iter().filter(mine).map(|o| o.cell).collect();
+                    let n = cells.len() as u32;
+                    let mean = Cell::new(
+                        cells.iter().map(|c| c.x).sum::<u32>() / n.max(1),
+                        cells.iter().map(|c| c.y).sum::<u32>() / n.max(1),
+                    );
+                    cells.iter().map(|c| cheb(*c, mean)).max().unwrap_or(0)
+                },
+                enemy_seen_at,
+            });
+        }
+    }
+    legs
+}
+
+/// `(exit tick, most members on a Move, members, exit spread, group spread, nearest enemy seen)`.
+type LegWant = (u64, usize, usize, u32, u32, Option<u32>);
+
+/// The first strike of each seat on its staging leg with the march on, per game (`[seat 0, seat 1]`): in game 0 seat 0 is on SW,
+/// in game 4 on NE. Measured on the shipped assets: every strike goes out on a `Move` as one group of six and breaks 920 to
+/// 1,040 ticks after the launch (a launch at about 10,080), 20 to 25 cells short of its staging cell, with the other wave in
+/// sight at 2 to 4 cells; the spread of the group at the break is 3 to 14.
+const LEGS_ON: [(u32, [LegWant; 2]); 2] = [
+    (
+        0,
+        [
+            (11001, 6, 6, 22, 3, Some(4)),
+            (11038, 6, 6, 21, 14, Some(2)),
+        ],
+    ),
+    (
+        4,
+        [
+            (11001, 6, 6, 25, 14, Some(4)),
+            (10998, 6, 6, 20, 4, Some(4)),
+        ],
+    ),
+];
+
+#[test]
+fn the_staging_leg_with_the_march_on_is_pinned_on_both_start_sites() {
+    for (game, want) in LEGS_ON {
+        let got = staging_legs(game, true);
+        for seat in 0..2 {
+            let site = if on_south_west(game, seat) {
+                "SW"
+            } else {
+                "NE"
+            };
+            let leg = got[seat]
+                .as_ref()
+                .unwrap_or_else(|| panic!("game {game} {site}: no leg"));
+            assert_eq!(
+                (
+                    leg.exit_tick,
+                    leg.most_on_move,
+                    leg.members,
+                    leg.exit_spread,
+                    leg.group_spread,
+                    leg.enemy_seen_at
+                ),
+                want[seat],
+                "game {game} {site}"
+            );
+            // The group went out on a `Move` and broke on seeing the other wave within the radius.
+            assert_eq!(leg.most_on_move, leg.members, "game {game} {site}");
+            assert!(
+                leg.enemy_seen_at
+                    .is_some_and(|d| d <= u32::from(BREAK_RADIUS))
+            );
+        }
+    }
+}
+
+#[test]
+fn with_the_march_off_no_member_is_ever_on_a_move_while_the_strike_stages() {
+    // The control: the shipped numbers; the strike goes out on an `AttackMove` and the test above would fail on it.
+    let mut legs = 0;
+    for game in [0u32, 4] {
+        for (seat, leg) in staging_legs(game, false).iter().enumerate() {
+            if let Some(leg) = leg {
+                assert_eq!(leg.most_on_move, 0, "game {game} seat {seat}: {leg:?}");
+                legs += 1;
+            }
+        }
+    }
+    assert!(
+        legs >= 2,
+        "the control has staging legs to look at ({legs})"
+    );
+}

@@ -820,3 +820,58 @@ fn the_think_interval_of_easy_is_inside_the_limits_and_keeps_the_players_apart()
     assert!(with("think_interval: 40", "think_interval: 601").is_err());
     assert!(with("stagger: 3,", "stagger: 3, bogus: 1,").is_err());
 }
+
+/// WP9.3e-1: the formation march and the staging search read as off when left out, are range-checked, and need staging.
+#[test]
+fn the_numbers_of_wp9_3e_1_are_off_when_left_out_checked_and_need_staging() {
+    // The frozen profiles written before them read as off.
+    for frozen in [
+        include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_vs_passive_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_harvest_raid_defs/normal.ron"),
+    ] {
+        let a = AiProfile::from_ron(frozen).unwrap().army;
+        assert_eq!((a.march_break_radius, a.stage_search), (0, false));
+        assert!(!a.cohesion_on());
+    }
+    // Either one makes `cohesion_on` true.
+    let mut a = AiProfile::embedded().army;
+    a.march_break_radius = 0;
+    a.stage_search = false;
+    assert!(!a.cohesion_on());
+    let mut b = a;
+    b.march_break_radius = 1;
+    assert!(b.cohesion_on());
+    let mut c = a;
+    c.stage_search = true;
+    assert!(c.cohesion_on());
+    // Written in a profile with staging on: read as written, 0 to 32.
+    let p = AiProfile::from_ron(&edited(
+        "stage_distance: 14,",
+        "stage_distance: 14, march_break_radius: 32, stage_search: true,",
+    ))
+    .unwrap();
+    assert_eq!((p.army.march_break_radius, p.army.stage_search), (32, true));
+    refused(
+        &edited(
+            "stage_distance: 14,",
+            "stage_distance: 14, march_break_radius: 33,",
+        ),
+        "march_break_radius",
+    );
+    // With staging off neither does anything, so a profile that sets one is refused.
+    for extra in ["march_break_radius: 8,", "stage_search: true,"] {
+        refused(
+            &edited(
+                "stage_distance: 14,",
+                &format!("stage_distance: 0, {extra}"),
+            ),
+            "stage_distance",
+        );
+    }
+    AiProfile::from_ron(&edited(
+        "stage_distance: 14,",
+        "stage_distance: 0, march_break_radius: 0, stage_search: false,",
+    ))
+    .unwrap();
+}
