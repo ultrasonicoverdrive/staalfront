@@ -585,7 +585,8 @@ fn lab_of(srgb: [f64; 3]) -> [f64; 3] {
 /// up) of a model's LOD0 as the renderer shows it: the baked vertex colour times the material
 /// factor, lit by the default light of `sf_render::scene::Lighting` (direction (0.5, -0.8, 0.4),
 /// colour (0.85, 0.82, 0.75), ambient (0.22, 0.25, 0.30); copied here, the generator does not
-/// depend on the renderer).
+/// depend on the renderer). These constants copy `sf_render::scene::Lighting::default`
+/// (crates/sf_render/src/scene.rs) and must follow it when that changes.
 fn lit_hull(stem: &str) -> [f64; 3] {
     let m = sf_model_gen::set::all()
         .into_iter()

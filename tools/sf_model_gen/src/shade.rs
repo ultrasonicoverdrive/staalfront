@@ -67,8 +67,9 @@ pub const NOMINAL: f32 = 0.85;
 /// head room in the vertex colour instead of `top / NOMINAL`, so the dust, which lifts it towards a
 /// brighter earth colour, cannot overflow `COLOR_0`'s 0..1 (before: 5-25 % of a tank's metal and
 /// rubber vertices clamped to flat grey). A plain face is still exactly the palette colour (the
-/// vertex colour is divided by the factor); the vertex colour is smaller on a dark slot, which 8-bit
-/// rounding resolves finer in linear light, not coarser.
+/// vertex colour is divided by the factor). The cost: a floored slot has a larger factor than
+/// `top / NOMINAL`, so one 8-bit step of the vertex colour is a coarser step in the rendered colour
+/// (about 4.7x for the darkest slots), still under one sRGB level and so invisible.
 pub const FACTOR_FLOOR: f32 = 0.15;
 /// The extra brightness of an upward-sloping bevel or chamfer (the top-edge highlight; WP11.6p:
 /// 0.16 before, now a few per cent).
@@ -355,7 +356,7 @@ pub fn bake_team(tris: &[Tri], lin: &[[f32; 3]], team: Option<u8>) -> Vec<[f32; 
             let s = ao * grime * down * variation * tone * highlight(cn[1]);
             let mut c = base.map(|b| b * s);
             if worn && blocked == 0 {
-                // Lighter and less saturated: towards a grey a quarter above the luminance.
+                // Lighter and less saturated: towards a grey of the luminance x 1.12 + 0.01, half tinted.
                 let lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
                 let grey = lum * WEAR_GREY_GAIN + WEAR_GREY_LIFT;
                 c = [0, 1, 2].map(|k| {
