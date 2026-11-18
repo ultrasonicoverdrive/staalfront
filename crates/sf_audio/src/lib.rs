@@ -23,6 +23,7 @@
 mod announce_config;
 pub mod bank;
 pub mod config;
+pub mod limiter;
 mod live;
 pub mod music;
 pub mod positional;
@@ -34,7 +35,8 @@ pub mod voices;
 
 pub use announce_config::{AnnounceConfig, AnnounceRule};
 pub use bank::{Bank, BankError, Category, SoundDef};
-pub use config::AudioConfig;
+pub use config::{AudioConfig, LimiterConfig};
+pub use limiter::{LimiterHandle, MasterLimiterBuilder, limit_samples};
 pub use music::{Mood, MoodTracker};
 pub use positional::{Cue, PlanStats, Planner, Request};
 pub use spatial::{Listener, Mix, SpatialParams};
@@ -43,3 +45,13 @@ pub use system::{
     pick_variant,
 };
 pub use voice_brake::{VoiceBrake, VoiceConfig};
+
+/// The samples of an audio file as the game decodes it (kira, mono: the left channel), with its sample rate.
+/// For tests that mix real files (the music) with the fight at sample accuracy; `None` when it does not decode.
+pub fn decode_mono(path: &std::path::Path) -> Option<(u32, Vec<f32>)> {
+    let data = kira::sound::static_sound::StaticSoundData::from_file(path).ok()?;
+    Some((
+        data.sample_rate,
+        data.frames.iter().map(|f| f.left).collect(),
+    ))
+}
