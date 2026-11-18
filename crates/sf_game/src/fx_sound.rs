@@ -1141,12 +1141,21 @@ mod tests {
             }
         }
         let mut audio = tracing_audio(&assets());
-        for event in ["unit.select", "unit.move", "unit.attack"] {
+        // WP11.2d: both sides, every line of each: the Meridian voice (joe) and the Veyran voice (cori).
+        let events = [
+            ("unit.select", 9),
+            ("unit.move", 3),
+            ("unit.attack", 3),
+            ("unit.select.veyran", 9),
+            ("unit.move.veyran", 3),
+            ("unit.attack.veyran", 3),
+        ];
+        for (event, lines) in events {
             let def = bank.get(event).unwrap();
             assert_eq!(def.category, sf_audio::Category::Voice, "{event}");
-            assert_eq!(def.files().count(), 3, "{event}");
+            assert_eq!(def.files().count(), lines, "{event}");
             let mut heard = std::collections::BTreeSet::new();
-            for _ in 0..12 {
+            for _ in 0..120 {
                 audio.play_as(event, sf_audio::Category::Voice);
                 let t = audio.take_trace().pop().unwrap();
                 let voice: Vec<f32> = wav_samples(&t.file)
@@ -1177,7 +1186,7 @@ mod tests {
                     t.file
                 );
             }
-            assert_eq!(heard.len(), 3, "{event}: {heard:?}");
+            assert_eq!(heard.len(), lines, "{event}: {heard:?}");
         }
     }
 
@@ -1460,6 +1469,57 @@ mod tests {
         Traced { audio, _root: root }
     }
 
+    /// WP11.2d: with a mapped Red Alert original for `unit.select`, a Veyran unit speaks the original too, through a real
+    /// `AudioSystem` (`VoiceOut::original` -> `is_original`); `unit.move` has no original, so the Veyran voice plays its own
+    /// bank event there.
+    #[test]
+    fn a_mapped_original_speaks_for_a_veyran_unit_too() {
+        use sf_audio::ra::RaAudioConfig;
+        use sf_audio::ra::aud::{Compression, Pcm, encode};
+        use sf_audio::ra::mix::{MixFormat, mix_id, write_mix};
+        let root = root_with(
+            "ra_veyran",
+            &[
+                "unit.select",
+                "unit.select.veyran",
+                "unit.move",
+                "unit.move.veyran",
+            ],
+        );
+        let d = &root.0;
+        std::fs::write(
+            d.join("audio/ra_mapping.ron"),
+            r#"(sounds: {"unit.select": "FIX.AUD"})"#,
+        )
+        .unwrap();
+        let pcm = Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: (0..2000).map(|i| ((i % 50) * 400 - 10000) as i16).collect(),
+        };
+        let mix = write_mix(
+            &[(mix_id("FIX.AUD"), &encode(&pcm, Compression::Ima))],
+            MixFormat::Plain,
+        );
+        let install = d.join("fixture_install");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("SOUNDS.MIX"), mix).unwrap();
+        let mut audio = tracing_audio(d);
+        audio.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        assert_eq!(
+            settled_ra_status(&mut audio),
+            sf_audio::RaStatus::Ready { mapped: 1 }
+        );
+        let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
+        assert!(voices.speak(UnitVoice::Select, Faction::Veyran, 10_000, &mut audio));
+        assert!(voices.speak(UnitVoice::Move, Faction::Veyran, 20_000, &mut audio));
+        let names: Vec<String> = audio.take_trace().into_iter().map(|t| t.name).collect();
+        assert_eq!(names, ["unit.select", "unit.move.veyran"]);
+    }
+
     /// R4: a mapped original in a loud frame is neither counted in the sum nor turned down; the bank
     /// sounds still add up to the limit by themselves.
     #[test]
@@ -1626,6 +1686,7 @@ mod tests {
     use crate::settings::SoundSettings;
     use crate::unit_voice::{UnitVoice, UnitVoices};
     use sf_audio::{Category, RaStatus};
+    use sf_data::units::Faction;
 
     fn near(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-6
@@ -1656,7 +1717,7 @@ mod tests {
         // the master volume (the bank entries' own volume is 1.0).
         audio.play("weapon.fire.cannon");
         let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
-        assert!(voices.speak(UnitVoice::Move, 10_000, &mut audio));
+        assert!(voices.speak(UnitVoice::Move, Faction::Meridian, 10_000, &mut audio));
         let gains: Vec<(String, f32)> = audio
             .take_trace()
             .into_iter()
@@ -1776,7 +1837,7 @@ mod tests {
         assert_eq!(audio.original_audio_catalog().unwrap().sound_count(), 0);
         // The event still has the bank's sound, and plays it: no panic, no error.
         let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
-        assert!(voices.speak(UnitVoice::Move, 10_000, &mut audio));
+        assert!(voices.speak(UnitVoice::Move, Faction::Meridian, 10_000, &mut audio));
         assert_eq!(audio.take_trace().len(), 1);
     }
 

@@ -12,7 +12,7 @@ use crate::sandbox::{MERIDIAN, NEUTRAL, VEYRAN};
 use crate::selection::{Gesture, Pointer, Recall, Selection};
 use crate::sim_snapshot::SimSnapshot;
 use sf_audio::AudioConfig;
-use sf_data::units::UnitDefs;
+use sf_data::units::{Faction, UnitDefs};
 use sf_math::Vec2;
 use sf_sim::{Cell, GuardTarget, Kind, PlayerId, World, WorldConfig};
 
@@ -392,6 +392,8 @@ fn the_events_are_the_bank_names() {
 #[derive(Default)]
 struct Out {
     has: Vec<&'static str>,
+    /// Events that play a mapped Red Alert original.
+    original: Vec<&'static str>,
     busy: bool,
     played: Vec<String>,
 }
@@ -399,6 +401,9 @@ struct Out {
 impl VoiceOut for Out {
     fn has_sound(&self, event: &str) -> bool {
         self.has.contains(&event)
+    }
+    fn original(&self, event: &str) -> bool {
+        self.original.contains(&event)
     }
     fn busy(&self) -> bool {
         self.busy
@@ -430,7 +435,7 @@ fn each_voice_plays_its_own_event() {
     for voice in UnitVoice::ALL {
         let mut v = voices();
         let mut out = all_sounds();
-        assert!(v.speak(voice, 10_000, &mut out));
+        assert!(v.speak(voice, Faction::Meridian, 10_000, &mut out));
         assert_eq!(out.played, [voice.event()]);
     }
 }
@@ -441,15 +446,15 @@ fn a_spammed_click_is_thinned_out_by_the_gaps() {
     let mut out = all_sounds();
     // Ten selections 100 ms apart, from t = 0 to 900: one voice (the repeat gap is 1200).
     for i in 0..10 {
-        v.speak(UnitVoice::Select, i * 100, &mut out);
+        v.speak(UnitVoice::Select, Faction::Meridian, i * 100, &mut out);
     }
     assert_eq!(out.played, ["unit.select"]);
     // At 1200 ms the same event may speak again; at 1199 it could not.
-    assert!(!v.speak(UnitVoice::Select, 1199, &mut out));
-    assert!(v.speak(UnitVoice::Select, 1200, &mut out));
+    assert!(!v.speak(UnitVoice::Select, Faction::Meridian, 1199, &mut out));
+    assert!(v.speak(UnitVoice::Select, Faction::Meridian, 1200, &mut out));
     // Another event only needs the shorter gap.
-    assert!(!v.speak(UnitVoice::Move, 1500, &mut out));
-    assert!(v.speak(UnitVoice::Move, 1600, &mut out));
+    assert!(!v.speak(UnitVoice::Move, Faction::Meridian, 1500, &mut out));
+    assert!(v.speak(UnitVoice::Move, Faction::Meridian, 1600, &mut out));
     assert_eq!(out.played, ["unit.select", "unit.select", "unit.move"]);
 }
 
@@ -457,12 +462,12 @@ fn a_spammed_click_is_thinned_out_by_the_gaps() {
 fn a_voice_that_is_still_sounding_blocks_a_new_one() {
     let mut v = voices();
     let mut out = all_sounds();
-    assert!(v.speak(UnitVoice::Select, 0, &mut out));
+    assert!(v.speak(UnitVoice::Select, Faction::Meridian, 0, &mut out));
     out.busy = true;
     // Far past both gaps, but the first is still sounding: skipped, not cut off.
-    assert!(!v.speak(UnitVoice::Move, 60_000, &mut out));
+    assert!(!v.speak(UnitVoice::Move, Faction::Meridian, 60_000, &mut out));
     out.busy = false;
-    assert!(v.speak(UnitVoice::Move, 60_001, &mut out));
+    assert!(v.speak(UnitVoice::Move, Faction::Meridian, 60_001, &mut out));
     assert_eq!(out.played, ["unit.select", "unit.move"]);
 }
 
@@ -474,10 +479,10 @@ fn without_a_sound_the_event_is_silent_and_uses_up_no_gap() {
         has: vec!["unit.move"],
         ..Out::default()
     };
-    assert!(!v.speak(UnitVoice::Select, 1000, &mut out));
-    assert!(!v.speak(UnitVoice::Attack, 1001, &mut out));
+    assert!(!v.speak(UnitVoice::Select, Faction::Meridian, 1000, &mut out));
+    assert!(!v.speak(UnitVoice::Attack, Faction::Meridian, 1001, &mut out));
     // The silent ones did not open a gap: the move voice speaks at once.
-    assert!(v.speak(UnitVoice::Move, 1002, &mut out));
+    assert!(v.speak(UnitVoice::Move, Faction::Meridian, 1002, &mut out));
     assert_eq!(out.played, ["unit.move"]);
 }
 
@@ -485,9 +490,9 @@ fn without_a_sound_the_event_is_silent_and_uses_up_no_gap() {
 fn a_reset_forgets_the_last_voice() {
     let mut v = voices();
     let mut out = all_sounds();
-    assert!(v.speak(UnitVoice::Move, 5000, &mut out));
+    assert!(v.speak(UnitVoice::Move, Faction::Meridian, 5000, &mut out));
     v.reset();
-    assert!(v.speak(UnitVoice::Move, 5001, &mut out));
+    assert!(v.speak(UnitVoice::Move, Faction::Meridian, 5001, &mut out));
 }
 
 // ---- the real AudioSystem ---------------------------------------------------------------------
@@ -506,7 +511,12 @@ fn the_shipped_bank_speaks_its_lines_without_red_alert_files() {
     let mut v = voices();
     for (i, voice) in UnitVoice::ALL.into_iter().enumerate() {
         assert!(audio.has_sound(voice.event()));
-        assert!(v.speak(voice, 10_000 * (i as u64 + 1), &mut audio));
+        assert!(v.speak(
+            voice,
+            Faction::Meridian,
+            10_000 * (i as u64 + 1),
+            &mut audio
+        ));
     }
     let trace = audio.take_trace();
     let got: Vec<(&str, &str)> = trace
@@ -523,6 +533,221 @@ fn the_shipped_bank_speaks_its_lines_without_red_alert_files() {
         assert!(file.starts_with(prefix.1), "{name}: {file}");
     }
     assert_eq!(audio.stats().unknown, 0);
+}
+
+// ---- a voice per side (WP11.2d) ----------------------------------------------------------------
+
+/// The names the two sides speak with, as literals (the bank events of `assets/audio/bank.ron`).
+#[test]
+fn each_side_has_its_bank_events_and_neutral_has_none() {
+    let veyran: Vec<&str> = UnitVoice::ALL.iter().map(|v| v.veyran_event()).collect();
+    assert_eq!(
+        veyran,
+        [
+            "unit.select.veyran",
+            "unit.move.veyran",
+            "unit.attack.veyran"
+        ]
+    );
+    for v in UnitVoice::ALL {
+        assert_eq!(v.event_for(Faction::Meridian), Some(v.event()));
+        assert_eq!(v.event_for(Faction::Veyran), Some(v.veyran_event()));
+        assert_eq!(v.event_for(Faction::Neutral), None);
+    }
+}
+
+/// The shipped bank, through `UnitVoices::speak` (the game's call), without Red Alert files: each side speaks a
+/// line of its own voice for every event (joe for Meridian, `cori_` for Veyran), in the voice volume and with
+/// no unknown sound; Neutral says nothing and uses up no gap.
+#[test]
+fn the_shipped_bank_speaks_both_sides_each_in_its_own_voice() {
+    let mut audio = AudioSystem::silent(assets());
+    audio.set_trace(true);
+    let mut v = voices();
+    let mut t = 0;
+    for voice in UnitVoice::ALL {
+        t += 10_000;
+        assert!(!v.speak(voice, Faction::Neutral, t, &mut audio), "neutral");
+        assert!(audio.take_trace().is_empty(), "neutral said something");
+        for faction in [Faction::Meridian, Faction::Veyran] {
+            t += 10_000;
+            assert!(
+                v.speak(voice, faction, t, &mut audio),
+                "{voice:?} {faction:?}"
+            );
+            let trace = audio.take_trace().pop().unwrap();
+            let kind = voice.event().trim_start_matches("unit.");
+            match faction {
+                Faction::Meridian => {
+                    assert_eq!(trace.name, voice.event());
+                    assert!(
+                        trace.file.starts_with(&format!("audio/voice/unit_{kind}_")),
+                        "{}",
+                        trace.file
+                    );
+                }
+                _ => {
+                    assert_eq!(trace.name, voice.veyran_event());
+                    assert!(
+                        trace
+                            .file
+                            .starts_with(&format!("audio/voice/cori_unit_{kind}_")),
+                        "{}",
+                        trace.file
+                    );
+                }
+            }
+            assert_eq!(trace.gain, 0.35, "{}", trace.file);
+        }
+    }
+    assert_eq!(audio.stats().unknown, 0);
+}
+
+/// Nine select lines per side and three per move and attack; over many plays every one is heard and a line is
+/// never followed by itself.
+#[test]
+fn the_variants_of_both_sides_all_play_and_never_repeat() {
+    let mut audio = AudioSystem::silent(assets());
+    audio.set_trace(true);
+    let mut v = voices();
+    let mut t = 0;
+    for faction in [Faction::Meridian, Faction::Veyran] {
+        for (voice, lines) in [
+            (UnitVoice::Select, 9),
+            (UnitVoice::Move, 3),
+            (UnitVoice::Attack, 3),
+        ] {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut last = String::new();
+            for _ in 0..150 {
+                t += 10_000;
+                assert!(v.speak(voice, faction, t, &mut audio));
+                let file = audio.take_trace().pop().unwrap().file;
+                assert_ne!(file, last, "{voice:?} {faction:?} repeated {file}");
+                seen.insert(file.clone());
+                last = file;
+            }
+            assert_eq!(seen.len(), lines, "{voice:?} {faction:?}: {seen:?}");
+        }
+    }
+}
+
+/// Both sides share the gaps and the one channel: a Veyran select right after a Meridian select is brake-skipped
+/// (same event for the brake), and a voice that is sounding blocks the other side too.
+#[test]
+fn the_two_sides_share_the_brake_and_the_channel() {
+    let mut v = voices();
+    let mut out = Out {
+        has: vec![
+            "unit.select",
+            "unit.select.veyran",
+            "unit.move",
+            "unit.move.veyran",
+        ],
+        ..Out::default()
+    };
+    assert!(v.speak(UnitVoice::Select, Faction::Meridian, 0, &mut out));
+    assert!(
+        !v.speak(UnitVoice::Select, Faction::Veyran, 1199, &mut out),
+        "repeat gap"
+    );
+    assert!(
+        !v.speak(UnitVoice::Move, Faction::Veyran, 399, &mut out),
+        "min gap"
+    );
+    out.busy = true;
+    assert!(
+        !v.speak(UnitVoice::Move, Faction::Veyran, 60_000, &mut out),
+        "busy"
+    );
+    out.busy = false;
+    assert!(v.speak(UnitVoice::Move, Faction::Veyran, 60_001, &mut out));
+    assert!(v.speak(UnitVoice::Select, Faction::Veyran, 61_201, &mut out));
+    assert_eq!(
+        out.played,
+        ["unit.select", "unit.move.veyran", "unit.select.veyran"]
+    );
+}
+
+/// With a mapped Red Alert original for the plain event the original speaks for both sides (the Veyran event is
+/// never played); where only one event has an original the other plays its bank voice; a bank without Veyran
+/// events plays the plain one for the Veyran side, as before WP11.2d.
+#[test]
+fn the_original_wins_for_both_sides_and_a_bank_without_a_veyran_voice_falls_back() {
+    let mut v = voices();
+    let mut out = Out {
+        has: vec![
+            "unit.select",
+            "unit.select.veyran",
+            "unit.move",
+            "unit.move.veyran",
+        ],
+        original: vec!["unit.select"],
+        ..Out::default()
+    };
+    assert!(v.speak(UnitVoice::Select, Faction::Veyran, 0, &mut out));
+    assert!(v.speak(UnitVoice::Select, Faction::Meridian, 2000, &mut out));
+    assert!(v.speak(UnitVoice::Move, Faction::Veyran, 4000, &mut out));
+    assert_eq!(
+        out.played,
+        ["unit.select", "unit.select", "unit.move.veyran"]
+    );
+    // No Veyran events in the bank.
+    let mut out = Out {
+        has: vec!["unit.attack"],
+        ..Out::default()
+    };
+    let mut v = voices();
+    assert!(v.speak(UnitVoice::Attack, Faction::Veyran, 0, &mut out));
+    assert_eq!(out.played, ["unit.attack"]);
+}
+
+/// Which side speaks for a list of units: the owner of the lowest id, in the production snapshot. A mixed list
+/// takes the leading (lowest-id) unit; a neutral and a stale id are skipped; nobody gives `None`.
+#[test]
+fn the_faction_of_the_leading_unit_speaks_for_a_mixed_list() {
+    let mut scene = Scene::new(false);
+    let veyran = scene.unit("rifleman", VEYRAN, 20, 10);
+    let meridian = scene.unit("rifleman", MERIDIAN, 10, 10);
+    let civ = scene.unit("civilian", NEUTRAL, 16, 10);
+    assert!(
+        veyran < meridian && meridian < civ,
+        "spawn order is id order"
+    );
+    let snap = scene.snap();
+    let who = |ids: &[EntityId]| speaker_faction(&snap, ids);
+    assert_eq!(who(&[meridian]), Some(Faction::Meridian));
+    assert_eq!(who(&[veyran]), Some(Faction::Veyran));
+    // Mixed: the lowest id leads, whatever the order of the list.
+    assert_eq!(who(&[meridian, veyran]), Some(Faction::Veyran));
+    assert_eq!(who(&[veyran, meridian]), Some(Faction::Veyran));
+    // A neutral is skipped, even with the lowest id.
+    assert_eq!(who(&[civ, meridian]), Some(Faction::Meridian));
+    assert_eq!(who(&[civ]), None);
+    assert_eq!(who(&[]), None);
+    // A stale id (never spawned) has no side.
+    let stale = EntityId::new(9_999, 7);
+    assert_eq!(who(&[stale]), None);
+    assert_eq!(who(&[stale, meridian]), Some(Faction::Meridian));
+}
+
+/// The units an order is given to are the ones whose side speaks.
+#[test]
+fn an_order_names_the_units_that_speak() {
+    let mut scene = Scene::new(false);
+    let a = scene.unit("rifleman", VEYRAN, 20, 10);
+    let command = Command::Order {
+        ids: vec![a],
+        order: Order::Move(Vec2::from_ints(5, 5)),
+        queued: false,
+    };
+    assert_eq!(order_units(&command), [a]);
+    let other = Command::SpawnUnit {
+        kind: Kind(0),
+        pos: Vec2::from_ints(1, 1),
+        owner: PlayerId(0),
+    };
+    assert!(order_units(&other).is_empty());
 }
 
 /// With a CC0 sound in the bank the event plays through the real `AudioSystem` (recorded by its
@@ -542,13 +767,16 @@ fn a_bank_sound_plays_through_the_audio_system() {
     let mut audio = AudioSystem::silent(&dir);
     audio.set_trace(true);
     let mut v = voices();
-    assert!(v.speak(UnitVoice::Select, 0, &mut audio));
-    assert!(!v.speak(UnitVoice::Move, 100, &mut audio), "inside the gap");
+    assert!(v.speak(UnitVoice::Select, Faction::Meridian, 0, &mut audio));
     assert!(
-        !v.speak(UnitVoice::Attack, 500, &mut audio),
+        !v.speak(UnitVoice::Move, Faction::Meridian, 100, &mut audio),
+        "inside the gap"
+    );
+    assert!(
+        !v.speak(UnitVoice::Attack, Faction::Meridian, 500, &mut audio),
         "no sound for attack"
     );
-    assert!(v.speak(UnitVoice::Move, 500, &mut audio));
+    assert!(v.speak(UnitVoice::Move, Faction::Meridian, 500, &mut audio));
     let names: Vec<String> = audio.take_trace().into_iter().map(|t| t.name).collect();
     assert_eq!(names, ["unit.select", "unit.move"]);
     std::fs::remove_dir_all(dir).ok();

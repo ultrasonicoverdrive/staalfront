@@ -447,11 +447,56 @@ pub const ANNOUNCEMENTS: [Line; 19] = [
     Line { event: "announce.repairing", file: "announce_repairing.wav", text: "Repairing", seed: 319 },
 ];
 
-/// All files as (name, bytes), for the writer and the checker: the unit voices first, then the announcements.
-pub fn files() -> Vec<(String, Vec<u8>)> {
+/// Six more select lines of the Meridian voice (WP11.2d): the same joe voice, the same filter, the same
+/// synthesis settings as [`LINES`], so `unit.select` has nine variants (these six after the three of [`LINES`]).
+/// The texts are the ones `piper_lines.py` renders (with a full stop).
+#[rustfmt::skip]
+pub const MERIDIAN_SELECT_MORE: [Line; 6] = [
+    Line { event: "unit.select", file: "unit_select_go_ahead.wav", text: "Go ahead", seed: 210 },
+    Line { event: "unit.select", file: "unit_select_listening.wav", text: "Listening", seed: 211 },
+    Line { event: "unit.select", file: "unit_select_orders.wav", text: "Orders", seed: 212 },
+    Line { event: "unit.select", file: "unit_select_copy_that.wav", text: "Copy that", seed: 213 },
+    Line { event: "unit.select", file: "unit_select_your_call.wav", text: "Your call", seed: 214 },
+    Line { event: "unit.select", file: "unit_select_on_the_line.wav", text: "On the line", seed: 215 },
+];
+
+/// The Veyran voice (WP11.2d): the Piper voice `en_GB-cori-high` (British female, LibriVox, public domain;
+/// chosen by Tijmen by ear, 16-11-2026) through the same filter. Nine select lines and three each for move and
+/// attack, in the bank events `unit.<kind>.veyran`. The files carry the prefix `cori_` (sources and outputs),
+/// so they never meet joe's. The spoken text is in `piper_lines_cori.py` with its own punctuation
+/// ("Standing by!", "Orders, sir?"); `text` here is the words only.
+#[rustfmt::skip]
+pub const VEYRAN_LINES: [Line; 15] = [
+    Line { event: "unit.select.veyran", file: "cori_unit_select_ready_to_go.wav", text: "Ready to go", seed: 401 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_systems_online.wav", text: "Systems online", seed: 402 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_standing_by.wav", text: "Standing by", seed: 403 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_go_ahead.wav", text: "Go ahead", seed: 404 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_listening_in.wav", text: "Listening in", seed: 405 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_orders_sir.wav", text: "Orders, sir", seed: 406 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_copy_sir.wav", text: "Copy, sir", seed: 407 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_your_call_sir.wav", text: "Your call, sir", seed: 408 },
+    Line { event: "unit.select.veyran", file: "cori_unit_select_on_the_line.wav", text: "On the line", seed: 409 },
+    Line { event: "unit.move.veyran", file: "cori_unit_move_moving_out.wav", text: "Moving out", seed: 410 },
+    Line { event: "unit.move.veyran", file: "cori_unit_move_route_set.wav", text: "Route set", seed: 411 },
+    Line { event: "unit.move.veyran", file: "cori_unit_move_on_my_way.wav", text: "On my way", seed: 412 },
+    Line { event: "unit.attack.veyran", file: "cori_unit_attack_opening_fire.wav", text: "Opening fire", seed: 413 },
+    Line { event: "unit.attack.veyran", file: "cori_unit_attack_target_locked.wav", text: "Target locked", seed: 414 },
+    Line { event: "unit.attack.veyran", file: "cori_unit_attack_engaging_now.wav", text: "Engaging now", seed: 415 },
+];
+
+/// Every line of the tool, in the order of the written files: the nine unit voices, the announcements, the six
+/// more Meridian select lines, the fifteen Veyran lines.
+pub fn all_lines() -> impl Iterator<Item = &'static Line> {
     LINES
         .iter()
         .chain(ANNOUNCEMENTS.iter())
+        .chain(MERIDIAN_SELECT_MORE.iter())
+        .chain(VEYRAN_LINES.iter())
+}
+
+/// All files as (name, bytes), for the writer and the checker, in the order of [`all_lines`].
+pub fn files() -> Vec<(String, Vec<u8>)> {
+    all_lines()
         .map(|l| (l.file.to_string(), l.bytes()))
         .collect()
 }
