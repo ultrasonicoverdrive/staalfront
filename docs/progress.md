@@ -3310,7 +3310,7 @@ What it does not settle:
   `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise`: with a fixture install mapping 14 events, those 14 resolve to
   the original and `weapon.fire.demolition`, `impact.bullet`, `impact.precision`, `impact.miss` play the CC0 file; with the switch off all 18 are CC0.
 * **Volume.** Every file has the same peak (26000 of 32767); the bank volumes are the loudness of the event (0.125 to 0.35), and
-  `a_20_tank_fight_is_not_louder_than_the_music` runs 20 tanks for 10 s (a volley each every 30 ticks, hits, three
+  `a_20_tank_fight_is_at_most_1_8_times_the_music` runs 20 tanks for 10 s (a volley each every 30 ticks, hits, three
   explosions, infantry deaths) through the real planner and audio system, mixes the traced playbacks at sample accuracy from the real
   files and gets a mixed peak of **0.466** of full scale (the music at `music_volume` 0.6 peaks at 0.6 at most). With the first volumes (twice
   these) the peak was 0.932 and the test failed; that is how they were set. The mix ignores pan, pitch and voice limits (an upper bound).
@@ -3674,7 +3674,7 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
   file; tempo, length and size budget; no clipping and no flat top; the loop join; the ends are not silent; equal loudness of the two files; the game's
   decoder (kira) reads both files back sample for sample. `sf_audio` `the_shipped_fallback_music_plays_per_mood_without_red_alert_files`: the shipped config and
   bank, no Red Alert files, calm then combat start `music.calm` and `music.combat` (trace), looped, Music category, no failed play. `sf_audio` `config::tests` pin the
-  shipped fallback names. `sf_game` `a_20_tank_fight_is_not_louder_than_the_music` now pins the `music.combat` bank volume (0.885 x 1.0 x 0.6 = 0.531
+  shipped fallback names. `sf_game` `a_20_tank_fight_is_at_most_1_8_times_the_music` now pins the `music.combat` bank volume (0.885 x 1.0 x 0.6 = 0.531
   against the fight's 0.466) and says in its comment that this is peak against peak, guarded only by the pins.
 * **Mutations** (scratch, reverted): `Song::put` without the wrap (`j = start + i; if j >= n { continue }`): `the_loop_joins_without_a_jump` fails (calm: the last and first
   sample are 10,684 apart, music steps of 1,437 are normal). The other mutations are in the PR body.
@@ -3802,3 +3802,24 @@ without `--ra-audio`; calm plays at the start, combat once the fight is counted)
 * **Environment.** On this machine `cargo test --workspace` hangs in the GPU tests (`screenshot`, `ai_screenshot`, `bench_scene`; no
   adapter), so locally I ran `sf_game --lib` (572 passed), `sf_game --test announcements` (8), `sf_audio`, `sf_voice_gen`, `sf_data`;
   CI runs the rest.
+
+## WP11.3c: more power in the CC0 fight sounds, six sounds redesigned (18-11-2026)
+
+Audio only: `sf_sim` untouched, no checksum or scenario pin moved. Tijmen's verdicts (15 and 16-11-2026, comparing with the Red Alert originals): "alles duidelijk zwakker. meer power er in"; "unit destroyed,
+weapon fire demolition, impact bullet, impact precision en impact miss moeten heel anders"; "fire bullet moet overtuigender". Nobody listened to the result in the build container; everything below is a measurement.
+Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the music, the limiter, Variants).
+
+* **Generator** (`tools/sf_sound_gen`): new integer building blocks `saturate` (cubic soft clip), `sweep_noise`, `crackle`, `saw`, `Mix::drive`, `Mix::slap`; every recipe has a sub thump, a click, a rumble, saturation and (loud ones) echoes;
+  30 files (18 events, six with three variants), 1,015,612 bytes (was 571,926; budget 2 MB). RMS of every file rose from 2,644-5,737 to 6,569-9,327 at the same peak (26,000).
+* **Volumes**: 0.125-0.35 -> 0.5-1.0 (table in audio.md); a single sound is 15 to 20 dB louder in RMS and peaks at 0.40 to 0.79 (was 0.10 to 0.28).
+* **Six redesigned sounds, three files each**: `unit.destroyed.infantry` (synthesised pain cry, fall, gear), `weapon.fire.demolition` (satchel set down, clunk, fuse hiss), `impact.bullet` (dry thwack, debris, a ricochet variant),
+  `impact.precision` (crack and thud, no ping), `impact.miss` (whiz-by crack and dirt puff), `weapon.fire.bullet` (report, muzzle blast, action click, slap; rifle, machine gun, heavy rifle).
+* **Cue limiter reworked, master limiter added** (beyond the brief, forced by the volumes; the first version of the load limiter, a ceiling of 1.0 with a half-life of 6 ticks, made a dense fight **quieter** than before, found by the pre-review sweep).
+  `FxSound::start_cues` keeps a load (gains started, half-life 4 ticks) and turns a frame down to keep it at `max_load_gain` 1.15, with a floor `min_cue_scale` 0.12 and cues of priority >= `protected_priority` 4 (deaths, explosions) not turned down by the load;
+  `max_summed_gain` 2.0. Measured per cue in the 20-tank fight from tick 40: cannon fire 0.30 of its gain (first version 0.10, old 1.0 of a quieter file), cannon hit 0.20 (0.054), large explosion 1.0 (0.04), lone shot's hit 0.79 (0.47).
+  New `sf_audio::limiter`: a master limiter effect on kira's main track (ceiling 0.95, release 150 ms, `audio.ron` `limiter`): the 20-tank fight + the loudest 13 s of the combat music + two voice lines clip in 1,560 of 286,550 samples (peak 1.680) without it and in none with it (peak 0.950).
+* **Loudness rule restated** (steady state, 2 s to 10 s of the 20-tank fight, after the master limiter): RMS >= 2 x the old 0.108 and <= 1.8 x the music's 0.168; measured 0.272 (2.51 x old, 1.62 x music), peak 0.950. Old fight: steady 0.108, peak 0.466. The fight is now allowed to be louder than the music (by 5 dB at most): a change of Tijmen's decision 3 of WP11.3b, for him to confirm.
+* **Voices and announcements raised** 0.35 -> 0.95 (joe, cori, the 19 announcements; #156 is merged): every line's RMS is at least half of the steady fight RMS (0.278): joe 0.147-0.303, cori 0.216-0.366, announcements from 0.173. The stale "0.35 / 0.042 / 0.105" of `voices.md` and `announcements.md` are corrected.
+* **Also**: `play_at_scaled` with scale 0 starts nothing (it took a voice slot); config tests for the shipped values, a file without the new fields, the range edges; a mapped original is left alone with the load full; the heavy-moment numbers (0.719, 0.703, 0.627) are pinned.
+* **Mutations** (each reverted, failing tests named in the PR): see the PR body.
+* **Gaps**: not listened to (the limiters and the six redesigns especially); the cue limiter is a gain model; the master limiter has no attack time (a little distortion on a sharp transient is possible, not judged by ear); the steady fight is 5 dB louder than the music at most, by decision.

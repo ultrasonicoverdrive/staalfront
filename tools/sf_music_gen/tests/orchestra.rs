@@ -632,7 +632,7 @@ fn the_layer_does_not_make_the_combat_track_quieter_and_the_peak_stays_the_file_
         peak(&base),
         peak(&full)
     );
-    // The peak is the file peak either way (the sf_game test `a_20_tank_fight_is_not_louder_than_the_music`
+    // The peak is the file peak either way (the sf_game test `a_20_tank_fight_is_at_most_1_8_times_the_music`
     // measures the fight against 29000 / 32767 x 0.6 = 0.531).
     assert!((FILE_PEAK - 2..=FILE_PEAK).contains(&peak(&full)));
     // The music does not get quieter: the same peak, an RMS within a tenth of the old one or more.

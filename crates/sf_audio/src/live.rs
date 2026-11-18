@@ -54,6 +54,8 @@ pub(crate) trait Player {
     /// Register already decoded audio under a synthetic path (original Red
     /// Alert sounds); kept across [`clear_cache`](Self::clear_cache).
     fn inject(&mut self, key: PathBuf, data: StaticSoundData);
+    /// New numbers for the master limiter on the main track (WP11.3c).
+    fn set_limiter(&mut self, ceiling: f32, release_ms: f32);
 }
 
 pub(crate) fn amplitude_to_db(a: f32) -> Decibels {
@@ -87,11 +89,23 @@ pub(crate) struct Live<B: Backend> {
     music: Option<Music>,
     /// Previous tracks still fading out.
     fading: Vec<StaticSoundHandle>,
+    /// The master limiter on the main track (WP11.3c).
+    limiter: crate::limiter::LimiterHandle,
 }
 
 impl<B: Backend> Live<B> {
-    pub fn new(settings: AudioManagerSettings<B>) -> Result<Self, B::Error> {
+    pub fn new(mut settings: AudioManagerSettings<B>) -> Result<Self, B::Error> {
+        // The master limiter first, with the shipped numbers; `AudioSystem::set_limiter` applies the file's.
+        let shipped = crate::config::LimiterConfig::default();
+        let handle =
+            settings
+                .main_track_builder
+                .add_effect(crate::limiter::MasterLimiterBuilder::new(
+                    shipped.ceiling,
+                    shipped.release_ms,
+                ));
         Ok(Self {
+            limiter: handle,
             manager: AudioManager::new(settings)?,
             cache: BTreeMap::new(),
             injected: BTreeMap::new(),
@@ -243,6 +257,10 @@ impl<B: Backend> Player for Live<B> {
     fn inject(&mut self, key: PathBuf, data: StaticSoundData) {
         self.injected.insert(key, data);
     }
+
+    fn set_limiter(&mut self, ceiling: f32, release_ms: f32) {
+        self.limiter.set(ceiling, release_ms);
+    }
 }
 
 #[cfg(test)]
@@ -260,6 +278,20 @@ mod tests {
             ..Default::default()
         };
         Live::new(settings).unwrap()
+    }
+
+    /// WP11.3c: a `Live` output starts with the shipped limiter numbers and `Player::set_limiter` changes them
+    /// on the effect that is on the main track.
+    #[test]
+    fn the_master_limiter_is_on_the_main_track_and_follows_set_limiter() {
+        let mut l = live();
+        let shipped = crate::config::LimiterConfig::default();
+        assert_eq!(l.limiter.current(), (shipped.ceiling, shipped.release_ms));
+        assert_eq!((shipped.ceiling, shipped.release_ms), (0.95, 150.0));
+        Player::set_limiter(&mut l, 0.5, 80.0);
+        assert_eq!(l.limiter.current(), (0.5, 80.0));
+        // The mixer runs with the effect in place.
+        run(&mut l, 2);
     }
 
     /// Run the mock mixer for `frames` internal buffers.

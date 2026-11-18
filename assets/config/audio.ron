@@ -141,14 +141,24 @@
     // The bank's `max_instances` still caps the voices alive at once.
     positional: (
         max_cues_per_frame: 16,
-        // The limiter (follow-up of WP11.3b): what the playbacks of one frame may add up to, each counted
-        // as bank volume x category volume x master volume x spatial gain (so at a lower master or
-        // Effects slider it engages later in terms of the sounds, not sooner). Above it the frame's cues
-        // are all turned down by the same factor; below it nothing changes. A file peaks at 0.79 of full
-        // scale, so 1.2 keeps ONE frame under 0.95 even if all its peaks met. It holds per frame only:
-        // frames that overlap in time (a file lasts up to 2 s, 40 ticks) are not limited together.
-        // Mapped original sounds are neither counted nor turned down.
-        max_summed_gain: 1.2,
+        // The limiters (WP11.3b follow-up, reworked in WP11.3c). Each cue has a gain: bank volume x category
+        // volume x master volume x spatial gain.
+        //  max_summed_gain       what the cues of ONE frame may add up to; above it they are all turned down
+        //                        by the same factor. 2.0 is about two full-volume sounds.
+        //  max_load_gain         the cues' gains fade with a half-life (load_half_life_ticks, 20 ticks a
+        //                        second); a frame is turned down so the faded sum stays at or below this.
+        //                        A lone shot keeps its hit 4 ticks later at about 0.79 of its gain; in the
+        //                        20-tank fight a cannon shot plays at about 0.3 and its hit at about 0.2.
+        //  min_cue_scale         a cue is never turned down below this share of its own gain by the load.
+        //  protected_priority    cues of events with at least this priority (deaths, explosions) are not turned
+        //                        down by the load at all.
+        // What these do not stop, the master limiter below does. Mapped original sounds are neither counted
+        // nor turned down by the cue limiters.
+        max_summed_gain: 2.0,
+        max_load_gain: 1.15,
+        load_half_life_ticks: 4.0,
+        min_cue_scale: 0.12,
+        protected_priority: 4,
         fallback: (priority: 1, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 6, merge_radius_m: 6.0),
         // A name covers the names below it ("weapon.fire" covers "weapon.fire.bullet"); the longest wins.
         events: {
@@ -175,4 +185,8 @@
             "explosion.large":        (priority: 5, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 8, merge_radius_m: 14.0),
         },
     ),
+    // The master limiter (WP11.3c) on the main track: the sum of the fight, the music and the voices never goes
+    // above `ceiling` (of full scale) and lets go over `release_ms`. kira and the sound device do not limit.
+    limiter: (ceiling: 0.95, release_ms: 150.0),
+
 )
