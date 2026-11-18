@@ -310,3 +310,44 @@ generated (`tools/sf_model_gen/src/buildings.rs`, `objects.rs`, `stages.rs`; `se
   and rebar inside the set v4 heap's size, decor budget.
 - **Far levels keep the height**: antennas, crane masts, stakes and posts stay in every level;
   an outer octagon stays eight-sided at LOD2 where it sets the bounds (the automated gun).
+
+## 12. Decor and wrecks (WP11.6d)
+
+Fourteen neutral files (`tools/sf_model_gen/src/decor.rs`): the four wrecks (`neutral_wreck_light_vehicle`,
+`_medium_vehicle`, `_heavy_vehicle`, `_vessel`), two rocks, a fence, a cliff edge, the four ore field
+stages and the broadleaf tree with its fallen twin. No player colour (third slot `paint3`); the decor
+budget (1500 / 500 / 150), the usual LOD, ground and checker rules.
+
+- **Kept from set v3 (Tijmen):** the pine, the fallen and burnt pine, and the burnt broadleaf
+  (`neutral_tree_pine*`, `neutral_tree_broadleaf_burnt`). The pines are dark green and already pass
+  `sf_asset_check`; the burnt trees are black. They are not in set v5 and not wired yet (trees wait for
+  the map WPs). **Replaced:** the standing and the fallen broadleaf (the set v3 crown is a bright
+  light green), both rocks (olive moss on grey, and both sink 0.3-0.85 m below the ground, which the
+  checker fails), the four wrecks (fail `lod-structure`: LOD2 lacks the `debris` and `scorch` nodes),
+  the fence, the cliff edge (set v4: 60 and 8 triangles) and the ore stages (red-brown with white
+  tips). The ore field role of `unit_defs.ron` now shows `neutral_ore_field_stage_04`.
+- **Palette:** rocks, fence, cliff, ore and wrecks use the `neutral` entry (grey-green stone, rust
+  accent for ore and wrecks, `paint3` light). The broadleaf needs foliage, so there is one new entry,
+  `flora`: foliage `#566246`, sunlit `#687456`, shaded `#3c4630`, bark `#3e342a`, soil `#2e2c28`, dry
+  leaves `#766038` (no channel of a foliage slot above 120, the green at most 16 over the red:
+  `the_flora_palette_has_the_pinned_values`). The six slots keep their order.
+- **Rule: blobs** (`decor::blob`). A rock-like solid is a loft of rings whose radius is jittered by a
+  fixed hash of the *absolute angle*, except at the four compass points, which keep the full radius.
+  The 16-, 8- and 4-sided levels therefore share their extent exactly
+  (`a_blob_keeps_its_extent_in_every_level`), so rocks, nuggets, crowns and the cliff's talus keep
+  their size in the far levels. The base is at `Y = 0`.
+- **Rule: a wreck is burnt.** Nothing in a wreck is unburnt: paint and rust are toned to at most
+  `SOOT` (430 per mille), steel to `BURNT_STEEL` (420), debris and soot on the ground to `CHAR` (380),
+  and the dark pits (a burnt-through deck, rubber) to `PIT` (560, a lower tone crushes the baked
+  corner to black, `no_baked_vertex_crushes_to_black`). A wreck stays inside the vehicle it stands
+  for (light tank 5.11 x 2.90 m, amphibious transport 6.33 x 3.26 m, heavy tank 7.25 x 3.80 m,
+  gunboat 18.0 x 5.0 m) and has real damage: one track gone short, a turret thrown to one side,
+  the engine deck burnt through with a frame round the pit, rust patches, bent plates and chunks.
+  Test: `every_triangle_of_a_wreck_is_burnt`.
+- **Nodes of a wreck:** `hull` (with geometry) -> `turret` -> `barrel` and the empty anchors
+  `fx_smoke_0` and `fx_fire_0` under the hull, in every level (the engine's wreck smoke reads them;
+  the four set v4 wrecks were left out of set v5 for lacking them). No muzzle. The boat wreck is a
+  vessel for the checker: the waterline `Y = 0` lies inside the hull (keel at -0.4 m). Decor (rocks,
+  fence, cliff, ore, trees) is one `body` node without anchors.
+- **The ore field stages** grow in width and in nuggets (4, 6, 9, 13) from stage 1 to 4
+  (`the_ore_field_stages_grow`); the nuggets are rust-brown with grey tops on dark soil.
