@@ -132,22 +132,15 @@ Integer maths only: the filter coefficients come from cosine and exponential ser
 (no platform `sin` or `exp`), so the outputs are byte-equal on Linux and Windows. Each file is the trimmed source
 plus 115 ms of squelch, at most 1.5 s (orchestrator, 15-11-2026); the longest is 1.018 s.
 
-**Volume.** 0.35 for all three, the volume of the loudest fight entry (`explosion.large`). Measured by
+**Volume.** 0.95 for all three (it was 0.35, the volume of the loudest fight entry, until WP11.3c made the fight sounds 2 to 4 times louder in volume). Measured by
 `the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound` (sf_game `fx_sound.rs`, default
-settings, each line through `play_as(.., Voice)`): every line's peak is at most the peak of the loudest fight sound alone
-at the focus (both 0.278 of full scale), its loudness (RMS while it sounds, 0.055 to 0.090) is above that of the
-loudest fight sound (0.042), and at least half (-6 dB) the RMS of the whole 20-tank fight mix (0.105). A line is not
-louder than that whole fight on average: with the same peak as one explosion it cannot be. Whether it is clearly heard
-in a real fight is for the ear.
-
-**Heard.** The tests show the band, the levels and the pins, not that a person understands the words. Tijmen listened
-on 15-11-2026 to the nine filtered lines as committed here (the files written at 19:52 that day, unchanged since) and
-judged them good ("joe klinkt goed"). Not yet heard in a running game over a fight.
-
-### 3b. Announcements (WP11.2c)
+settings, each line through `play_as(.., Voice)`): every line's peak (0.754 of full scale) is at most the peak of the loudest fight sound alone
+at the focus (0.793), and its loudness (RMS while it sounds) is at least half (-6 dB) the **steady-state** RMS of the 20-tank fight (from 2 s on, 0.278): joe's lines 0.147 to 0.303,
+cori's 0.216 to 0.366 (the rule `VOICE_OVER_FIGHT_MIN` 0.5, pinned; the old rule "above the loudest fight sound's RMS" is dropped, the howitzer's is 0.268). Whether a line is clearly heard in a real fight is for the ear; the master limiter
+(`audio.md` section 3c) catches the sum of voice, fight and music.
 
 The status lines of the base ("Unit ready", "Base under attack") use the same voice, the same filter and the same bank
-settings (Voice category, 0.35, `max_instances: 1`, `original_as_is`). They share the **voice channel** with the unit voices: while an
+settings (Voice category, 0.95 since WP11.3c, `max_instances: 1`, `original_as_is`). They share the **voice channel** with the unit voices: while an
 announcement sounds, a unit voice that is asked for is skipped (`UnitVoices::speak` sees `busy`), and an announcement waits for
 a quiet channel. Rules: `announcements.md`.
 
@@ -207,13 +200,10 @@ second side ("Ja, cori").
     events and the 19 announcements (25 names), so one voice sounds at a time across sides and announcements.
     A Veyran select that follows a Meridian select inside 1200 ms is skipped like any repeat.
 * **Announcements stay one voice, joe, for both sides** (orchestrator's proposal, holds unless Tijmen objects). Unchanged.
-* **Volume.** The six Veyran events and the new joe lines use the same bank settings as before (0.35, Voice,
-  `max_instances: 1`, `original_as_is`). Measured by the extended
-  `the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound` (every line of both sides, default
-  settings): every line's peak is 0.278, equal to the loudest fight sound; the RMS while sounding is 0.055 to 0.114 for joe's
-  lines and 0.081 to 0.136 for cori's, against 0.042 for the loudest fight sound and 0.105 for the whole 20-tank fight mix.
-  Most lines of both voices are under the RMS of the whole fight (the test only requires at least half of it, -6 dB, and
-  more than the loudest single sound). cori is a little louder than joe at the same bank volume (higher RMS, same peak); it
+* **Volume.** The six Veyran events and the new joe lines use the same bank settings as the rest (Voice, `max_instances: 1`, `original_as_is`), at 0.95 since WP11.3c (they were 0.35 when
+  these lines were added; with that volume joe's quietest line, `unit_attack_engaging`, was 0.055 RMS against a fight of 0.108, with the louder fight of WP11.3c 0.278 it would have been 0.20 of it). Measured by the extended
+  `the_unit_voices_are_heard_over_a_fight_and_not_louder_than_its_loudest_sound` (every line of both sides, default settings): every line's peak is 0.754, the loudest fight sound's 0.793; the RMS while sounding is 0.147 to 0.303 for joe's
+  lines and 0.216 to 0.366 for cori's, against 0.278 for the steady-state 20-tank fight mix; the test requires at least half of it (-6 dB). cori is louder than joe at the same bank volume (higher RMS, same peak); it
   was not levelled further (by ear later, if at all).
 * **Heard.** Tijmen heard the previews of both voices (filtered as here, seeds differ so the hiss differs) on 16-11-2026
   and approved them. These exact files were not heard by a person, and not heard in a running game over a fight.

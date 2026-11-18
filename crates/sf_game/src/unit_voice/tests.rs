@@ -597,7 +597,7 @@ fn the_shipped_bank_speaks_both_sides_each_in_its_own_voice() {
                     );
                 }
             }
-            assert_eq!(trace.gain, 0.35, "{}", trace.file);
+            assert_eq!(trace.gain, 0.95, "{}", trace.file);
         }
     }
     assert_eq!(audio.stats().unknown, 0);

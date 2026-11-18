@@ -79,6 +79,8 @@ pub fn start_audio_with(
     audio.set_spatial_params(config.spatial.params());
     // Dynamic music (WP11.4): crossfade and default tracks.
     audio.set_music_config(&config.music);
+    // The master limiter on the output (WP11.3c).
+    audio.set_limiter(config.limiter);
     apply_mix(audio, &now.mix);
     (FxSound::new(&config), warning, base)
 }
@@ -116,6 +118,10 @@ pub struct FxSound {
     max_summed_gain: f32,
     /// `positional.max_load_gain` and the per-tick fade made from `positional.load_half_life_ticks` (WP11.3c).
     max_load_gain: f32,
+    /// `positional.min_cue_scale` and `positional.protected_priority`, and the rules to look the priority up in.
+    min_cue_scale: f32,
+    protected_priority: u8,
+    positional: sf_audio::config::PositionalConfig,
     load_fade_per_tick: f32,
     /// The time-aware limiter's state: the faded sum of the gains started so far and the sim tick it is for.
     load: f32,
@@ -143,6 +149,9 @@ impl FxSound {
             planner: Planner::new(config.positional.clone()),
             max_summed_gain: config.positional.max_summed_gain,
             max_load_gain: config.positional.max_load_gain,
+            min_cue_scale: config.positional.min_cue_scale,
+            protected_priority: config.positional.protected_priority,
+            positional: config.positional.clone(),
             load_fade_per_tick: 0.5f32.powf(1.0 / config.positional.load_half_life_ticks),
             load: 0.0,
             load_tick: 0,
@@ -234,45 +243,75 @@ impl FxSound {
         stats
     }
 
-    /// Starts the planned `cues` on `audio`. The limiter has two parts. (1) Per frame: when the gains of the
-    /// frame's cues (what `AudioSystem::play_at` would give each) add up to more than `max_summed_gain`, all are
-    /// turned down by the same factor. (2) Over time (WP11.3c): the gains started so far fade with a half-life
-    /// (`load_half_life_ticks`, by the cues' sim ticks) into a load, and a frame is turned down further so that
-    /// the load stays at or below `max_load_gain`; this is what holds a dense fight of overlapping sounds. A
-    /// quieter frame in a quiet moment plays unchanged. A mapped original sound is neither counted nor turned
-    /// down (it plays as it did before the limiter, 3c of `audio.md`). Returns the factor (1.0 = untouched).
+    /// Starts the planned `cues` on `audio`. The cue limiter (the master limiter on the output catches what is
+    /// left, `sf_audio::limiter`) has three parts, in this order:
+    /// 1. **Per frame**: when the gains of the frame's cues (what `AudioSystem::play_at` would give each) add up to
+    ///    more than `max_summed_gain`, all are turned down by the same factor.
+    /// 2. **Load over time** (WP11.3c): the gains started so far fade with a half-life (`load_half_life_ticks`, by
+    ///    the cues' sim ticks) into a *load*; the frame's cues are turned down together so that the load stays at or
+    ///    below `max_load_gain`. The cues of an event whose rule has a `priority` of at least `protected_priority`
+    ///    (deaths and explosions) are not turned down by the load and take their share of the room first.
+    /// 3. **Floor**: no cue is turned down by the load below `min_cue_scale` of its own gain, so a saturated fight
+    ///    still plays every sound.
+    ///
+    /// A mapped original sound is neither counted nor turned down (it plays as it did before the limiter, 3c of
+    /// `audio.md`). Returns the share of the frame's summed gain that was played (1.0 = untouched).
     pub fn start_cues(&mut self, audio: &mut AudioSystem, cues: &[Cue]) -> f32 {
-        let mut sum = 0.0;
-        let mut tick = self.load_tick;
-        for cue in cues {
-            if !audio.is_original(cue.sound) {
-                sum += audio.gain_at(cue.sound, cue.pos);
-            }
-            tick = tick.max(cue.tick);
-        }
+        let gains: Vec<f32> = cues
+            .iter()
+            .map(|c| {
+                if audio.is_original(c.sound) {
+                    0.0
+                } else {
+                    audio.gain_at(c.sound, c.pos)
+                }
+            })
+            .collect();
+        let protected: Vec<bool> = cues
+            .iter()
+            .map(|c| self.positional.rule(c.sound).priority >= self.protected_priority)
+            .collect();
+        let sum: f32 = gains.iter().sum();
+        let tick = cues.iter().map(|c| c.tick).fold(self.load_tick, u64::max);
         // The load fades by the sim ticks since the last frame with cues (never backwards).
         self.load *= self
             .load_fade_per_tick
             .powi(i32::try_from(tick - self.load_tick).unwrap_or(i32::MAX));
         self.load_tick = tick;
-        let mut scale = 1.0f32;
-        if sum > self.max_summed_gain {
-            scale = self.max_summed_gain / sum;
-        }
-        if sum * scale > 0.0 {
-            let room = (self.max_load_gain - self.load).max(0.0);
-            scale = scale.min(room / sum);
-        }
-        self.load += sum * scale;
-        for cue in cues {
+        let frame = if sum > self.max_summed_gain {
+            self.max_summed_gain / sum
+        } else {
+            1.0
+        };
+        let kept: f32 = gains
+            .iter()
+            .zip(&protected)
+            .filter(|(_, p)| **p)
+            .map(|(g, _)| g * frame)
+            .sum();
+        let loose: f32 = gains
+            .iter()
+            .zip(&protected)
+            .filter(|(_, p)| !**p)
+            .map(|(g, _)| g * frame)
+            .sum();
+        let room = (self.max_load_gain - self.load - kept).max(0.0);
+        let by_load = if loose > room { room / loose } else { 1.0 };
+        let loose_scale = frame * by_load.max(self.min_cue_scale);
+        let mut played = 0.0;
+        for ((cue, gain), protected) in cues.iter().zip(&gains).zip(&protected) {
             let own = if audio.is_original(cue.sound) {
                 1.0
+            } else if *protected {
+                frame
             } else {
-                scale
+                loose_scale
             };
+            played += gain * own;
             audio.play_at_scaled(cue.sound, cue.pos, own);
         }
-        scale
+        self.load += played;
+        if sum > 0.0 { played / sum } else { 1.0 }
     }
 
     /// What the runner calls once a frame, after `fx.frame(..)`: plan the sounds of the events just shown and
@@ -855,7 +894,11 @@ mod tests {
         };
         let text = sf_audio::config::EMBEDDED_CONFIG
             .replace("max_pan: 0.9", "max_pan: 0.45")
-            .replace("sfx_volume: 1.0", "sfx_volume: 0.5");
+            .replace("sfx_volume: 1.0", "sfx_volume: 0.5")
+            .replace(
+                "limiter: (ceiling: 0.95, release_ms: 150.0)",
+                "limiter: (ceiling: 0.8, release_ms: 300.0)",
+            );
         let text = spacing(
             &spacing(&text, "min_spacing_ticks: "),
             "far_spacing_ticks: ",
@@ -866,6 +909,11 @@ mod tests {
         let mut audio = tracing_audio(&scratch.0);
         let (mut sound, warning) = start_audio(&scratch.0, None, &mut audio);
         assert_eq!(warning, None, "the scratch file is valid");
+        // The master limiter numbers of the file reach the audio system (WP11.3c).
+        assert_eq!(
+            (audio.limiter().ceiling, audio.limiter().release_ms),
+            (0.8, 300.0)
+        );
         let (gain, pan, cues) = stream_through(&mut sound, &mut audio);
 
         // The same root without the file: the shipped numbers.
@@ -873,6 +921,7 @@ mod tests {
         let mut shipped_audio = tracing_audio(&scratch.0);
         let (mut shipped, w) = start_audio(&scratch.0, None, &mut shipped_audio);
         assert_eq!(w, None);
+        assert_eq!(shipped_audio.limiter().ceiling, 0.95);
         let (g0, p0, n0) = stream_through(&mut shipped, &mut shipped_audio);
 
         assert!((pan - p0 * 0.5).abs() < 1e-5, "pan {pan} vs shipped {p0}");
@@ -1117,13 +1166,23 @@ mod tests {
         }
     }
 
-    /// WP11.3c, the time-aware part of the limiter on its own: a bank that plays every name at volume 1.0,
-    /// one cue per frame through the planner and `start_cues`. A cue alone plays at full gain and the load is
-    /// 1.0; 6 ticks later (the half-life) the load is 0.5 so the next cue gets 0.5; a cue on the same tick finds
-    /// no room (0); a long pause lets it fade away (1.0 again); `reset` forgets it.
+    /// WP11.3c, the load part of the limiter on its own: a bank that plays every name at volume 1.0, one cue per
+    /// frame through the planner and `start_cues`, with the shipped numbers (ceiling 1.15, half-life 4 ticks, floor
+    /// 0.12, protected from priority 4). A cue alone plays at full gain and the load is 1.0; 4 ticks later (the
+    /// half-life) the load is 0.5 and the next cue gets what is left, 0.65; on the same tick there is no room and
+    /// the cue plays at the floor 0.12; a large explosion (priority 5) at that moment is not turned down at all;
+    /// after a long pause a cue is at full gain again; `reset` forgets the load.
     #[test]
     fn the_load_limiter_fades_with_its_half_life() {
         let (fx, mut sound) = setup();
+        assert_eq!(
+            (
+                sound.max_load_gain,
+                sound.min_cue_scale,
+                sound.protected_priority
+            ),
+            (1.15, 0.12, 4)
+        );
         let mut audio = all_names_audio("load_fade");
         let l = listener(30.0);
         audio.set_listener(l);
@@ -1141,14 +1200,43 @@ mod tests {
             sound.start_cues(&mut audio, &cues)
         };
         let at = [12.0, 12.0];
-        assert_eq!(play(&mut sound, death_at(8.0, true, at, 0)), 1.0);
-        let half = play(&mut sound, death_at(6.0, false, at, 6));
-        assert!((half - 0.5).abs() < 1e-3, "{half}");
-        let none = play(&mut sound, death_at(4.8, false, at, 6));
-        assert!(none < 1e-3, "{none}");
-        assert_eq!(play(&mut sound, death_at(8.0, true, at, 400)), 1.0);
+        let (cannon, rocket, shell) = (weapon("cannon"), weapon("rocket"), weapon("battery_shell"));
+        assert_eq!(play(&mut sound, fire_at(cannon, at, 0)), 1.0);
+        let half = play(&mut sound, fire_at(rocket, at, 4));
+        assert!((half - 0.65).abs() < 1e-3, "{half}");
+        let none = play(&mut sound, fire_at(shell, at, 4));
+        assert!((none - 0.12).abs() < 1e-3, "no room: the floor, {none}");
+        let big = play(&mut sound, death_at(8.0, true, at, 4));
+        assert_eq!(big, 1.0, "a large explosion is not turned down by the load");
+        assert_eq!(play(&mut sound, fire_at(cannon, at, 400)), 1.0);
         sound.reset();
-        assert_eq!(play(&mut sound, death_at(6.0, false, at, 0)), 1.0);
+        assert_eq!(play(&mut sound, fire_at(rocket, at, 0)), 1.0);
+    }
+
+    /// WP11.3c: a mapped original is left alone when the load is full, and does not add to the load. A frame of
+    /// bank sounds fills the load; a frame with only the original (`explosion.large`, mapped in the fixture) then
+    /// plays at gain 1.0 and the load is the same after it as before.
+    #[test]
+    fn a_mapped_original_is_left_alone_when_the_load_is_full() {
+        let (mut fx, mut sound) = setup();
+        let mut audio = audio_with_one_original("original_full");
+        loud_events(&mut fx);
+        let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 1, listener(30.0));
+        assert_eq!(trace.len(), 3);
+        let full = sound.load;
+        assert!(
+            full >= sound.max_load_gain - 1e-3,
+            "the load is full: {full}"
+        );
+        fx.push_events(&[death_at(8.0, true, [12.0, 12.0], 1)]);
+        let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 2, listener(30.0));
+        assert_eq!(trace.len(), 1);
+        assert_eq!(
+            (trace[0].name.as_str(), trace[0].gain),
+            ("explosion.large", 1.0)
+        );
+        // Only the fade of one tick has acted on the load; the original added nothing.
+        assert!(sound.load <= full + 1e-6, "{} after {full}", sound.load);
     }
 
     fn shipped_bank() -> sf_audio::Bank {
@@ -1228,6 +1316,17 @@ mod tests {
     /// [`fight_mix`] with the two parts of the limiter set apart: the per-frame sum (`frame`) and the load over
     /// time (`load`); `None` is the shipped number, `Some(f32::MAX)` switches that part off.
     fn fight_mix_with(frames: &[Vec<FxEvent>], frame: Option<f32>, load: Option<f32>) -> Vec<f32> {
+        fight_run(frames, frame, load).mix
+    }
+
+    /// What [`fight_run`] returns: the mixed samples and, for every cue that played, (sim tick, sound, the share
+    /// of its own gain it played at).
+    struct FightRun {
+        mix: Vec<f32>,
+        scales: Vec<(u64, String, f32)>,
+    }
+
+    fn fight_run(frames: &[Vec<FxEvent>], frame: Option<f32>, load: Option<f32>) -> FightRun {
         let (fx, mut sound) = setup();
         if let Some(frame) = frame {
             sound.max_summed_gain = frame;
@@ -1241,6 +1340,7 @@ mod tests {
         let per_tick = 22_050 / 20;
         let mut mix = vec![0.0f32; frames.len() * per_tick + 3 * 22_050];
         let mut cues = Vec::new();
+        let mut scales = Vec::new();
         let mut cache: std::collections::BTreeMap<String, Vec<i16>> = Default::default();
         for (f, events) in frames.iter().enumerate() {
             sound.plan_events(
@@ -1251,8 +1351,10 @@ mod tests {
                 |n| audio.has_sound(n),
                 &mut cues,
             );
+            let own: Vec<f32> = cues.iter().map(|c| audio.gain_at(c.sound, c.pos)).collect();
             sound.start_cues(&mut audio, &cues);
-            for t in audio.take_trace() {
+            for (t, own) in audio.take_trace().into_iter().zip(own) {
+                scales.push((f as u64, t.name.clone(), t.gain / own));
                 // The file the trace says was picked (a sound with variants plays one of several).
                 let samples = cache
                     .entry(t.file.clone())
@@ -1262,7 +1364,13 @@ mod tests {
                 }
             }
         }
-        mix
+        FightRun { mix, scales }
+    }
+
+    /// The samples of `mix` from 2 s on to the end of the fight (200 ticks, 10 s): the steady state, without the
+    /// onset in which the first shots meet an empty load.
+    fn steady(mix: &[f32]) -> &[f32] {
+        &mix[2 * 22_050..200 * (22_050 / 20)]
     }
 
     /// Root mean square of `x`, over the samples above a thousandth of full scale (the sound, not its silence).
@@ -1271,14 +1379,11 @@ mod tests {
         (on.iter().map(|v| v * v).sum::<f32>() / on.len().max(1) as f32).sqrt()
     }
 
-    /// Restated in WP11.3c (the fight sounds got 2 to 4 times louder in volume, the voices did not, bank volume
-    /// 0.35): a voice's RMS must be at least this share of the 20-tank fight mix's RMS (it was one half, -6 dB,
-    /// in WP11.2b) and of the loudest single fight sound's RMS (it was "above", 1.0). The quietest line is
-    /// `unit_attack_engaging` at an RMS of 0.055. A voice is band-limited speech (about 300 Hz to 3 kHz) and the
-    /// fight sounds sit mostly below 300 Hz, so they mask it less than their level suggests; that is a reason,
-    /// not a measurement. Raising the voice volumes is a one-number change per entry if this proves too quiet.
-    const VOICE_OVER_FIGHT_MIN: f32 = 0.35;
-    const VOICE_OVER_LOUDEST_MIN: f32 = 0.15;
+    /// A voice line's RMS must be at least this share of the steady-state RMS of the 20-tank fight ([`steady`]:
+    /// from 2 s on, so the onset does not count), for the unit voices of both sides (joe and cori) and, in
+    /// `the_announcements_are_heard_over_a_fight`, for the announcements. Half is -6 dB, as in WP11.2b. WP11.3c
+    /// raised the voice bank volumes from 0.35 to 0.9 so this holds with the louder fight (measured below).
+    const VOICE_OVER_FIGHT_MIN: f32 = 0.5;
 
     /// WP11.2b: the unit voices at the default settings (voice volume 1.0, effects 1.0) are clearly heard
     /// over the 20-tank fight, and not louder than the loudest single fight sound. Each of the nine lines is
@@ -1293,7 +1398,7 @@ mod tests {
         assert_eq!(cfg.mix.sfx_volume, 1.0);
         let bank = shipped_bank();
         let fight = fight_mix(&tank_fight(), None);
-        let fight_rms = rms_of_sound(&fight);
+        let fight_rms = rms_of_sound(steady(&fight));
         let (mut loudest_peak, mut loudest_rms, mut loudest) = (0.0f32, 0.0f32, "");
         for (name, ev) in every_fight_event([12.0, 12.0], 0) {
             let alone = fight_mix(&[vec![ev]], None);
@@ -1342,14 +1447,47 @@ mod tests {
                     "{}: rms {rms} below {VOICE_OVER_FIGHT_MIN} of the fight's {fight_rms}",
                     t.file
                 );
-                assert!(
-                    rms >= loudest_rms * VOICE_OVER_LOUDEST_MIN,
-                    "{}: rms {rms} below {VOICE_OVER_LOUDEST_MIN} of {loudest}'s {loudest_rms}",
-                    t.file
-                );
             }
             assert_eq!(heard.len(), lines, "{event}: {heard:?}");
         }
+    }
+
+    /// WP11.3c (A3): the 19 announcements of the shipped bank, through the game's own path
+    /// (`AudioSystem::play_as(.., Voice)`), are as loud as the unit voices: each line's RMS is at least
+    /// [`VOICE_OVER_FIGHT_MIN`] of the steady-state RMS of the 20-tank fight, its peak is no higher than the
+    /// loudest single fight sound's, and every one has the volume 0.95 of the unit voices (pinned).
+    #[test]
+    fn the_announcements_are_heard_over_a_fight() {
+        let bank_text = std::fs::read_to_string(assets().join("audio/bank.ron")).unwrap();
+        let names: Vec<&str> = bank_text
+            .split('"')
+            .filter(|t| t.starts_with("announce."))
+            .collect();
+        assert_eq!(names.len(), 19, "{names:?}");
+        let bank = shipped_bank();
+        let fight_rms = rms_of_sound(steady(&fight_mix(&tank_fight(), None)));
+        let mut loudest_peak = 0.0f32;
+        for (_, ev) in every_fight_event([12.0, 12.0], 0) {
+            loudest_peak = loudest_peak.max(peak_of(&fight_mix(&[vec![ev]], None)));
+        }
+        let mut audio = tracing_audio(&assets());
+        let mut quietest = f32::MAX;
+        for name in names {
+            assert_eq!(bank.get(name).unwrap().volume, 0.95, "{name}");
+            audio.play_as(name, sf_audio::Category::Voice);
+            let t = audio.take_trace().pop().unwrap();
+            let line: Vec<f32> = wav_samples(&t.file)
+                .iter()
+                .map(|v| f32::from(*v) / 32_768.0 * t.gain)
+                .collect();
+            let (rms, peak) = (rms_of_sound(&line), peak_of(&line));
+            quietest = quietest.min(rms);
+            assert!(rms >= fight_rms * VOICE_OVER_FIGHT_MIN, "{name}: rms {rms}");
+            assert!(peak <= loudest_peak, "{name}: peak {peak}");
+        }
+        println!(
+            "WP11.3c: announcements: quietest rms {quietest:.3} against the fight's steady {fight_rms:.3}"
+        );
     }
 
     /// 20 tanks in a cluster at the focus fire a volley every 30 ticks, staggered, each shell hits 4 ticks later;
@@ -1382,12 +1520,14 @@ mod tests {
             .collect()
     }
 
+    /// The steady-state RMS of the 20-tank fight (from 2 s on) on main before WP11.3c (commit 37002cf3: old files, bank
+    /// volumes 0.125-0.35, the per-frame limiter at 1.2 only), measured with this same harness on that commit:
+    /// whole fight RMS 0.105, steady 0.108, peak 0.466.
+    const OLD_STEADY_RMS: f32 = 0.108;
+
     /// RMS of the combat track as a share of full scale: 9,158 of 32,768, pinned in `sf_music_gen`
     /// `tests/orchestra.rs` (`RMS_AFTER`), times its bank volume (1.0, pinned below) and the default music volume.
     const MUSIC_COMBAT_RMS: f32 = 9_158.0 / 32_768.0;
-
-    /// The loudest the mixed 20-tank fight may peak at, of full scale: under 1.0 so the fight alone does not clip.
-    const FIGHT_PEAK_CEILING: f32 = 0.85;
 
     /// The shipped music at the default settings: its RMS as a share of full scale.
     fn music_rms_at_default_settings() -> f32 {
@@ -1402,38 +1542,177 @@ mod tests {
         MUSIC_COMBAT_RMS * combat.volume * cfg.mix.music_volume
     }
 
-    /// The loudness rule of the fight against the music (WP11.3c, replaces the peak rule of WP11.3b/11.4b, which
-    /// was fight peak <= 0.5 against a music peak of 0.531 and left no room for a louder fight). The music is a
-    /// steady wall, the fight is bursts, so peak against peak says little; the rule is about how much sound there
-    /// is. At the default settings the combat track (peak 29,000 and RMS 9,158 of 32,768, bank volume 1.0, music
-    /// volume 0.6) has an RMS of 0.168. The 20-tank fight, the loudest ordinary fight, measured over the time it
-    /// sounds (`rms_of_sound`), must have **an RMS of at most the music's** (so the music still carries: it is
-    /// never the quieter of the two) and **at least half of it** (so the fight is heard), and it must not peak
-    /// above [`FIGHT_PEAK_CEILING`] (no clipping of the fight itself). The music side is guarded by the pins in
-    /// [`music_rms_at_default_settings`] and in `sf_music_gen`; change one and this test must be looked at again.
+    fn peak_of(x: &[f32]) -> f32 {
+        x.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+    }
+
+    /// `x` through the production master limiter with the shipped numbers (`audio.ron` `limiter`).
+    fn master_limited(x: &[f32]) -> Vec<f32> {
+        let mut y = x.to_vec();
+        sf_audio::limit_samples(&mut y, 22_050, AudioConfig::embedded().limiter);
+        y
+    }
+
+    /// The loudness rule of the fight against the music (WP11.3c, restates the peak rule of WP11.3b/11.4b, which
+    /// was fight peak <= 0.5 against a music peak of 0.531 and left no room for a louder fight). Measured on the
+    /// steady state of the 20-tank fight (from 2 s on; the onset, in which the first shots meet an empty load,
+    /// is left out because it hid the quiet of the steady state in the first version of this rule), after the
+    /// master limiter. The combat music at the default settings has an RMS of 0.168 (the file's 9,158 of
+    /// 32,768, bank volume 1.0, `music_volume` 0.6). The rule: the fight's steady RMS is **at least twice
+    /// what it was before WP11.3c** (0.108, so a dense fight is clearly louder, not quieter) and **at most
+    /// 1.8 times the music's** (the fight may be louder than the music, by 5 dB at most). The music side is
+    /// guarded by the pins in [`music_rms_at_default_settings`] and in `sf_music_gen`.
     #[test]
     fn a_20_tank_fight_is_not_louder_than_the_music() {
         let music_rms = music_rms_at_default_settings();
-        let fight = fight_mix(&tank_fight(), None);
-        let rms = rms_of_sound(&fight);
-        let peak = fight.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        let run = fight_run(&tank_fight(), None, None);
+        let raw = rms_of_sound(steady(&run.mix));
+        let limited = master_limited(&run.mix);
+        let rms = rms_of_sound(steady(&limited));
         println!(
-            "WP11.3c: 20-tank fight peak {peak:.3}, rms {rms:.3}; music.combat rms {music_rms:.3} (fight/music {:.2})",
+            "WP11.3c: 20-tank fight steady rms {rms:.3} after the master limiter ({raw:.3} before), whole {:.3}, peak {:.3} ({:.3} before); old steady {OLD_STEADY_RMS}, music {music_rms:.3}; fight/old {:.2}, fight/music {:.2}",
+            rms_of_sound(&limited),
+            peak_of(&limited),
+            peak_of(&run.mix),
+            rms / OLD_STEADY_RMS,
             rms / music_rms
         );
         assert!(
-            rms <= music_rms,
-            "fight rms {rms} above the music's {music_rms}"
+            rms >= 2.0 * OLD_STEADY_RMS,
+            "the dense fight is not clearly louder than before: {rms}"
         );
         assert!(
-            rms >= music_rms / 2.0,
-            "the fight is too quiet to hear: rms {rms}"
+            rms <= 1.8 * music_rms,
+            "fight rms {rms} above 1.8 times the music's {music_rms}"
+        );
+        assert!(peak_of(&limited) <= 0.95 + 1e-5, "{}", peak_of(&limited));
+    }
+
+    /// WP11.3c, the core of the WP: the cue limiter must not make a dense fight quieter than before (the first
+    /// version did: a saturated load freed 0.109 of gain a tick, cannon fire played at 0.10 of its volume, a hit at 0.05,
+    /// the large explosion at 0.04). Measured from tick 40 of the 20-tank fight (`tank_fight`), the share of
+    /// its own gain each cue played at: cannon fire 0.30 (was 0.10), cannon hit 0.20 (was 0.054), the large
+    /// explosion 1.0 (a death is protected, was 0.04), the floor `min_cue_scale` 0.12 is never undercut; a lone
+    /// shot and its hit 4 ticks later (the first version ducked it from 0.85 to 0.40) keeps 0.79 of it.
+    #[test]
+    fn the_cue_limiter_keeps_every_cue_audible_in_a_dense_fight() {
+        let run = fight_run(&tank_fight(), None, None);
+        let mean = |name: &str| {
+            let v: Vec<f32> = run
+                .scales
+                .iter()
+                .filter(|(t, n, _)| *t >= 40 && n == name)
+                .map(|(_, _, s)| *s)
+                .collect();
+            assert!(!v.is_empty(), "{name}: no cues");
+            let min = v.iter().cloned().fold(9.0f32, f32::min);
+            (v.iter().sum::<f32>() / v.len() as f32, min, v.len())
+        };
+        let (fire, fire_min, nf) = mean("weapon.fire.cannon");
+        let (hit, hit_min, nh) = mean("impact.cannon");
+        println!(
+            "WP11.3c: dense fight, share of own gain from tick 40: cannon fire mean {fire:.3} min {fire_min:.3} ({nf} cues), cannon hit mean {hit:.3} min {hit_min:.3} ({nh} cues)"
+        );
+        assert!(fire >= 0.25, "{fire}");
+        assert!(hit >= 0.15, "{hit}");
+        let floor = AudioConfig::embedded().positional.min_cue_scale;
+        assert!(fire_min >= floor - 1e-4 && hit_min >= floor - 1e-4);
+        // A high-priority sound in a full fight: the large explosion at tick 100 plays at its full gain, and so
+        // do the medium ones and the infantry deaths.
+        for name in [
+            "explosion.large",
+            "explosion.medium",
+            "unit.destroyed.infantry",
+        ] {
+            let (m, lo, n) = mean(name);
+            println!("WP11.3c: {name}: mean {m:.3} min {lo:.3} ({n} cues)");
+            assert!(lo >= 0.999, "{name} turned down to {lo}");
+        }
+        // A lone shot and its hit.
+        let lone = fight_run(
+            &[
+                vec![fire_at(weapon("cannon"), [12.0, 12.0], 0)],
+                vec![],
+                vec![],
+                vec![],
+                vec![hit_at(weapon("cannon"), true, true, [20.0, 12.0], 4)],
+            ],
+            None,
+            None,
+        );
+        println!("WP11.3c: lone shot and hit: {:?}", lone.scales);
+        assert_eq!(lone.scales.len(), 2);
+        assert!(lone.scales[0].2 >= 0.999);
+        assert!(
+            lone.scales[1].2 >= 0.75,
+            "the hit is ducked by its own shot: {}",
+            lone.scales[1].2
+        );
+        // And it is louder than the first version's model (a half-life of 6 and a ceiling of 1.0 with no
+        // floor): that setting is not reachable any more, so this is pinned by the numbers above.
+    }
+
+    /// The combat music (loudest 13 s window by RMS, at its bank volume times the music volume) and two unit
+    /// voice lines (at their bank volume, at 5 s and 8 s) mixed with the fight, at sample accuracy.
+    fn fight_music_and_voice(fight: &[f32]) -> Vec<f32> {
+        let cfg = AudioConfig::embedded();
+        let bank = shipped_bank();
+        let (rate, music) =
+            sf_audio::decode_mono(&assets().join("audio/music/combat.flac")).unwrap();
+        assert_eq!(rate, 22_050);
+        let n = fight.len();
+        let gain = bank.get("music.combat").unwrap().volume * cfg.mix.music_volume;
+        let energy: Vec<f64> = music.iter().map(|v| f64::from(*v).powi(2)).collect();
+        let (mut best, mut best_at) = (0.0f64, 0usize);
+        for start in (0..music.len() - n).step_by(22_050) {
+            let e: f64 = energy[start..start + n].iter().sum();
+            if e > best {
+                (best, best_at) = (e, start);
+            }
+        }
+        let mut mix: Vec<f32> = fight
+            .iter()
+            .zip(&music[best_at..best_at + n])
+            .map(|(f, m)| f + m * gain)
+            .collect();
+        let voice = bank.get("unit.attack").unwrap();
+        for at in [5 * 22_050, 8 * 22_050] {
+            for (i, v) in wav_samples("audio/voice/unit_attack_engaging.wav")
+                .iter()
+                .enumerate()
+            {
+                mix[at + i] += f32::from(*v) / 32_768.0 * voice.volume;
+            }
+        }
+        mix
+    }
+
+    /// WP11.3c (A6): one howitzer peaks at 0.793, the combat music at 0.53, a voice at 0.7: summed they clip, and
+    /// kira and the sound device do not limit. The sum of the 20-tank fight, the loudest 13 s of the combat music
+    /// at the default volume and two voice lines is counted for samples above full scale before and after the
+    /// master limiter (`sf_audio::limit_samples`, the effect the output runs, numbers from `audio.ron`).
+    #[test]
+    fn fight_music_and_voice_together_clip_without_the_master_limiter_and_not_with_it() {
+        let run = fight_run(&tank_fight(), None, None);
+        let mix = fight_music_and_voice(&run.mix);
+        let clipped = mix.iter().filter(|v| v.abs() > 1.0).count();
+        let limited = master_limited(&mix);
+        let clipped_after = limited.iter().filter(|v| v.abs() > 1.0).count();
+        let ceiling = AudioConfig::embedded().limiter.ceiling;
+        println!(
+            "WP11.3c: fight + music + voice: peak {:.3}, {clipped} of {} samples above full scale; after the master limiter peak {:.3}, {clipped_after} above",
+            peak_of(&mix),
+            mix.len(),
+            peak_of(&limited)
         );
         assert!(
-            peak <= FIGHT_PEAK_CEILING,
-            "peak {peak} above {FIGHT_PEAK_CEILING}"
+            clipped > 1_000,
+            "without the limiter the sum clips: {clipped}"
         );
-        assert!(peak >= 0.5, "the fight has no punch: peak {peak}");
+        assert_eq!(clipped_after, 0);
+        assert!(peak_of(&limited) <= ceiling + 1e-5, "{}", peak_of(&limited));
+        // The limiter does not mute: the limited sum keeps most of its loudness.
+        assert!(rms_of_sound(&limited) >= 0.7 * rms_of_sound(&mix));
     }
 
     /// One event of every fight kind at `p`, with the event name the game gives it (checked against
@@ -1508,15 +1787,19 @@ mod tests {
                 v
             })
             .collect();
-        let mix = fight_mix(&frames, None);
-        let peak = mix.iter().fold(0.0f32, |m, v| m.max(v.abs()));
-        let rms = rms_of_sound(&mix);
-        println!("WP11.3c: simultaneous 20-tank volley peaks at {peak:.3}, rms {rms:.3}");
-        assert!(peak <= FIGHT_PEAK_CEILING, "peak {peak}");
-        assert!(peak >= 0.5, "{peak}");
+        let run = fight_run(&frames, None, None);
+        let limited = master_limited(&run.mix);
+        let rms = rms_of_sound(steady(&limited));
+        println!(
+            "WP11.3c: simultaneous 20-tank volley: peak {:.3} ({:.3} after the master limiter), steady rms {rms:.3}",
+            peak_of(&run.mix),
+            peak_of(&limited)
+        );
+        assert!(peak_of(&limited) <= 0.95 + 1e-5);
+        assert!(peak_of(&limited) >= 0.5);
         // The artificial worst case (all 20 on one tick, over and over) sounds more of the time than the staggered
-        // fight, so it gets a looser bound than the music's own RMS: at most 1.5 times it (measured 1.32).
-        assert!(rms <= music_rms_at_default_settings() * 1.5, "rms {rms}");
+        // fight: its steady RMS may be up to 2.2 times the music's.
+        assert!(rms <= music_rms_at_default_settings() * 2.2, "rms {rms}");
     }
 
     /// Peak of `names` fired together on the same tick at the focus, repeated four times.
@@ -1570,38 +1853,19 @@ mod tests {
             together_peak(&all),
         );
         println!("limiter: four kinds {p4:.3}, eight kinds {p8:.3}, all 18 kinds {p18:.3}");
-        assert!(p4 <= 1.0 && p8 <= 1.0 && p18 <= 1.0, "{p4} {p8} {p18}");
+        // Measured 18-11-2026 (the cue limiters of WP11.3c; they were 0.485, 0.582 and 0.384 before it).
+        for (got, want) in [(p4, 0.719), (p8, 0.703), (p18, 0.627)] {
+            assert!((got - want).abs() < 0.01, "{got} against {want}");
+        }
         let (f4, f8, f18) = (
             together_peak_limited(&four, Some(f32::MAX)),
             together_peak_limited(&EIGHT, Some(f32::MAX)),
             together_peak_limited(&all, Some(f32::MAX)),
         );
         println!("limiter off: four {f4:.3}, eight {f8:.3}, all 18 {f18:.3}");
-        assert!(f4 > 1.0 && f8 > 1.0 && f18 > 1.0, "{f4} {f8} {f18}");
-    }
-
-    /// The time-aware part of the limiter is needed (WP11.3c): the 20-tank fight with only the per-frame bound
-    /// (the load limit switched off) clips, with the shipped limiter it peaks under the ceiling, and with both
-    /// off it is far over.
-    #[test]
-    fn the_limiter_holds_the_20_tank_fight_below_full_scale() {
-        let peak = |m: Vec<f32>| m.iter().fold(0.0f32, |a, v| a.max(v.abs()));
-        let shipped = peak(fight_mix_with(&tank_fight(), None, None));
-        let frame_only = peak(fight_mix_with(&tank_fight(), None, Some(f32::MAX)));
-        let off = peak(fight_mix_with(
-            &tank_fight(),
-            Some(f32::MAX),
-            Some(f32::MAX),
-        ));
-        println!(
-            "WP11.3c: 20-tank fight peak: shipped {shipped:.3}, frame bound only {frame_only:.3}, both off {off:.3}"
-        );
-        assert!(shipped <= FIGHT_PEAK_CEILING, "{shipped}");
-        assert!(
-            frame_only > 1.0,
-            "the frame bound alone is enough: {frame_only}"
-        );
-        assert!(off > frame_only, "{off}");
+        for (got, want) in [(f4, 2.505), (f8, 4.654), (f18, 7.928)] {
+            assert!((got - want).abs() < 0.02, "{got} against {want}");
+        }
     }
 
     /// Three bank sounds at volume 1.0 at the focus: the frame sums to 3.0 at the listener's centre.
@@ -1619,6 +1883,8 @@ mod tests {
     #[test]
     fn play_frame_turns_a_loud_frame_down_to_the_limit() {
         let (mut fx, mut sound) = setup();
+        // This test is about the per-frame bound; the load limit is switched off (it has its own tests).
+        sound.max_load_gain = f32::MAX;
         let mut audio = all_names_audio("loud_frame");
         loud_events(&mut fx);
         let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 1, listener(30.0));
@@ -1735,6 +2001,7 @@ mod tests {
     #[test]
     fn a_mapped_original_is_not_counted_and_not_turned_down() {
         let (mut fx, mut sound) = setup();
+        sound.max_load_gain = f32::MAX; // the per-frame bound is under test
         let mut audio = audio_with_one_original("original");
         assert!(audio.is_original("explosion.large") && !audio.is_original("weapon.fire.cannon"));
         loud_events(&mut fx);
@@ -1763,6 +2030,7 @@ mod tests {
     #[test]
     fn start_cues_turns_a_loud_frame_down_to_the_limit() {
         let (fx, mut sound) = setup();
+        sound.max_load_gain = f32::MAX; // the per-frame bound is under test
         let mut audio = tracing_audio(&assets());
         let l = listener(30.0);
         audio.set_listener(l);

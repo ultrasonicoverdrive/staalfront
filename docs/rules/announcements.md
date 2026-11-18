@@ -153,11 +153,9 @@ There is no separate slider for announcements.
 | `announce.repairing` | `announce_repairing.wav` | 0.655 s | "Repairing" |
 
 * **Bank.** Each event has one entry in `assets/audio/bank.ron`: category `Voice`, `max_instances: 1`, `original_as_is:
-  true`, volume **0.35**, the volume of the unit voices (their level was measured against the loudest fight sound,
-  `voices.md` section 3a; the files have the same peak). Pinned as literals by
-  `the_shipped_bank_speaks_every_announcement_without_red_alert_files`. **Not measured separately:** the announcement
-  lines have not been put through the fight-loudness test of the unit voices; they share file peak and volume with them, and
-  are longer.
+  true`, volume **0.95**, the volume of the unit voices (0.35 until WP11.3c, which raised it with the louder fight sounds, `voices.md` section 3a; the files have the same peak). Pinned by
+  `the_announcements_are_heard_over_a_fight` (all 19 at 0.95, each line's RMS at least half of the 20-tank fight's steady-state RMS 0.278, quietest 0.173, peak at most the loudest fight sound's) and by
+  `the_shipped_bank_speaks_every_announcement_without_red_alert_files`.
 * **Red Alert.** The 18 names are in `assets/audio/ra_mapping.ron`, one per event, all `.AUD` files of `SPEECH.MIX`,
   checked one fact at a time by `onderzoeker` (EA's source and OpenRA agree); `STRCKIL1.AUD` for "structure lost" is the
   closest match only. `announce.harvester_under_attack` has none. No Red Alert file is in the repository. The names are

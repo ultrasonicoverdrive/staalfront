@@ -42,6 +42,28 @@ pub struct AudioConfig {
     pub voices: VoiceConfig,
     /// The status announcements of the base (WP11.2c).
     pub announce: crate::announce_config::AnnounceConfig,
+    /// The master limiter on the main track (WP11.3c). Absent in an older file: the numbers of the shipped one.
+    #[serde(default)]
+    pub limiter: LimiterConfig,
+}
+
+/// The master limiter (`limiter::MasterLimiter`): nothing the game plays goes above `ceiling`.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LimiterConfig {
+    /// Peak of the output as a share of full scale, in (0, 1].
+    pub ceiling: f32,
+    /// Milliseconds the turn-down takes to let go (the envelope falls to a third in this time), 1 to 5000.
+    pub release_ms: f32,
+}
+
+impl Default for LimiterConfig {
+    fn default() -> Self {
+        LimiterConfig {
+            ceiling: 0.95,
+            release_ms: 150.0,
+        }
+    }
 }
 
 /// The numbers of [`SpatialParams`], in metres.
@@ -97,11 +119,19 @@ pub struct MixConfig {
 }
 
 fn default_max_load_gain() -> f32 {
-    1.0
+    1.15
 }
 
 fn default_load_half_life_ticks() -> f32 {
-    6.0
+    4.0
+}
+
+fn default_min_cue_scale() -> f32 {
+    0.12
+}
+
+fn default_protected_priority() -> u8 {
+    4
 }
 
 fn one() -> f32 {
@@ -154,6 +184,15 @@ pub struct PositionalConfig {
     /// 0.1 to 0.5 s, so a few ticks.
     #[serde(default = "default_load_half_life_ticks")]
     pub load_half_life_ticks: f32,
+    /// The least a cue is turned down to by the load, as a share of its own gain, in (0, 1] (WP11.3c). Without
+    /// it a saturated fight would play every new sound at a few percent; with it every sound is heard and the
+    /// master limiter ([`LimiterConfig`]) catches the sum.
+    #[serde(default = "default_min_cue_scale")]
+    pub min_cue_scale: f32,
+    /// Cues of an event whose rule has at least this `priority` (deaths and explosions in the shipped file) are
+    /// never turned down by the load, only by the per-frame bound: a building exploding in a big fight is heard.
+    #[serde(default = "default_protected_priority")]
+    pub protected_priority: u8,
     /// The rule of an event that no entry of `events` covers.
     pub fallback: EventRule,
     /// Rules by event name. A rule for `weapon.fire` covers `weapon.fire.bullet`
@@ -306,6 +345,16 @@ impl AudioConfig {
         if !(p.max_summed_gain.is_finite() && p.max_summed_gain > 0.0 && p.max_summed_gain <= 4.0) {
             return Err("positional.max_summed_gain must be in (0, 4]".into());
         }
+        if !(p.min_cue_scale.is_finite() && p.min_cue_scale > 0.0 && p.min_cue_scale <= 1.0) {
+            return Err("positional.min_cue_scale must be in (0, 1]".into());
+        }
+        let l = &self.limiter;
+        if !(l.ceiling.is_finite() && l.ceiling > 0.0 && l.ceiling <= 1.0) {
+            return Err("limiter.ceiling must be in (0, 1]".into());
+        }
+        if !(l.release_ms.is_finite() && (1.0..=5000.0).contains(&l.release_ms)) {
+            return Err("limiter.release_ms must be in [1, 5000]".into());
+        }
         if !(p.max_load_gain.is_finite() && p.max_load_gain > 0.0 && p.max_load_gain <= 4.0) {
             return Err("positional.max_load_gain must be in (0, 4]".into());
         }
@@ -456,9 +505,18 @@ mod tests {
         assert_eq!(c.music.fallback.combat.as_deref(), Some("music.combat"));
         let p = &c.positional;
         assert_eq!(p.max_cues_per_frame, 16);
-        assert_eq!(p.max_summed_gain, 1.0);
-        assert_eq!(p.max_load_gain, 1.0);
-        assert_eq!(p.load_half_life_ticks, 6.0);
+        assert_eq!(p.max_summed_gain, 2.0);
+        assert_eq!(p.max_load_gain, 1.15);
+        assert_eq!(p.load_half_life_ticks, 4.0);
+        assert_eq!(p.min_cue_scale, 0.12);
+        assert_eq!(p.protected_priority, 4);
+        assert_eq!(
+            c.limiter,
+            LimiterConfig {
+                ceiling: 0.95,
+                release_ms: 150.0
+            }
+        );
         assert_eq!(p.fallback, rule(1, 3, 1, 6, 6.0));
         let want: Vec<(&str, EventRule)> = vec![
             ("explosion", rule(4, 3, 1, 6, 10.0)),
@@ -551,7 +609,21 @@ mod tests {
             ("cap", Box::new(|c| c.positional.max_cues_per_frame = 0)),
             ("sum0", Box::new(|c| c.positional.max_summed_gain = 0.0)),
             ("sum5", Box::new(|c| c.positional.max_summed_gain = 5.0)),
+            ("min0", Box::new(|c| c.positional.min_cue_scale = 0.0)),
+            ("min2", Box::new(|c| c.positional.min_cue_scale = 1.5)),
+            ("lim0", Box::new(|c| c.limiter.ceiling = 0.0)),
+            ("lim2", Box::new(|c| c.limiter.ceiling = 1.5)),
+            ("rel0", Box::new(|c| c.limiter.release_ms = 0.5)),
+            ("rel9", Box::new(|c| c.limiter.release_ms = 9000.0)),
             ("load0", Box::new(|c| c.positional.max_load_gain = 0.0)),
+            (
+                "halfneg",
+                Box::new(|c| c.positional.load_half_life_ticks = -3.0),
+            ),
+            (
+                "halfnan",
+                Box::new(|c| c.positional.load_half_life_ticks = f32::NAN),
+            ),
             ("load5", Box::new(|c| c.positional.max_load_gain = 5.0)),
             (
                 "loadnan",
@@ -639,5 +711,58 @@ mod tests {
         let (c, w) = AudioConfig::load(&root);
         assert!(w.is_none());
         assert_eq!(c, AudioConfig::embedded());
+    }
+
+    /// WP11.3c: a file from before the limiter numbers (no `max_load_gain`, `load_half_life_ticks`,
+    /// `min_cue_scale`, `protected_priority`, no `limiter` section) loads, with the numbers of the shipped file.
+    #[test]
+    fn a_file_without_the_limiter_numbers_gets_the_shipped_ones() {
+        let old: String = EMBEDDED_CONFIG
+            .lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                !(t.starts_with("max_load_gain:")
+                    || t.starts_with("load_half_life_ticks:")
+                    || t.starts_with("min_cue_scale:")
+                    || t.starts_with("protected_priority:")
+                    || t.starts_with("limiter:"))
+            })
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            );
+        assert!(!old.contains("max_load_gain:") && !old.contains("limiter:"));
+        let c = AudioConfig::parse(&old).unwrap();
+        assert_eq!(c, AudioConfig::embedded());
+        assert_eq!(c.positional.max_load_gain, 1.15);
+        assert_eq!(c.positional.load_half_life_ticks, 4.0);
+    }
+
+    /// The edges of the ranges of the limiter numbers: the end values are accepted, just outside is refused.
+    #[test]
+    fn the_range_edges_of_the_limiter_numbers() {
+        let ok = |f: &dyn Fn(&mut AudioConfig)| {
+            let mut c = AudioConfig::embedded();
+            f(&mut c);
+            c.validate()
+        };
+        assert!(ok(&|c| c.positional.max_load_gain = 4.0).is_ok());
+        assert!(ok(&|c| c.positional.max_load_gain = 4.01).is_err());
+        assert!(ok(&|c| c.positional.max_load_gain = 0.0).is_err());
+        assert!(ok(&|c| c.positional.load_half_life_ticks = 0.5).is_ok());
+        assert!(ok(&|c| c.positional.load_half_life_ticks = 200.0).is_ok());
+        assert!(ok(&|c| c.positional.load_half_life_ticks = 0.49).is_err());
+        assert!(ok(&|c| c.positional.load_half_life_ticks = 200.5).is_err());
+        assert!(ok(&|c| c.positional.load_half_life_ticks = -1.0).is_err());
+        assert!(ok(&|c| c.positional.load_half_life_ticks = f32::NAN).is_err());
+        assert!(ok(&|c| c.positional.min_cue_scale = 1.0).is_ok());
+        assert!(ok(&|c| c.positional.min_cue_scale = 0.0).is_err());
+        assert!(ok(&|c| c.limiter.ceiling = 1.0).is_ok());
+        assert!(ok(&|c| c.limiter.ceiling = 1.01).is_err());
+        assert!(ok(&|c| c.limiter.release_ms = 1.0).is_ok());
+        assert!(ok(&|c| c.limiter.release_ms = 5000.0).is_ok());
+        assert!(ok(&|c| c.limiter.release_ms = 5000.5).is_err());
+        assert!(ok(&|c| c.limiter.release_ms = f32::NAN).is_err());
     }
 }
