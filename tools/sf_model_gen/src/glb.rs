@@ -8,7 +8,7 @@
 use std::fmt::Write as _;
 
 use crate::kit::{Mat, Model, Node, Tri};
-use crate::shade::{bake, corner_normals, factor};
+use crate::shade::{bake_team, corner_normals, factor};
 
 /// sRGB 0..=255 to the linear factor glTF stores (a cubic fit of the sRGB curve, basic operations
 /// only, so the same bytes everywhere; within 0.4 % of the exact curve).
@@ -65,12 +65,12 @@ type Corners = Vec<([f32; 3], [f32; 3])>;
 
 /// The baked shade and the corner normal of every node's triangles of one level, keyed like the
 /// flattened meshes.
-fn shades(level: &Node, lin: &[[f32; 3]]) -> Vec<Corners> {
+fn shades(level: &Node, lin: &[[f32; 3]], team: Option<u8>) -> Vec<Corners> {
     // Bake and smooth on the whole level in model space (parts occlude each other, and a lathed
     // part's corners are welded across nodes only where they coincide), then hand each node its
     // slice, in the same preorder as `flatten`.
     let world = level.world_tris();
-    let baked = bake(&world, lin);
+    let baked = bake_team(&world, lin, team);
     let normals: Vec<[f32; 3]> = corner_normals(&world).into_iter().flatten().collect();
     let both: Corners = baked.into_iter().zip(normals).collect();
     let mut out = Vec::new();
@@ -96,9 +96,14 @@ pub fn write(model: &Model) -> Vec<u8> {
     let mut shade = Vec::new();
     let mut roots = Vec::new();
     let lin: Vec<[f32; 3]> = model.materials.iter().map(|m| m.srgb.map(linear)).collect();
+    let team = model
+        .materials
+        .iter()
+        .position(|m| m.name == crate::kit::TEAM)
+        .map(|i| i as u8);
     for level in &model.lods {
         roots.push(flatten(level, &mut nodes, &mut meshes));
-        shade.extend(shades(level, &lin));
+        shade.extend(shades(level, &lin, team));
     }
     // Primitives: per mesh, per material in material order.
     let mut prims: Vec<Prim> = Vec::new();

@@ -21,8 +21,8 @@ pub type Tone = u16;
 
 /// The plain tone.
 pub const PLAIN: Tone = 1000;
-/// The tone of a panel line or seam.
-pub const SEAM: Tone = 560;
+/// The tone of a panel line or seam (WP11.6p: 560 before, slightly darker on the muted palette).
+pub const SEAM: Tone = 500;
 /// The tone of a bolt head or a recessed hatch.
 pub const RECESS: Tone = 720;
 

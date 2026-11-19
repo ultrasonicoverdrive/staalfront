@@ -3,7 +3,7 @@
 //! Every check runs on [`shade::bake`] itself, the function the GLB writer uses.
 
 use sf_model_gen::kit::{Mat, Mesh, Tri, bevel_box, cuboid, lathe};
-use sf_model_gen::shade::{self, NOMINAL, bake, factor, unit_normal};
+use sf_model_gen::shade::{self, NOMINAL, bake, bake_team, factor, unit_normal};
 
 /// A saturated colour (linear), so desaturation shows.
 const COLOUR: [f32; 3] = [0.7, 0.45, 0.08];
@@ -88,7 +88,96 @@ fn the_top_edge_bevels_are_brighter_than_the_flat_top() {
             .map(|(_, c)| lum(*c)),
     );
     println!("flat top {flat:.4}, top bevels {bevel:.4}");
-    assert!(bevel > flat * 1.08, "highlight: {bevel} vs {flat}");
+    // WP11.6p: a few per cent, not the 16 % of the bright style: visible, and pinned from above.
+    assert!(bevel > flat * 1.02, "highlight: {bevel} vs {flat}");
+    assert!(
+        bevel < flat * 1.08,
+        "highlight too strong: {bevel} vs {flat}"
+    );
+}
+
+/// WP11.6p: the constants of the muted bake, as literals (a changed value fails here).
+#[test]
+fn the_realistic_bake_constants_are_pinned() {
+    assert_eq!(shade::HIGHLIGHT, 0.05);
+    #[allow(clippy::assertions_on_constants)]
+    {
+        assert!(shade::HIGHLIGHT <= 0.08, "a few per cent at most");
+    }
+    assert_eq!(shade::WEAR, 0.20);
+    assert_eq!(shade::WEAR_GREY_GAIN, 1.12);
+    assert_eq!(shade::WEAR_GREY_LIFT, 0.01);
+    assert_eq!(shade::WEAR_TINT, 0.5);
+    assert_eq!(shade::GRIME, 0.20);
+    assert_eq!(shade::GRIME_HEIGHT_MM, 1300.0);
+    assert_eq!(shade::DUST, 0.28);
+    assert_eq!(shade::FACTOR_FLOOR, 0.15);
+    assert_eq!(shade::DUST_SRGB, [118, 104, 82]);
+    assert_eq!(sf_model_gen::kit::SEAM, 500);
+    assert_eq!(sf_model_gen::kit::RECESS, 720);
+}
+
+/// The mean final colour of the top faces of a plate at height `y` (slot `mat`).
+fn plate_top(y: i32, mat: u8, team: Option<u8>) -> [f32; 3] {
+    let m = cuboid([-1000, y, -1000], [1000, y + 50, 1000], Mat(mat));
+    let lin = [COLOUR, COLOUR];
+    let baked = bake_team(&m.tris, &lin, team);
+    let f = factor(COLOUR);
+    let tops: Vec<[f32; 3]> = m
+        .tris
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| unit_normal(t)[1] > 0.99)
+        .flat_map(|(i, _)| (0..3).map(move |c| i * 3 + c))
+        .map(|k| [baked[k][0] * f[0], baked[k][1] * f[1], baked[k][2] * f[2]])
+        .collect();
+    [0, 1, 2].map(|k| mean(tops.iter().map(|c| c[k])))
+}
+
+fn dist(a: [f32; 3], b: [f32; 3]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+/// WP11.6p: the dust. Low faces are darker and closer to the dust colour than high faces of the
+/// same material; a team triangle carries neither.
+#[test]
+fn dust_darkens_and_pulls_the_foot_towards_the_dust_colour_and_a_team_triangle_has_none() {
+    let dust = sf_model_gen::shade::DUST_SRGB.map(sf_model_gen::glb::linear);
+    let (foot, mid, high) = (
+        plate_top(0, 0, None),
+        plate_top(700, 0, None),
+        plate_top(3000, 0, None),
+    );
+    println!("foot {foot:?} mid {mid:?} high {high:?}");
+    assert!(
+        lum(foot) < lum(mid) && lum(mid) < lum(high),
+        "darker towards the ground"
+    );
+    // The saturated COLOUR is far from the earth colour; the foot is nearer to it than the top.
+    let (df, dm, dh) = (dist(foot, dust), dist(mid, dust), dist(high, dust));
+    println!("distance to the dust colour: foot {df:.3} mid {dm:.3} high {dh:.3}");
+    assert!(
+        df < dm && dm < dh,
+        "closer to the dust colour at the ground"
+    );
+    // The grime alone only darkens (the hue stays); the dust moves the colour towards the earth
+    // colour, so the blue share of the (very orange) test colour grows towards the ground.
+    let blue = |c: [f32; 3]| c[2] / c[0];
+    assert!(
+        blue(foot) > blue(high) * 1.15 && blue(mid) < blue(foot) && blue(mid) > blue(high),
+        "dust: blue share foot {} mid {} high {}",
+        blue(foot),
+        blue(mid),
+        blue(high)
+    );
+    // Team: the same plate in the team slot is the same colour at the ground and high up.
+    assert_eq!(
+        plate_top(0, 1, Some(1)),
+        plate_top(3000, 1, Some(1)),
+        "team: no grime, no dust"
+    );
+    // ... and the same two plates in a normal slot differ (the check above has teeth).
+    assert_ne!(plate_top(0, 1, None), plate_top(3000, 1, None));
 }
 
 #[test]
@@ -109,7 +198,7 @@ fn exposed_bevels_show_lighter_desaturated_wear() {
         .map(|(_, c)| *c)
         .collect();
     let flat_sat = mean(flat.iter().map(|c| sat(*c)));
-    let worn = bevel.iter().filter(|c| sat(**c) < flat_sat * 0.85).count();
+    let worn = bevel.iter().filter(|c| sat(**c) < flat_sat * 0.93).count();
     println!(
         "flat saturation {flat_sat:.3}, worn corners {worn} of {}",
         bevel.len()
@@ -188,7 +277,7 @@ fn a_lathed_dome_gets_no_edge_wear() {
     let c = colours(&dome);
     let sats: Vec<f32> = c.iter().map(|(_, c)| sat(*c)).collect();
     let top = sats.iter().copied().fold(0.0, f32::max);
-    let worn = sats.iter().filter(|s| **s < top * 0.85).count();
+    let worn = sats.iter().filter(|s| **s < top * 0.93).count();
     assert_eq!(worn, 0, "{worn} of {} dome corners are worn", sats.len());
     // The same mesh without the mark does wear: the rule is what keeps the dome clean.
     let mut plain = dome.clone();
@@ -197,7 +286,7 @@ fn a_lathed_dome_gets_no_edge_wear() {
     }
     let sats: Vec<f32> = colours(&plain).iter().map(|(_, c)| sat(*c)).collect();
     assert!(
-        sats.iter().any(|s| *s < top * 0.85),
+        sats.iter().any(|s| *s < top * 0.93),
         "the control mesh shows no wear"
     );
 }
@@ -286,4 +375,277 @@ fn no_smooth_part_carries_facet_variation() {
         t.lathed = false;
     }
     assert!(spread(&flat) > 1.01, "flat drum {}", spread(&flat));
+}
+
+/// WP11.6p, the black-crush floor: no vertex of any shipped model, times its material factor, is
+/// darker (luminance, linear) than [`CRUSH_FLOOR`] outside the team slot. AO, grime, the downward
+/// term and the seam tone multiply, and on the near-black slots (rubber, metal) the floor is what
+/// keeps a track readable. The one named exception is the stages' fire damage: a triangle toned
+/// `stages::CHAR` or `stages::SOOT` is burnt black on purpose (the darkest of them, 0.0033, is on
+/// the heavily damaged Meridian power plant).
+const CRUSH_FLOOR: f32 = 0.004;
+
+#[test]
+fn no_baked_vertex_crushes_to_black() {
+    let mut darkest = (f32::MAX, String::new());
+    for m in sf_model_gen::set::all() {
+        let lin: Vec<[f32; 3]> = m
+            .materials
+            .iter()
+            .map(|x| x.srgb.map(sf_model_gen::glb::linear))
+            .collect();
+        let team = m
+            .materials
+            .iter()
+            .position(|x| x.name == sf_model_gen::kit::TEAM)
+            .map(|i| i as u8);
+        let world = m.lods[0].world_tris();
+        let baked = bake_team(&world, &lin, team);
+        for (i, t) in world.iter().enumerate() {
+            if team == Some(t.mat.0)
+                || t.tone == sf_model_gen::stages::CHAR
+                || t.tone == sf_model_gen::stages::SOOT
+            {
+                continue;
+            }
+            let f = factor(lin[usize::from(t.mat.0)]);
+            for c in 0..3 {
+                let b = baked[i * 3 + c];
+                let l = lum([b[0] * f[0], b[1] * f[1], b[2] * f[2]]);
+                if l < darkest.0 {
+                    darkest = (l, format!("{} tri {i} material {}", m.stem, t.mat.0));
+                }
+            }
+        }
+    }
+    println!("darkest baked corner: {:.5} ({})", darkest.0, darkest.1);
+    assert!(darkest.0 >= CRUSH_FLOOR, "crushed to black: {darkest:?}");
+}
+
+/// Every vertex colour channel that `bake` clamped at 1.0 (the value the clamp leaves), counted
+/// over the triangles of the given material slots; a clamped channel has lost its hue and its
+/// occlusion (WP11.6p review: the dust on rubber and metal).
+fn clamped(tris: &[Tri], lin: &[[f32; 3]], team: Option<u8>, slots: &[u8]) -> usize {
+    let baked = bake_team(tris, lin, team);
+    tris.iter()
+        .enumerate()
+        .filter(|(_, t)| slots.contains(&t.mat.0) && team != Some(t.mat.0))
+        .flat_map(|(i, _)| (0..3).map(move |c| i * 3 + c))
+        .filter(|&k| baked[k].iter().any(|&q| q >= 0.9999))
+        .count()
+}
+
+/// The shipped models' linear material colours and team slot.
+fn linear_of(m: &sf_model_gen::kit::Model) -> (Vec<[f32; 3]>, Option<u8>) {
+    let lin = m
+        .materials
+        .iter()
+        .map(|x| x.srgb.map(sf_model_gen::glb::linear))
+        .collect();
+    let team = m
+        .materials
+        .iter()
+        .position(|x| x.name == sf_model_gen::kit::TEAM)
+        .map(|i| i as u8);
+    (lin, team)
+}
+
+/// The dark slots (metal 3, rubber 4) have little head room in the vertex colour (the material
+/// factor is a grey of the brightest channel over `NOMINAL`); the dust, which lifts them towards a
+/// brighter earth colour, must not overflow it. Before the factor floor, 5-25 % of the vertices of
+/// a tank's metal and rubber clamped to flat grey.
+#[test]
+fn the_dust_never_clamps_a_vertex_of_the_dark_slots() {
+    let (mut dark, mut all) = (0, 0);
+    for m in sf_model_gen::set::all() {
+        let (lin, team) = linear_of(&m);
+        let world = m.lods[0].world_tris();
+        let d = clamped(&world, &lin, team, &[3, 4]);
+        let a = clamped(&world, &lin, team, &[0, 1, 2, 3, 4, 5]);
+        if d > 0 || a > 0 {
+            println!("{}: {d} dark-slot and {a} clamped vertices in all", m.stem);
+        }
+        dark += d;
+        all += a;
+    }
+    println!("clamped vertices over the set: {dark} in the dark slots, {all} in all");
+    assert_eq!(dark, 0, "dark slots clamp");
+}
+
+/// The same on a plate in each shipped dark colour: low faces move towards the dust hue (the blue
+/// share over the red share grows towards the ground), with no channel at the clamp.
+#[test]
+fn dust_lifts_rubber_and_metal_towards_the_dust_hue_without_clamping() {
+    let p = sf_model_gen::palette::Palette::shipped();
+    for faction in ["meridian", "veyran"] {
+        let f = &p.factions[faction];
+        for (name, srgb) in [("rubber", f.rubber), ("metal", f.metal)] {
+            let lin = [srgb.map(sf_model_gen::glb::linear)];
+            let fac = factor(lin[0]);
+            let vertex = |y: i32| {
+                let m = cuboid([-1000, y, -1000], [1000, y + 50, 1000], Mat(0));
+                let b = bake(&m.tris, &lin);
+                let i = m
+                    .tris
+                    .iter()
+                    .position(|t| unit_normal(t)[1] > 0.99)
+                    .unwrap();
+                b[i * 3]
+            };
+            let (foot, high) = (vertex(0), vertex(3000));
+            println!("{faction} {name}: foot {foot:?} high {high:?}");
+            assert!(foot.iter().all(|&q| q < 0.9999), "{faction} {name} clamps");
+            // Dark, near-neutral materials get warmer: red over blue grows towards the ground.
+            let warm = |q: [f32; 3]| (q[0] * fac[0]) / (q[2] * fac[2]);
+            assert!(
+                warm(foot) > warm(high) * 1.10,
+                "{faction} {name}: red over blue {} at the foot, {} high",
+                warm(foot),
+                warm(high)
+            );
+        }
+    }
+}
+
+/// A panel line is half the plain shade (tone 500; it was 560): measured on the same plate plain
+/// and as a seam, through the bake.
+#[test]
+fn a_panel_line_is_half_as_bright_as_the_plain_face() {
+    let top = |m: &Mesh| {
+        let b = bake(&m.tris, &[COLOUR]);
+        let i = m
+            .tris
+            .iter()
+            .position(|t| unit_normal(t)[1] > 0.99)
+            .unwrap();
+        lum(b[i * 3])
+    };
+    let plain = cuboid([-1000, 3000, -1000], [1000, 3050, 1000], Mat(0));
+    let seam = plain.clone().toned(sf_model_gen::kit::SEAM);
+    let r = top(&seam) / top(&plain);
+    println!("panel line / plain = {r:.3}");
+    assert!((0.48..=0.52).contains(&r), "panel line is {r} of plain");
+}
+
+/// Worn paint, not bright metal: the brightest corner of a worn bevel stays within 13 % of the
+/// flat top's luminance. (The bright style, wear 0.35 towards 1.25x grey, went well beyond.)
+#[test]
+fn worn_edges_stay_close_to_the_paint() {
+    let c = colours(&bevelled());
+    let flat = mean(
+        c.iter()
+            .filter(|(t, _)| unit_normal(t)[1] > 0.99)
+            .map(|(_, c)| lum(*c)),
+    );
+    let brightest = c
+        .iter()
+        .filter(|(t, _)| {
+            unit_normal(t)
+                .iter()
+                .all(|v| v.abs() < shade::HIGHLIGHT_MAX_UP)
+        })
+        .map(|(_, c)| lum(*c))
+        .fold(0.0, f32::max);
+    println!(
+        "brightest bevel corner / flat top = {:.3}",
+        brightest / flat
+    );
+    assert!(brightest < flat * 1.13, "{brightest} vs {flat}");
+}
+
+/// Measured on the shipped tanks: dE 22.7, dL 12.2 (and 24.1 / 15.2 on the pixels of the M1 shot).
+const READ_DE: f64 = 20.0;
+const READ_DL: f64 = 10.0;
+
+/// sRGB 0..1 to CIE L*a*b* (D65), f64: a test helper.
+fn lab_of(srgb: [f64; 3]) -> [f64; 3] {
+    let lin = |s: f64| {
+        if s <= 0.04045 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (lin(srgb[0]), lin(srgb[1]), lin(srgb[2]));
+    let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+    let f = |t: f64| {
+        if t > 0.008856 {
+            t.cbrt()
+        } else {
+            7.787 * t + 16.0 / 116.0
+        }
+    };
+    let (fx, fy, fz) = (f(x), f(y), f(z));
+    [116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz)]
+}
+
+/// The area-weighted mean sRGB of the visible hull paint (slots paint and paint2, faces looking
+/// up) of a model's LOD0 as the renderer shows it: the baked vertex colour times the material
+/// factor, lit by the default light of `sf_render::scene::Lighting` (direction (0.5, -0.8, 0.4),
+/// colour (0.85, 0.82, 0.75), ambient (0.22, 0.25, 0.30); copied here, the generator does not
+/// depend on the renderer). These constants copy `sf_render::scene::Lighting::default`
+/// (crates/sf_render/src/scene.rs) and must follow it when that changes.
+fn lit_hull(stem: &str) -> [f64; 3] {
+    let m = sf_model_gen::set::all()
+        .into_iter()
+        .find(|m| m.stem == stem)
+        .unwrap_or_else(|| panic!("no model {stem}"));
+    let (lin, team) = linear_of(&m);
+    let world = m.lods[0].world_tris();
+    let baked = bake_team(&world, &lin, team);
+    let d = {
+        let l = (0.5f64 * 0.5 + 0.8 * 0.8 + 0.4 * 0.4).sqrt();
+        [-0.5 / l, 0.8 / l, -0.4 / l]
+    };
+    let (col, amb) = ([0.85f64, 0.82, 0.75], [0.22f64, 0.25, 0.30]);
+    let (mut sum, mut area) = ([0.0f64; 3], 0.0f64);
+    for (i, t) in world.iter().enumerate() {
+        let n = unit_normal(t);
+        if t.mat.0 > 1 || n[1] < 0.3 {
+            continue;
+        }
+        let f = factor(lin[usize::from(t.mat.0)]);
+        let facing =
+            (f64::from(n[0]) * d[0] + f64::from(n[1]) * d[1] + f64::from(n[2]) * d[2]).max(0.0);
+        let a = {
+            let n = t.normal();
+            ((n[0] as f64).powi(2) + (n[1] as f64).powi(2) + (n[2] as f64).powi(2)).sqrt()
+        };
+        for k in 0..3 {
+            let v: f64 = (0..3)
+                .map(|c| f64::from(baked[i * 3 + c][k] * f[k]))
+                .sum::<f64>()
+                / 3.0;
+            sum[k] += a * v * (amb[k] + col[k] * facing);
+        }
+        area += a;
+    }
+    sum.map(|x| {
+        let l = (x / area).clamp(0.0, 1.0);
+        if l <= 0.003_130_8 {
+            12.92 * l
+        } else {
+            1.055 * l.powf(1.0 / 2.4) - 0.055
+        }
+    })
+}
+
+/// WP11.6p (review): the two factions read apart as rendered. The palette test cannot see grime,
+/// dust, AO or the light, so this bakes the shipped light tanks of both factions and compares the
+/// lit mean colour of the visible hull paint. The M1 shot at zoom 0.12 (two tanks close up,
+/// `docs/screenshots/wp11.6p/after_m1_zoom_0.12.png`) measured dE 24.1 and dL 15.2 on its pixels.
+#[test]
+fn the_factions_read_apart_as_baked_and_lit() {
+    let m = lit_hull("meridian_light_tank");
+    let v = lit_hull("veyran_light_tank");
+    let (lm, lv) = (lab_of(m), lab_of(v));
+    let de = ((lm[0] - lv[0]).powi(2) + (lm[1] - lv[1]).powi(2) + (lm[2] - lv[2]).powi(2)).sqrt();
+    let dl = lm[0] - lv[0];
+    println!("meridian {m:?} veyran {v:?}: dE {de:.1}, dL {dl:.1}");
+    // Meridian leans warm, Veyran cool.
+    assert!(m[0] > m[2] && v[2] > v[0], "warm vs cool: {m:?} {v:?}");
+    assert!(de >= READ_DE, "dE {de}");
+    assert!(dl >= READ_DL, "dL {dl}");
 }
