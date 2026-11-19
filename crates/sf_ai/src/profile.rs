@@ -147,6 +147,12 @@ impl Profile {
         if a.harvester_threat {
             h.write_u8(0x96);
         }
+        // The numbers of WP9.3e-1, only when one is set (off keeps the digest).
+        if a.cohesion_on() {
+            h.write_u8(0x97);
+            h.write_u8(a.march_break_radius);
+            h.write_u8(u8::from(a.stage_search));
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
@@ -369,6 +375,31 @@ mod tests {
         let mut h = base;
         h.army.harvester_threat = true;
         assert_ne!(h.digest(), d);
+    }
+
+    #[test]
+    fn the_numbers_of_wp9_3e_1_are_hashed_only_when_one_is_set_and_each_moves_the_digest() {
+        let mut off = resolved(Faction::Meridian);
+        off.army.march_break_radius = 0;
+        off.army.stage_search = false;
+        let d = off.digest();
+        // Switching either on moves it; the radius moves it with every value; the two are different digests.
+        let mut radius = off.clone();
+        radius.army.march_break_radius = 8;
+        let r8 = radius.digest();
+        assert_ne!(r8, d);
+        radius.army.march_break_radius = 9;
+        assert_ne!(radius.digest(), r8);
+        let mut search = off.clone();
+        search.army.stage_search = true;
+        let s = search.digest();
+        assert_ne!(s, d);
+        assert_ne!(s, r8);
+        // Both on differ from either alone.
+        radius.army.march_break_radius = 8;
+        radius.army.stage_search = true;
+        assert_ne!(radius.digest(), r8);
+        assert_ne!(radius.digest(), s);
     }
 
     /// WP9.4a: the shipped level files resolve against the shipped definitions, with their goal lists and digests pinned

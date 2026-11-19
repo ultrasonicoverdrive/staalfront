@@ -993,3 +993,161 @@ fn what_the_harvester_threat_costs_with_200_own_units_and_the_ledger_with_a_stri
         assert!(dtotal / runs <= Duration::from_micros(20) && dworst <= Duration::from_millis(1));
     }
 }
+
+#[test]
+fn what_the_formation_march_costs_with_50_and_200_units_at_the_launch_and_on_the_staging_leg() {
+    // WP9.3e-1: the army turn with the formation march and the staging search on and off, on the observation of `ai_vs_passive`
+    // at tick 4000 with N riflemen added. The staging leg is the turn that does the new work: the break scan is members x
+    // visible. The enemy list holds 60 units, none within the break radius (the whole scan, no early exit), and the members are
+    // on their `Move` half-way to the staging cell. 20,000 turns each on a copy of the state; the clock is outside the clone. Three alternating
+    // rounds; the worst-turn bound is the 1 ms of the think budget, taken on the best round of the three (see the end).
+    let s = Scenario::load(&scenario_path("ai_vs_passive.ron")).unwrap();
+    let mut world = s.build_world().unwrap();
+    let mut ais = s.ais.clone();
+    let mut out = Vec::new();
+    while world.tick().0 < 4000 {
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                out.clear();
+                ai.think(&world, &mut out);
+                for command in out.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        world.step();
+    }
+    let player = sf_sim::PlayerId(0);
+    let mut base = ais[0].state().clone();
+    base.profile.army.attack_value = 1;
+    base.profile.army.stage_distance = 14;
+    base.profile.army.stage_patience = 1800;
+    let gather = base.gather.expect("a gather cell");
+    let runs = 20_000u32;
+    let mut means: Vec<(&str, u32, bool, Duration, Duration)> = Vec::new();
+    for round in 0..3 {
+        for n in [50u32, 200] {
+            for on in [false, true] {
+                let mut state = base.clone();
+                state.profile.army.march_break_radius = if on { 8 } else { 0 };
+                state.profile.army.stage_search = on;
+                let mut obs = sf_ai::Observation::build(&world, player, &state.known_structures);
+                obs.tick = sf_sim::Tick(6000);
+                let first = obs.own.iter().map(|o| o.id.index()).max().unwrap_or(0) + 1000;
+                for i in 0..n {
+                    obs.own.push(sf_ai::Own {
+                        id: sf_sim::EntityId::new(first + i, 0),
+                        kind: sf_sim::Kind(12),
+                        cell: sf_sim::Cell::new(gather.x - 3 + i % 7, gather.y - 3 + i / 7 % 7),
+                        footprint: None,
+                        hp: 50,
+                        order: sf_sim::Order::Idle,
+                        standing: true,
+                        max_hp: 50,
+                        building: None,
+                        repairing: false,
+                        factory: None,
+                        selling: false,
+                        armed: true,
+                        mobile: true,
+                    });
+                }
+                let mut launched = state.clone();
+                sf_ai::army::turn(
+                    &mut launched,
+                    &obs,
+                    &mut sf_ai::Lens::new(&world, player),
+                    &mut out,
+                );
+                assert!(launched.attackers().len() as u32 >= n);
+                let stage = launched
+                    .groups
+                    .iter()
+                    .find_map(|g| g.staging)
+                    .expect("a staging cell");
+                let mut leg = obs.clone();
+                leg.tick = sf_sim::Tick(6200);
+                for o in leg.own.iter_mut().filter(|o| o.id.index() >= first) {
+                    o.cell = sf_sim::Cell::new(40, 50);
+                    o.order = sf_sim::Order::Move(sf_math::Vec2::new(
+                        sf_math::Fx::from_i64(i64::from(stage.x)),
+                        sf_math::Fx::from_i64(i64::from(stage.y)),
+                    ));
+                }
+                leg.visible = (0..60u32)
+                    .map(|i| sf_ai::Seen {
+                        id: sf_sim::EntityId::new(9000 + i, 0),
+                        kind: sf_sim::Kind(12),
+                        owner: sf_sim::PlayerId(1),
+                        cell: sf_sim::Cell::new(90 + i % 6, 90 + i / 6),
+                        footprint: None,
+                        hp: 50,
+                        armed: true,
+                    })
+                    .collect();
+                for (label, st0, o) in [("launch", &state, &obs), ("staging leg", &launched, &leg)]
+                {
+                    let (mut total, mut worst, mut sent) = (Duration::ZERO, Duration::ZERO, 0);
+                    for _ in 0..runs {
+                        let mut st = st0.clone();
+                        let mut lens = sf_ai::Lens::new(&world, player);
+                        out.clear();
+                        let started = Instant::now();
+                        sf_ai::army::turn(&mut st, o, &mut lens, &mut out);
+                        let spent = started.elapsed();
+                        total += spent;
+                        worst = worst.max(spent);
+                        sent += out.len();
+                    }
+                    let mean = total / runs;
+                    println!(
+                        "round {round}: one army turn, {label}, {n} riflemen added, march and search {} ({} own entities, {sent} commands in {runs} turns): mean {:.2} us, worst {:.1} us",
+                        if on { "on" } else { "off" },
+                        o.own.len(),
+                        total.as_secs_f64() * 1e6 / f64::from(runs),
+                        worst.as_secs_f64() * 1e6
+                    );
+                    means.push((label, n, on, mean, worst));
+                    if label == "launch" {
+                        assert!(
+                            sent >= runs as usize,
+                            "every launch turn orders the staging leg"
+                        );
+                    } else {
+                        assert_eq!(sent, 0, "{label}: nothing to order on the leg, no break");
+                    }
+                }
+            }
+        }
+    }
+    // Every cell was run in three alternating rounds. The mean must hold in the median round and the worst turn in the best round: a
+    // turn that is slow in every round is slow, one that is slow in one round was preempted on the shared machine.
+    assert_eq!(means.len(), 24);
+    if !cfg!(debug_assertions) {
+        for label in ["launch", "staging leg"] {
+            for n in [50u32, 200] {
+                for on in [false, true] {
+                    let mut cell: Vec<&(&str, u32, bool, Duration, Duration)> = means
+                        .iter()
+                        .filter(|m| m.0 == label && m.1 == n && m.2 == on)
+                        .collect();
+                    assert_eq!(cell.len(), 3);
+                    cell.sort_by_key(|m| m.3);
+                    let median = cell[1].3;
+                    let best_worst = cell.iter().map(|m| m.4).min().unwrap();
+                    println!(
+                        "{label} {n} on {on}: median mean {median:?}, best worst {best_worst:?}"
+                    );
+                    assert!(
+                        median <= Duration::from_micros(100),
+                        "{label} {n} {on}: {median:?}"
+                    );
+                    assert!(
+                        best_worst <= Duration::from_millis(1),
+                        "{label} {n} {on}: worst {best_worst:?}"
+                    );
+                }
+            }
+        }
+    }
+}

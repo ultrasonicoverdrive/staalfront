@@ -19,21 +19,24 @@ later texture step can key on them: `paint` (main hull paint), `paint2` (second 
 
 | Slot | Meridian | Veyran | Neutral | Network |
 |---|---|---|---|---|
-| `paint` | warm sand `#9a8773` (154, 135, 115) | cool grey-blue `#5e6a76` (94, 106, 118) | `#8c8574` (140, 133, 116) | `#5a5f66` (90, 95, 102) |
-| paint light (highlight, `paint3` of neutral) | `#aca088` (172, 160, 136) | `#74808c` (116, 128, 140) | `#a09a88` (160, 154, 136) | `#6e737a` (110, 115, 122) |
-| `paint2` | olive `#5e5838` (94, 88, 56) | dark slate `#3c424c` (60, 66, 76) | `#5b564d` (91, 86, 77) | `#393d44` (57, 61, 68) |
-| paint2 shade | `#45422e` (69, 66, 46) | `#4e535a` (78, 83, 90) | `#46423b` (70, 66, 59) | `#464a54` (70, 74, 84) |
-| `metal` | `#2b2924` (43, 41, 36) | `#2a2c30` (42, 44, 48) | `#302f2b` (48, 47, 43) | `#242428` (36, 36, 40) |
-| `rubber` | `#1a1a18` (26, 26, 24) | same | same | same |
+| `paint` | warm sand `#b2a088` (178, 160, 136) | cool grey-blue `#6c7a8a` (108, 122, 138) | grey-green `#888e80` (136, 142, 128) | graphite `#4a4c50` (74, 76, 80) |
+| paint light (highlight, `paint3` of neutral) | `#c8baa4` (200, 186, 164) | `#8896a4` (136, 150, 164) | `#9ea494` (158, 164, 148) | `#5c5f64` (92, 95, 100) |
+| `paint2` | olive `#5e5838` (94, 88, 56) | dark slate `#3c424c` (60, 66, 76) | `#565a4c` (86, 90, 76) | `#303237` (48, 50, 55) |
+| paint2 shade | `#45422e` (69, 66, 46) | `#4e535a` (78, 83, 90) | `#42463c` (66, 70, 60) | `#3c3f46` (60, 63, 70) |
+| `metal` | `#3c3932` (60, 57, 50) | `#3a3d43` (58, 61, 67) | `#42413c` (66, 65, 60) | `#323237` (50, 50, 55) |
+| `rubber` | `#2e2c28` (46, 44, 40) | same | same | same |
 | `accent` | glass `#3e4a52` (62, 74, 82) | dull crimson `#7a1e28` (122, 30, 40) | `#7a4a30` (122, 74, 48) | amber `#8a6420` (138, 100, 32) |
 | `team` | the player colour (the file stores a neutral `#ebebeb`; the engine replaces it, at full strength) | same | none (third slot is `paint3`) | same as Veyran |
 
 WP11.6p (15-11-2026): the realistic palette. The first sample of the Canva restyle of the M1 shot
-(reference only, not in the repo) gave a grey-green Veyran (`#6b6f71`); it was set slightly bluer
-(`#5e6a76`) so the factions stay apart at distance: Meridian reads warm tan and olive, Veyran cool
-grey-blue, at the in-game zoom of 0.12 too (`docs/screenshots/wp11.6p/`). Previous values (style G
-bright): Meridian paint `#dcb450`, Veyran paint `#7894b2`. No channel of any paint or accent is
-above 175, and the Veyran accent stays darker than any player colour (no channel above 160).
+(reference only, not in the repo) gave the on-screen colours; they were lifted to albedo values (a top
+face renders at about 0.95 of its albedo, a side at 0.5-0.8), and Veyran was set slightly bluer so the
+factions stay apart at distance: Meridian reads warm tan and olive, Veyran cool grey-blue, at the
+in-game zoom of 0.12 too (`docs/screenshots/wp11.6p/`). Previous values (style G bright): Meridian
+paint `#dcb450`, Veyran paint `#7894b2`. No channel bound is pinned on the paints (Meridian paint
+light reaches 200); the test pins muting instead: every `paint` and paint light has a saturation of at
+most 0.30, and every `rubber` a brightest channel of at least 40. The Veyran accent stays darker than
+any player colour (no channel above 160, asserted in the same test file).
 
 A test pins the shipped values (`tools/sf_model_gen/tests/models.rs`,
 `the_shipped_palette_has_the_realistic_values`).
@@ -93,14 +96,19 @@ the material colour:
 - **ambient occlusion:** 17 rays per corner over the face's hemisphere, 1.4 m reach; the blocked
   share times 2 (`AO_GAIN`, tuning round: twice as visible), up to 60 % darker (so half the rays
   blocked is already the full darkening: creases, under overhangs, between hull and tracks);
-- **grime:** up to 30 % darker at the ground, fading out at 1.3 m (WP11.6p; 40 % in the bright
-  style, which was about twice the first 22 %);
-- **dust** (WP11.6p, `DUST`, `DUST_HEIGHT_MM`, `DUST_TINT`): on the lowest 0.6 m (hulls, tracks and
-  the lower walls of structures) up to 70 % of the way towards the colour times (0.78, 0.66, 0.50):
-  darker and warmer, and a black material stays black. A triangle of the team material gets neither
+- **grime:** up to 20 % darker at the ground (`GRIME` 0.20), fading out at 1.3 m (`GRIME_HEIGHT_MM`
+  1300; WP11.6p; 40 % in the bright style, which was about twice the first 22 %);
+- **dust** (WP11.6p, `DUST`, `DUST_SRGB`, `GRIME_HEIGHT_MM`): at the ground the colour moves 0.28 of
+  the way towards the fixed warm earth colour (118, 104, 82) (sRGB, taken to linear and lit like the
+  face: times the occlusion and the downward term), fading linearly to none at 1.3 m, the same height
+  as the grime (hulls, tracks and the lower walls of structures). It is applied after the edge wear.
+  Because the dust lifts a dark slot (rubber, dark metal, glass) towards a brighter colour, the
+  material factor has a floor (`FACTOR_FLOOR`, below). A triangle of the team material gets neither
   grime nor dust (`shade::bake_team`; the loader ignores its vertex colour, so this only makes the
-  bytes say what the engine does). Fixed numbers, no randomness
-  (`dust_darkens_and_warms_the_foot_and_a_team_triangle_has_none`);
+  bytes say what the engine does). Fixed numbers, no randomness. Tests:
+  `dust_darkens_and_pulls_the_foot_towards_the_dust_colour_and_a_team_triangle_has_none`,
+  `dust_lifts_rubber_and_metal_towards_the_dust_hue_without_clamping`,
+  `the_dust_never_clamps_a_vertex_of_the_dark_slots`;
 - **downward faces** up to 30 % darker;
 - **facet variation** of +-3.5 % per flat triangle from a fixed hash (no randomness), so large flat
   areas are not one sheet; a triangle of a turned surface gets none (WP11.6r: on a round body it
@@ -109,8 +117,9 @@ the material colour:
 - **top-edge highlight:** a face that slopes upward (a bevel or chamfer on top, normal `y` between
   0.2 and 0.97) is 5 % brighter (a few per cent since WP11.6p, was 16 %);
 - **edge wear:** a bevel strip (no axis-aligned normal, narrower than 320 mm) whose corner sees open
-  sky (no AO ray blocked) is, on about two thirds of its triangles (fixed hash), moved 25 % (was 35 %) towards a
-  grey 12 % above its luminance (was 25 %): lighter and less saturated, as paint rubbed thin, not
+  sky (no AO ray blocked) is, on about two thirds of its triangles (fixed hash), moved 20 % (`WEAR`, was 35 %) towards a
+  target that is half a grey of the luminance times 1.12 plus 0.01 (`WEAR_GREY_GAIN`,
+  `WEAR_GREY_LIFT`) and half the colour itself times 1.12 (`WEAR_TINT` 0.5): lighter and less saturated, as paint rubbed thin, not
   bright metal. Big slanted
   facets (a dome segment) are not edges and get none, and neither does any triangle of a turned
   surface (`kit::lathe`, marked `Tri::lathed`; refinement round 2: the narrow segments of the
