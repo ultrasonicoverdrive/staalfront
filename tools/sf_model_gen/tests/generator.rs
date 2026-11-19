@@ -534,7 +534,7 @@ const PINNED_DECOR: [(&str, usize, u64); 14] = [
     ("neutral_ore_field_stage_03.glb", 128888, 0xb95da5095cf1409b),
     ("neutral_ore_field_stage_04.glb", 179056, 0xc8dec64318788c05),
     ("neutral_rock_large.glb", 189340, 0x40f97822c06afd32),
-    ("neutral_rock_small.glb", 118188, 0xf740bc1018ee3bfe),
+    ("neutral_rock_small.glb", 118188, 0x80732670133e829c),
     ("neutral_tree_broadleaf.glb", 82252, 0xcac08d62e8a80cc7),
     (
         "neutral_tree_broadleaf_fallen.glb",
@@ -556,7 +556,7 @@ const PINNED_DECOR: [(&str, usize, u64); 14] = [
         209752,
         0xb40137b663d348d3,
     ),
-    ("neutral_wreck_vessel.glb", 127972, 0x1626849e1e3c48f8),
+    ("neutral_wreck_vessel.glb", 127972, 0xf6b3b3d5c7f9a12b),
 ];
 
 fn fnv1a(bytes: &[u8]) -> u64 {

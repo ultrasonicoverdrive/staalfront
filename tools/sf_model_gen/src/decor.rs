@@ -34,7 +34,7 @@ fn blob_ring(segs: u32, seed: u32, lo: i32) -> Vec<[i32; 2]> {
     (0..segs)
         .map(|k| {
             let a = k * 64 / segs;
-            let j = if a % 16 == 0 {
+            let j = if a.is_multiple_of(16) {
                 1000
             } else {
                 lo + hash(seed.wrapping_mul(131) ^ a) as i32 * (1000 - lo) / 1000
@@ -47,6 +47,7 @@ fn blob_ring(segs: u32, seed: u32, lo: i32) -> Vec<[i32; 2]> {
 /// A rock-like solid on the ground at `at` (on its base): `rx` and `rz` half widths, `h` high,
 /// 16 / 8 / 4 sides (`Lod::segs`). LOD0 has a middle ring, so the side bulges; the top is a
 /// small flat cap leaning a little. Bands: `mats` (low, high), the cap `top`.
+#[allow(clippy::too_many_arguments)]
 pub fn blob(
     at: P,
     rx: i32,
@@ -166,7 +167,7 @@ pub fn rock_large() -> Model {
 }
 
 pub fn rock_small() -> Model {
-    rock("neutral_rock_small", &SMALL_ROCK, 6, (1000, 780))
+    rock("neutral_rock_small", &SMALL_ROCK, 6, (1000, 600))
 }
 
 // ---- Fence and cliff edge -----------------------------------------------------------------------
@@ -808,7 +809,7 @@ pub fn wreck_vessel() -> Model {
                 for k in 0..4 {
                     let z = -1100 + k * 700;
                     hull.add(
-                        closed_box([4900, deck + 1000, z], [4960, deck + 1600, z + 380], RUBBER)
+                        closed_box([4900, deck + 1000, z], [4960, deck + 1600, z + 380], METAL)
                             .toned(CHAR),
                     );
                 }
