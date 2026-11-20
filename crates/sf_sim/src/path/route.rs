@@ -17,9 +17,11 @@
 
 use core::ops::{Index, IndexMut};
 
+use sf_math::bytes::{ByteError, ByteReader, ByteWriter};
 use sf_math::hash::Fnv1a64;
 
-use crate::path::replan::Overlay;
+use crate::path::replan::{OVERLAY_CAP, Overlay};
+use crate::save::{SaveError, SaveResult, ensure};
 
 /// Waypoints the ring holds.
 pub const RING_CAP: usize = 8;
@@ -50,7 +52,7 @@ pub enum RouteState {
 }
 
 impl RouteState {
-    const fn tag(self) -> u8 {
+    pub(crate) const fn tag(self) -> u8 {
         match self {
             RouteState::Idle => 0,
             RouteState::Wanted => 1,
@@ -326,6 +328,11 @@ impl Routes {
         self.0.len()
     }
 
+    /// The route of slot `i`, if the slot has one.
+    pub fn get(&self, i: usize) -> Option<&Route> {
+        self.0.get(i)
+    }
+
     /// Makes slot `i` idle (no growth).
     pub fn reset(&mut self, i: usize) {
         if let Some(r) = self.0.get_mut(i) {
@@ -366,9 +373,166 @@ impl PartialEq for Routes {
 
 impl Eq for Routes {}
 
+impl Route {
+    /// Writes the route (WP13.1b): the waypoints and portals in order from the front, so a
+    /// route is written the same wherever its rings start. Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) {
+        let Route {
+            state,
+            unreachable,
+            complete,
+            truncated,
+            cautious,
+            ticket,
+            epoch,
+            want,
+            goal,
+            frontier,
+            field_serial,
+            field_rank,
+            final_leg,
+            overlay,
+            // Written through `ring_get` and `abs_get`, from the front.
+            ring: _,
+            ring_head: _,
+            ring_len,
+            abs: _,
+            abs_head: _,
+            abs_len,
+        } = self;
+        w.u8(state.tag());
+        w.bool(*unreachable);
+        w.bool(*complete);
+        w.bool(*truncated);
+        w.bool(*cautious);
+        w.u32(*ticket);
+        w.u32(*epoch);
+        w.u32(*want);
+        w.u32(*goal);
+        w.u32(*frontier);
+        w.u32(*field_serial);
+        w.u16(*field_rank);
+        w.bool(*final_leg);
+        w.u8(overlay.len() as u8);
+        for &c in overlay.cells() {
+            w.u32(c);
+        }
+        w.u8(*ring_len);
+        for k in 0..self.ring_len() {
+            w.u32(self.ring_get(k).unwrap_or(0));
+        }
+        w.u8(*abs_len);
+        for k in 0..self.abs_len() {
+            w.u32(self.abs_get(k).unwrap_or(0));
+        }
+    }
+
+    /// Reads what [`Route::save`] wrote, on a map of `cells` cells with graphs of `nodes` portal
+    /// nodes. Refused: an unknown state, a cell or node out of range, rings longer than they hold,
+    /// overlay cells not strictly ascending.
+    pub(crate) fn restore(r: &mut ByteReader<'_>, cells: u64, nodes: u64) -> SaveResult<Route> {
+        let mut out = Route::IDLE;
+        out.state = match r.u8()? {
+            0 => RouteState::Idle,
+            1 => RouteState::Wanted,
+            2 => RouteState::Active,
+            3 => RouteState::Stranded,
+            _ => return Err(SaveError::Corrupt("unknown route state")),
+        };
+        out.unreachable = r.bool()?;
+        out.complete = r.bool()?;
+        out.truncated = r.bool()?;
+        out.cautious = r.bool()?;
+        out.ticket = r.u32()?;
+        out.epoch = r.u32()?;
+        out.want = r.u32()?;
+        out.goal = r.u32()?;
+        out.frontier = r.u32()?;
+        out.field_serial = r.u32()?;
+        out.field_rank = r.u16()?;
+        out.final_leg = r.bool()?;
+        let cell = |c: u32| u64::from(c) < cells;
+        ensure(
+            cell(out.want) && cell(out.goal) && cell(out.frontier),
+            "a route names a cell off the map",
+        )?;
+        let n = usize::from(r.u8()?);
+        ensure(n <= OVERLAY_CAP, "a route overlay is longer than it holds")?;
+        let mut ov = [0u32; OVERLAY_CAP];
+        for c in ov.iter_mut().take(n) {
+            *c = r.u32()?;
+        }
+        ensure(
+            ov[..n].iter().all(|&c| cell(c)) && ov[..n].windows(2).all(|p| p[0] < p[1]),
+            "a route overlay",
+        )?;
+        out.overlay = Overlay::from_cells(&ov[..n]);
+        let n = usize::from(r.u8()?);
+        ensure(n <= RING_CAP, "a route ring is longer than it holds")?;
+        for _ in 0..n {
+            let c = r.u32()?;
+            ensure(cell(c), "a route names a cell off the map")?;
+            out.ring_push(c);
+        }
+        let n = usize::from(r.u8()?);
+        ensure(n <= ABS_CAP, "a route path is longer than it holds")?;
+        for _ in 0..n {
+            let node = r.u32()?;
+            ensure(
+                u64::from(node) < nodes,
+                "a route names a portal that does not exist",
+            )?;
+            out.abs_push(node);
+        }
+        Ok(out)
+    }
+}
+
+impl Routes {
+    /// Writes every slot's route up to the length of the vector, which the service reads (it
+    /// looks at the slots below it): kept exactly.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        w.usize(self.0.len())?;
+        for route in &self.0 {
+            route.save(w);
+        }
+        Ok(())
+    }
+
+    /// Reads what [`Routes::save`] wrote: at most `slots` routes (a route belongs to a slot).
+    pub(crate) fn restore(
+        r: &mut ByteReader<'_>,
+        slots: usize,
+        cells: u64,
+        nodes: u64,
+    ) -> SaveResult<Routes> {
+        let n = r.count(30)?;
+        ensure(n <= slots, "more routes than slots")?;
+        let routes = (0..n)
+            .map(|_| Route::restore(r, cells, nodes))
+            .collect::<SaveResult<Vec<_>>>()?;
+        Ok(Routes(routes))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn routes_restore_at_most_one_per_slot() {
+        let routes = Routes(vec![Route::IDLE; 3]);
+        let mut w = ByteWriter::new();
+        routes.save(&mut w).unwrap();
+        let bytes = w.finish();
+        let back = Routes::restore(&mut ByteReader::new(&bytes), 3, 16, 16).unwrap();
+        assert_eq!(back, routes, "as many routes as slots restore");
+        assert_eq!(
+            Routes::restore(&mut ByteReader::new(&bytes), 2, 16, 16),
+            Err(SaveError::Corrupt("more routes than slots")),
+            "one route more than slots"
+        );
+    }
 
     #[test]
     fn the_ring_is_first_in_first_out_bounded_and_wraps() {

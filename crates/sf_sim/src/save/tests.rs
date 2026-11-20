@@ -6,7 +6,6 @@ use sf_math::{Facing, Fx, Vec2};
 
 use super::*;
 use crate::crowd::CollisionConfig;
-use crate::formation::Member;
 use crate::orders::{GuardTarget, Order};
 use crate::path::ReplanConfig;
 use crate::projectiles::{Projectile, Target};
@@ -329,7 +328,6 @@ fn busy(mut w: World, ticks: u64) -> World {
 /// last tick, the stats, the interpolation columns and the checksum history.
 fn settled(mut w: World) -> World {
     let e = &mut w.entities;
-    e.prev_pos.clone_from(&e.pos);
     e.prev_facing.clone_from(&e.facing);
     e.prev_turret.clone_from(&e.turret);
     w.stalled.clear();
@@ -466,12 +464,15 @@ fn the_header_is_pinned() {
     let w = busy(fresh(), 2);
     let bytes = w.save().unwrap();
     assert_eq!(&bytes[..4], b"SFSV");
-    assert_eq!(&bytes[4..8], &[1, 0, 0, 0]);
+    assert_eq!(&bytes[4..8], &[2, 0, 0, 0]);
     assert_eq!(&bytes[8..16], &w.rules_digest().to_le_bytes());
     assert_eq!(&bytes[16..24], &2u64.to_le_bytes());
-    assert_eq!(&bytes[24..28], &[3, 0, 0, 0]);
-    assert_eq!(bytes[28], b'W');
-    assert_eq!(FORMAT_VERSION, 1);
+    assert_eq!(&bytes[24..28], &[6, 0, 0, 0]);
+    assert_eq!(
+        sections(&bytes).iter().map(|s| s.0).collect::<Vec<_>>(),
+        b"WEQPFM".to_vec()
+    );
+    assert_eq!(FORMAT_VERSION, 2);
 }
 
 #[test]
@@ -482,8 +483,8 @@ fn a_wrong_header_is_refused() {
     assert_eq!(World::restore(fresh(), &bad), Err(SaveError::BadMagic));
     assert_eq!(World::restore(fresh(), b"SF"), Err(SaveError::BadMagic));
     let mut bad = bytes.clone();
-    bad[4] = 2;
-    assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Version(2)));
+    bad[4] = 1;
+    assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Version(1)));
     let mut bad = bytes.clone();
     bad[9] ^= 0x40;
     assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Rules));
@@ -602,7 +603,7 @@ fn every_truncation_is_an_error_and_no_flip_panics() {
 }
 
 /// The body of every section: `(tag, start, length)`.
-fn sections(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
+pub(super) fn sections(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
     let mut out = Vec::new();
     let mut at = 28;
     while at < bytes.len() {
@@ -886,9 +887,10 @@ fn corruptions() -> Vec<Corruption> {
                 let mut w = busy(fresh(), 8);
                 w.entities.target[2] = None;
                 let _ = &mut w;
-                // Slot 0's behaviour: after its generation, flag, kind, owner, position and facing.
+                // Slot 0's behaviour: after its generation, flag, kind, owner, position, the
+                // position before the last step and facing.
                 let (_, body, _) = sections(b)[1];
-                let at = body + 4 + 4 + 1 + 2 + 1 + 16 + 1;
+                let at = body + 4 + 4 + 1 + 2 + 1 + 16 + 16 + 1;
                 assert!(b[at] <= 3);
                 b[at] = 9;
             },
@@ -962,16 +964,6 @@ type Gate = (&'static str, fn(&mut World));
 /// tick-0 state.
 fn gates() -> Vec<Gate> {
     vec![
-        ("pathing", |w| {
-            w.entities.route[5].state = crate::path::RouteState::Wanted
-        }),
-        ("turning", |w| w.entities.turn_carry[6] = 1),
-        ("formations", |w| {
-            w.entities.form[5] = Member {
-                serial: 1,
-                ..Member::NONE
-            }
-        }),
         ("weapons", |w| w.entities.weapon[5][0].wait = 1),
         ("weapons", |w| {
             w.arsenal.attacks.push((5, EntityId::new(6, 0)));
@@ -984,13 +976,6 @@ fn gates() -> Vec<Gate> {
         ("destruction", |w| {
             w.destruction.tally.push((PlayerId(0), Default::default()));
         }),
-        ("pathing", |w| w.pathing.dirty_for_test(0)),
-        ("pathing", |w| w.pathing.dirty_for_test(1)),
-        ("pathing", |w| w.pathing.dirty_for_test(2)),
-        ("pathing", |w| w.pathing.dirty_for_test(3)),
-        ("pathing", |w| w.pathing.dirty_for_test(4)),
-        ("flowfields", |w| w.pathing.dirty_for_test(5)),
-        ("formations", |w| w.formations.bump_serial_for_test()),
         ("economy", |w| {
             w.harvest = Some(Box::new(crate::harvest::Harvest::new(
                 crate::harvest::tests::RULES,

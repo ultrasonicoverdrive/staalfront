@@ -12,6 +12,10 @@
 /// The position of an element that is not in the heap.
 const NOT_IN: u32 = u32::MAX;
 
+use sf_math::bytes::{ByteError, ByteReader, ByteWriter};
+
+use crate::save::{SaveResult, ensure};
+
 /// The key of an element: estimated total cost, then the estimate to the
 /// goal. Smaller is better.
 pub(crate) type Key = (u64, u64);
@@ -126,6 +130,68 @@ impl IndexedHeap {
             self.swap(at, best);
             at = best;
         }
+    }
+}
+
+impl IndexedHeap {
+    /// Writes the heap (WP13.1b): the capacity, the elements in heap order and every key (the
+    /// keys of elements not in the heap are stale, but kept, so that a restored heap is equal).
+    /// The places are rebuilt from the order. Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        let IndexedHeap { heap, pos: _, key } = self;
+        w.usize(key.len())?;
+        crate::save::put_u32s(w, heap)?;
+        for &(a, b) in key {
+            w.u64(a);
+            w.u64(b);
+        }
+        Ok(())
+    }
+
+    /// Reads a heap written by [`IndexedHeap::save`] of the given capacity. Refused: another
+    /// capacity, an element out of range or in twice, and an order that is not a heap (the
+    /// simulation only ever leaves a valid one).
+    pub(crate) fn restore(r: &mut ByteReader<'_>, capacity: usize) -> SaveResult<IndexedHeap> {
+        ensure(r.usize()? == capacity, "a search heap has another size")?;
+        let heap = crate::save::get_u32s(r)?;
+        ensure(heap.len() <= capacity, "a search heap holds too much")?;
+        ensure(
+            r.remaining() >= capacity.saturating_mul(16),
+            "a search heap has another size",
+        )?;
+        let key: Vec<Key> = (0..capacity)
+            .map(|_| Ok((r.u64()?, r.u64()?)))
+            .collect::<SaveResult<_>>()?;
+        let mut pos = vec![NOT_IN; capacity];
+        for (at, &e) in heap.iter().enumerate() {
+            let e = e as usize;
+            ensure(e < capacity && pos[e] == NOT_IN, "a search heap element")?;
+            pos[e] = at as u32;
+        }
+        let mut out = IndexedHeap {
+            heap: Vec::with_capacity(capacity),
+            pos,
+            key,
+        };
+        out.heap.extend_from_slice(&heap);
+        for at in 1..out.heap.len() {
+            ensure(!out.before(at, (at - 1) / 2), "a search heap out of order")?;
+        }
+        Ok(out)
+    }
+
+    /// The elements in the heap, in heap order (restore checks).
+    pub(crate) fn elements(&self) -> &[u32] {
+        &self.heap
+    }
+}
+
+#[cfg(test)]
+impl IndexedHeap {
+    /// Puts the first element in a second time (save tests).
+    pub(crate) fn corrupt_for_test(&mut self) {
+        let first = self.heap.first().copied().unwrap_or(0);
+        self.heap.push(first);
     }
 }
 

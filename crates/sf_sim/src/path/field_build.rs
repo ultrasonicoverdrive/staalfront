@@ -197,7 +197,7 @@ impl Fields {
     /// The build of entry `i` is over: it replaces the older ones of its group.
     fn finish(&mut self, i: usize) {
         self.entries[i].state = FieldState::Ready;
-        self.built += 1;
+        self.built = self.built.saturating_add(1);
         self.cur = None;
         let (serial, version) = (self.entries[i].serial, self.entries[i].version);
         for (j, o) in self.entries.iter_mut().enumerate() {
@@ -667,5 +667,136 @@ fn integrate(f: &mut Field, c: &mut Cur, s: &mut Scratch, g: &ClassGraph, rem: &
         Flow::Done
     } else {
         Flow::Yield
+    }
+}
+
+// ---- saving (WP13.1b, `docs/rules/save.md`) ---------------------------------------------------
+
+use crate::path::job::Bounds;
+use crate::save::{SaveResult, ensure, get_fx, get_links, get_u8s, get_u32s, get_vec2, put_fx};
+use sf_math::bytes::{ByteError, ByteReader, ByteWriter};
+
+impl Scratch {
+    /// Writes the builder's memory whole: a build in flight goes on from it next tick.
+    /// Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        let Scratch {
+            local,
+            taken,
+            corridor,
+            walked,
+            walk_generation,
+            mark,
+            goal_links,
+            region,
+            wanted,
+            wanted_len,
+            heap,
+        } = self;
+        local.save(w)?;
+        w.usize(taken.len())?;
+        for &(p, s) in taken {
+            crate::save::put_vec2(w, p);
+            put_fx(w, s);
+        }
+        corridor.save(w)?;
+        crate::save::put_u32s(w, walked)?;
+        w.u32(*walk_generation);
+        crate::save::put_u8s(w, mark)?;
+        crate::save::put_links(w, goal_links)?;
+        crate::save::put_u32s(w, region)?;
+        w.usize(*wanted_len)?;
+        for &n in &wanted[..*wanted_len] {
+            w.u16(n);
+        }
+        heap.save(w)?;
+        Ok(())
+    }
+
+    /// Reads what [`Scratch::save`] wrote. Refused: arrays of another size, a node or sector out
+    /// of range, a walk mark from a later walk than the one going on, a sector mark other than
+    /// "on a path" and "in the margin", more wanted cells than a sector has portals or a wanted
+    /// cell outside the window.
+    pub(crate) fn restore(r: &mut ByteReader<'_>, b: &Bounds) -> SaveResult<Scratch> {
+        let local = Local::restore(r, b.width, b.height)?;
+        let n = r.count(24)?;
+        let taken = (0..n)
+            .map(|_| Ok((get_vec2(r)?, get_fx(r)?)))
+            .collect::<SaveResult<Vec<_>>>()?;
+        let corridor = Corridor::restore(r, b.sectors)?;
+        let walked = get_u32s(r)?;
+        let walk_generation = r.u32()?;
+        let mark = get_u8s(r)?;
+        let goal_links = get_links(r)?;
+        let region = get_u32s(r)?;
+        let wanted_len = r.usize()?;
+        ensure(
+            wanted_len <= SLOTS,
+            "the field builder wants too many cells",
+        )?;
+        let mut wanted = [0u16; SLOTS];
+        for n in wanted.iter_mut().take(wanted_len) {
+            *n = r.u16()?;
+        }
+        let cap = FIELD_SECTORS.min(b.sectors) * (SECTOR_SIZE * SECTOR_SIZE) as usize;
+        let heap = IndexedHeap::restore(r, cap)?;
+        let nodes = b.sectors * SLOTS;
+        ensure(
+            walked.len() == nodes && mark.len() == b.sectors,
+            "the field builder has another size",
+        )?;
+        ensure(
+            walked.iter().all(|&g| g <= walk_generation)
+                && mark.iter().all(|&m| m <= 3)
+                && goal_links.iter().all(|&(n, _)| b.node(n))
+                && region.len() <= FIELD_SECTORS
+                && region.iter().all(|&s| (s as usize) < b.sectors)
+                && wanted[..wanted_len]
+                    .iter()
+                    .all(|&n| usize::from(n) < crate::path::local::WINDOW_CELLS),
+            "the field builder's memory out of range",
+        )?;
+        Ok(Scratch {
+            local,
+            taken,
+            corridor,
+            walked,
+            walk_generation,
+            mark,
+            goal_links,
+            region,
+            wanted,
+            wanted_len,
+            heap,
+        })
+    }
+
+    /// Whether every cell in the integration heap is a place in a region of `cells` cells.
+    pub(crate) fn heap_within(&self, cells: usize) -> bool {
+        self.heap.elements().iter().all(|&e| (e as usize) < cells)
+    }
+}
+
+#[cfg(test)]
+impl Scratch {
+    /// 0: a walk mark from a later walk; 1: a sector reached from another one (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.walked[0] = self.walk_generation + 1,
+            1 => self.corridor.corrupt_for_test(),
+            _ => self.local.corrupt_for_test(2),
+        }
+    }
+}
+
+impl Scratch {
+    /// Whether the builder's local search fits the build in flight (restore checks): in the stage
+    /// that searches from the goal, its heap and parents lie in the goal's sector.
+    pub(crate) fn search_fits(&self, c: &Cur, f: &Field, g: &ClassGraph) -> bool {
+        if c.stage != Stage::GoalLinks || !c.searching {
+            return true;
+        }
+        let (gx, gy) = g.grid.xy(f.goal);
+        self.local.fits(g.sectors.rect(g.sectors.of_cell(gx, gy)))
     }
 }

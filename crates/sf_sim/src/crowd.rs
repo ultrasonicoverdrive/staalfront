@@ -878,6 +878,13 @@ impl Crowd {
     }
 }
 
+/// The stuck attempts after one more sidestep: one more, at most `limit`. Saturating, because
+/// `limit` may be 255 (`CollisionConfig::is_valid`) and a unit at the limit sidesteps again while
+/// its replan cools down (WP13.1b).
+pub(crate) fn next_attempts(attempts: u8, limit: u8) -> u8 {
+    attempts.saturating_add(1).min(limit)
+}
+
 impl PartialEq for Crowd {
     /// The scratch memory is not state.
     fn eq(&self, other: &Crowd) -> bool {
@@ -1473,7 +1480,7 @@ impl Work<'_, '_> {
                     // runs, when the attempts stay at their limit so that the next
                     // stuck period asks.
                     let c = &mut e.crowd[u];
-                    c.attempts = (c.attempts + 1).min(cfg.stuck_attempts);
+                    c.attempts = next_attempts(c.attempts, cfg.stuck_attempts);
                     self.stats.sidesteps += 1;
                     // The slot it was going to is walled off: it takes another one
                     // when it can (WP4.4b, `path/claim.rs`).

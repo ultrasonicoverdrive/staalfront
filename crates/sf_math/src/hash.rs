@@ -107,6 +107,13 @@ impl Fnv1a64 {
     pub const fn finish(&self) -> u64 {
         self.0
     }
+
+    /// A hasher that goes on from the state `finish` gave: `from_state(h.finish())` equals `h`.
+    /// For restoring a running hash from a save (WP13.1b).
+    #[inline]
+    pub const fn from_state(state: u64) -> Fnv1a64 {
+        Fnv1a64(state)
+    }
 }
 
 #[cfg(test)]
