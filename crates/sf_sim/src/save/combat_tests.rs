@@ -688,6 +688,17 @@ fn corruptions() -> Vec<Case> {
             w.entities.eng[i].held = false;
         }),
         (ENG, Need::Early, |w| {
+            // Not held, and the anchor cleared as `held` false needs: only "an engagement holds".
+            let i = engaged(w);
+            w.entities.eng[i].held = false;
+            w.entities.eng[i].anchor = Vec2::ZERO;
+        }),
+        (ENG, Need::Early, |w| {
+            // An engagement kept while the order is no `Pursue`.
+            let i = engaged(w);
+            w.entities.order[i] = Order::HoldPosition;
+        }),
+        (ENG, Need::Early, |w| {
             let i = calm(w);
             w.entities.eng[i].held = true;
             w.entities.eng[i].rest = TargetingConfig::DEFAULT.pursuit_reset;
@@ -845,6 +856,18 @@ fn corruptions() -> Vec<Case> {
             // A rifleman is too small to leave a wreck.
             let k = wreck_of(w, WreckKind::Vehicle);
             w.destruction.wrecks[k].unit = RIFLE;
+        }),
+        (WRECK, Need::Late, |w| {
+            // As small as a rifleman: below `wreck_min_size`, the size its own.
+            let k = wreck_of(w, WreckKind::Vehicle);
+            w.destruction.wrecks[k].unit = RIFLE;
+            w.destruction.wrecks[k].size = Fx::from_ratio(1, 2);
+        }),
+        (WRECK, Need::Late, |w| {
+            // A structure kind as a vehicle wreck, of its size.
+            let k = wreck_of(w, WreckKind::Vehicle);
+            w.destruction.wrecks[k].unit = TOWER;
+            w.destruction.wrecks[k].size = Fx::ONE;
         }),
         (WRECK, Need::Late, |w| {
             let k = wreck_of(w, WreckKind::Vehicle);
