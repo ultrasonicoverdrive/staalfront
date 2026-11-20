@@ -451,7 +451,10 @@ fn reachable(p: &Projectile, w: &WeaponStats, map: (u32, u32)) -> bool {
     let heights = |h: Fx| match w.projectile {
         ProjectileKind::Instant => false,
         ProjectileKind::Straight | ProjectileKind::Guided => h == Fx::ZERO,
-        ProjectileKind::Arc => h >= Fx::ZERO && h <= w.flight_height,
+        // `arc_height` lies between zero and the peak (the table does not forbid a negative one).
+        ProjectileKind::Arc => {
+            h >= w.flight_height.min(Fx::ZERO) && h <= w.flight_height.max(Fx::ZERO)
+        }
         ProjectileKind::Falling => h > Fx::ZERO && h <= w.flight_height,
     };
     let places = match w.projectile {
@@ -685,6 +688,34 @@ impl Projectiles {
             free,
             live,
         })
+    }
+
+    /// Breaks the store (save tests): 0 one generation too many, 1 a live slot on the free list, 2
+    /// a free slot dropped from the free list (a slot is freed first if none is).
+    #[cfg(test)]
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.generation.push(0),
+            1 => {
+                let live = self
+                    .rows
+                    .iter()
+                    .position(Option::is_some)
+                    .expect("a live slot");
+                self.free.push(live as u32);
+            }
+            _ => {
+                if self.free.is_empty() {
+                    let live = self
+                        .rows
+                        .iter()
+                        .position(Option::is_some)
+                        .expect("a live slot");
+                    self.remove(live as u32);
+                }
+                self.free.pop();
+            }
+        }
     }
 
     /// Folds the whole store into the checksum: the slots, the free list (it decides which slot a later

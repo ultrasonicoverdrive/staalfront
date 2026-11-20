@@ -325,7 +325,7 @@ fn busy(mut w: World, ticks: u64) -> World {
 
 /// The world with what a restore does not bring back put equal on both sides: the reports of the
 /// last tick, the stats, the interpolation columns and the checksum history.
-fn settled(mut w: World) -> World {
+pub(super) fn settled(mut w: World) -> World {
     let e = &mut w.entities;
     e.prev_facing.clone_from(&e.facing);
     e.prev_turret.clone_from(&e.turret);
@@ -335,6 +335,7 @@ fn settled(mut w: World) -> World {
     w.arsenal.shots.clear();
     w.arsenal.impacts.clear();
     w.arsenal.attacks.clear();
+    w.arsenal.hurt.clear();
     w.destruction.deaths.clear();
     w.pathing.clear_stats();
     w.crowd.stats = Default::default();

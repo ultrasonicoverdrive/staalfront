@@ -149,7 +149,7 @@ pub struct Wreck {
 
 impl Wreck {
     /// The total order wrecks are kept in: where they lie, then what they are.
-    fn key(&self) -> (i64, i64, WreckKind, u16, u8, u64, u64) {
+    pub(crate) fn key(&self) -> (i64, i64, WreckKind, u16, u8, u64, u64) {
         (
             self.pos.y.raw(),
             self.pos.x.raw(),
@@ -510,15 +510,13 @@ fn wreck_reachable(
         Fx::from_i64(i64::from(map.0)),
         Fx::from_i64(i64::from(map.1)),
     );
-    let on_map =
-        w.pos.x >= Fx::ZERO && w.pos.y >= Fx::ZERO && w.pos.x <= max_x && w.pos.y <= max_y;
+    let on_map = w.pos.x >= Fx::ZERO && w.pos.y >= Fx::ZERO && w.pos.x <= max_x && w.pos.y <= max_y;
     let ticks = match w.kind {
         WreckKind::Vehicle => c.wreck_ticks,
         WreckKind::Rubble => c.rubble_ticks,
     };
-    let times = w.born < now
-        && w.expires >= now
-        && w.expires == w.born.saturating_add(u64::from(ticks));
+    let times =
+        w.born < now && w.expires >= now && w.expires == w.born.saturating_add(u64::from(ticks));
     let shape = match w.kind {
         WreckKind::Vehicle => {
             stats.class() == UnitClass::Mobile

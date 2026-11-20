@@ -1065,14 +1065,12 @@ impl Combat<'_> {
                             && rest == 0
                     }
                     // Not engaged: `forget` cleared what the engagement held.
-                    None => {
-                        !pursuing && !chase && aim == Vec2::ZERO && reach == Fx::ZERO
-                    }
+                    None => !pursuing && !chase && aim == Vec2::ZERO && reach == Fx::ZERO,
                 };
                 // `rest` counts up to `pursuit_reset` and starts again there, only while `held`;
                 // dropping `held` clears the anchor.
-                let leash = rest < config.pursuit_reset
-                    && (held || (rest == 0 && anchor == Vec2::ZERO));
+                let leash =
+                    rest < config.pursuit_reset && (held || (rest == 0 && anchor == Vec2::ZERO));
                 common && engaged && leash
             }
             Some(UnitClass::Structure) => {
@@ -1871,3 +1869,6 @@ mod tests;
 
 #[cfg(test)]
 mod path_tests;
+
+#[cfg(test)]
+mod combat_tests;

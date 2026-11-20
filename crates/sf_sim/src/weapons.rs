@@ -691,7 +691,6 @@ impl PartialEq for SplashIndex {
 impl Eq for SplashIndex {}
 
 impl Arsenal {
-
     /// Writes the state of the arsenal: the projectiles in flight (section `X` of a save,
     /// WP13.1c-1, `docs/rules/save.md`). Destructured without `..`: a new field fails to compile
     /// until it is placed here.
