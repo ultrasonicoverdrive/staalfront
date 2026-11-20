@@ -20,7 +20,7 @@
 //! # Not yet saved
 //!
 //! Buildings (construction), economy, production, power, repair, vision and outcome come in
-//! WP13.1c-2. Until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
+//! WP13.1c-2; until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
 //! section, any world in which one of them holds something that is not its tick-0 state; the exact
 //! test per section is in `docs/rules/save.md`. A world that saves therefore restores whole.
 //!

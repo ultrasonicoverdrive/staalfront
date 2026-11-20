@@ -1048,6 +1048,81 @@ fn a_job_behind_the_service_restores_and_replans() {
     }
 }
 
+/// The battle's world without targeting or without destruction settings (the rest as `fresh`).
+fn fresh_without(targeting: bool, destruction: bool) -> World {
+    let mut w = World::with_terrain(WorldConfig::new(13).with_map_size(W, H), terrain())
+        .unwrap()
+        .with_units(table())
+        .unwrap()
+        .with_movement(movement())
+        .unwrap()
+        .with_path_budget(crate::path::MIN_NODE_BUDGET)
+        .unwrap()
+        .with_weapons(WeaponTable::new(weapons(), loadouts()).unwrap())
+        .unwrap();
+    if !targeting {
+        w = w.with_targeting(TargetingConfig::DEFAULT).unwrap();
+    }
+    if !destruction {
+        w = w.with_destruction(DestructionConfig::DEFAULT).unwrap();
+    }
+    w
+}
+
+/// Engagement memory, kills, wrecks or a tally in a world whose rules never make them: the saved
+/// world has its settings taken away (so the rules digest is the one of a world without them) and
+/// is restored onto such a world.
+#[test]
+fn combat_state_without_its_rules_is_corrupt() {
+    type Strip = (&'static str, Need, bool, fn(&mut World));
+    let cases: [Strip; 4] = [
+        (
+            "an engagement the targeting stage never leaves",
+            Need::Early,
+            true,
+            |w| w.targeting.config = None,
+        ),
+        (
+            "kills without a weapon or destruction",
+            Need::Late,
+            false,
+            |w| {
+                w.destruction.config = None;
+            },
+        ),
+        (
+            "a wreck the death stage never leaves",
+            Need::Late,
+            false,
+            |w| {
+                w.destruction.config = None;
+                w.entities.kills.iter_mut().for_each(|k| *k = 0);
+            },
+        ),
+        (
+            "a tally out of order, all zero or without destruction",
+            Need::Late,
+            false,
+            |w| {
+                w.destruction.config = None;
+                w.entities.kills.iter_mut().for_each(|k| *k = 0);
+                w.destruction.wrecks.clear();
+            },
+        ),
+    ];
+    for (k, (what, need, targeting, strip)) in cases.into_iter().enumerate() {
+        let mut w = base(need);
+        strip(&mut w);
+        let onto = fresh_without(targeting, !targeting);
+        assert_eq!(w.rules_digest(), onto.rules_digest(), "case {k}");
+        assert_eq!(
+            World::restore(onto, &w.save().unwrap()),
+            Err(SaveError::Corrupt(what)),
+            "case {k}"
+        );
+    }
+}
+
 /// A different weapon, armor, targeting or destruction setting is another set of rules.
 #[test]
 fn other_combat_rules_are_refused() {
