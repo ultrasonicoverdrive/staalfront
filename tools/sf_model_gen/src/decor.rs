@@ -944,6 +944,15 @@ pub fn wreck_vessel() -> Model {
                         closed_box([x, deck, -2130], [x + 50, deck + 700, -2080], METAL)
                             .toned(BURNT_STEEL),
                     );
+                    // The starboard rail is bent: its posts stand lower.
+                    hull.add(
+                        closed_box(
+                            [x, deck, 2080],
+                            [x + 50, deck + 700 - (k % 3) * 160, 2130],
+                            METAL,
+                        )
+                        .toned(BURNT_STEEL),
+                    );
                 }
             }
         }

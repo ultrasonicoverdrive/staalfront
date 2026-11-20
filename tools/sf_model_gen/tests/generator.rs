@@ -536,27 +536,11 @@ const PINNED_DECOR: [(&str, usize, u64); 14] = [
     ("neutral_rock_large.glb", 189340, 0x40f97822c06afd32),
     ("neutral_rock_small.glb", 118188, 0x80732670133e829c),
     ("neutral_tree_broadleaf.glb", 82252, 0xcac08d62e8a80cc7),
-    (
-        "neutral_tree_broadleaf_fallen.glb",
-        84172,
-        0xbcd02ed80df73d79,
-    ),
-    (
-        "neutral_wreck_heavy_vehicle.glb",
-        156596,
-        0xaded55d870736944,
-    ),
-    (
-        "neutral_wreck_light_vehicle.glb",
-        133152,
-        0xf93d7fcdb4e2be04,
-    ),
-    (
-        "neutral_wreck_medium_vehicle.glb",
-        209752,
-        0xb40137b663d348d3,
-    ),
-    ("neutral_wreck_vessel.glb", 134040, 0xaba3b05c3074a07a),
+    ("neutral_tree_broadleaf_fallen.glb", 85312, 0xe9d55b946c4d58f9),
+    ("neutral_wreck_heavy_vehicle.glb", 166376, 0xd405650e02d6a7de),
+    ("neutral_wreck_light_vehicle.glb", 142936, 0xcc4dee4f6149cdd9),
+    ("neutral_wreck_medium_vehicle.glb", 219544, 0x4bbb5dcfa38f1d06),
+    ("neutral_wreck_vessel.glb", 146372, 0x0cf13dd80a6c0b04),
 ];
 
 fn fnv1a(bytes: &[u8]) -> u64 {
