@@ -3619,6 +3619,31 @@ What it does not settle:
 
 * **Fix round 5 (B4).** The ticket counter skips 0 (`next_ticket_after`, used by all eight increments in `path.rs`) and `Job::restore` refuses a job with ticket 0, so a command's route (ticket 0) can never make an unowned, unchecked job owned before `serve`. Case in `every_impossible_job_state_is_corrupt`, `the_ticket_counter_skips_zero`; no pin moved.
 
+### WP13.1c-1 notes: saving weapons, projectiles, targeting and destruction (20-11-2026)
+
+* Format version 3: sections `X` (the projectile store whole) and `D` (wrecks and tally, before
+  `P`); the entity section gains the weapon slots, the engagement memory and the kills. The gates for
+  projectiles, weapons, targeting and destruction are gone; the gates of WP13.1c-2 (buildings,
+  economy, production, power, repair, vision, outcome) stay. Details: `docs/rules/save.md`.
+* Derived, not saved: the shots, impacts, attacks and damage records of the last tick (cleared by
+  `weapons::update_all` before anything reads them) and the deaths (cleared by `reap`).
+* Epoch rule: a job saved after a tick in which structures fell is behind the service by exactly
+  the rubble born then; that is allowed (and nothing else), and its memory is not judged (the next
+  service replans it unread). `a_job_behind_the_service_restores_and_replans`.
+* Rules digest: the weapon table through `WeaponTable::rules_digest`, the weapon and armor digests,
+  the targeting and destruction settings, all destructured without `..` (same bytes for the checksum).
+* Tally counters saturate (were `+= 1`); same values below `u32::MAX`, no pin moved.
+* Five combat CI scenarios (`weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`,
+  `destruction`) run through a save every 97 ticks and end on their pins
+  (`tools/sf_headless/tests/save_combat.rs`); the every-tick probe over all five passes in release
+  (ignored in debug). In `sf_sim`, `the_battle_restores_after_every_tick` saves after every tick of a
+  700-tick battle with every projectile kind and a job behind the service at two ticks.
+* Not saved yet (WP13.1c-2): buildings, economy, production, power, repair, vision, outcome; so
+  `defences` (power), `vision_targeting` (vision) and `repair_sell` (economy) still refuse.
+* Known gap (for 13.1h): a projectile's or wreck's owner and a projectile's heading are not checked
+  (any value is reachable or harmless); the slack of a straight or arcing shell past the map edge
+  (`STEP_SLACK`) is a reasoned bound, not a measured one.
+
 ### WP9.3c notes: the defence lock gate (14-11-2026)
 
 * **What changed.** Data only: `assets/ai/normal.ron`, both goal lists end at the second refinery (no tower, advanced defences, radar or bunker). Tests re-pinned with cause (below); `docs/rules/ai.md` "Defence lock (WP9.3c)"; PLAN note of 14-11-2026; screenshots `docs/screenshots/wp9.3c/`.

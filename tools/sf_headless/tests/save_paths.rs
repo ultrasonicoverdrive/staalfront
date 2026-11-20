@@ -84,16 +84,13 @@ fn the_other_movement_scenarios_continue_through_saves() {
     }
 }
 
-/// The other CI scenarios without an AI hold state of a section WP13.1c saves by the first save
-/// tick: their save is refused, naming the section (this list shrinks as those sections save).
+/// The other CI scenarios without an AI hold state of a section WP13.1c-2 saves by the first save
+/// tick: their save is refused, naming the section (this list shrinks as those sections save). The
+/// combat scenarios that save now are in `save_combat.rs`.
 #[test]
 fn probe_which_scenarios_save() {
+    let mut wrong = Vec::new();
     for (name, section) in [
-        ("weapons_reload", "projectiles"),
-        ("projectiles", "projectiles"),
-        ("armour_splash", "projectiles"),
-        ("tanks_vs_infantry", "targeting"),
-        ("destruction", "projectiles"),
         ("placement", "buildings"),
         ("construction", "buildings"),
         ("ore_256", "economy"),
@@ -104,10 +101,10 @@ fn probe_which_scenarios_save() {
         ("production_repeat", "economy"),
         ("match", "economy"),
         ("power", "economy"),
-        ("defences", "projectiles"),
-        ("repair_sell", "projectiles"),
+        ("defences", "power"),
+        ("repair_sell", "economy"),
         ("vision", "vision"),
-        ("vision_targeting", "projectiles"),
+        ("vision_targeting", "vision"),
         ("silo", "economy"),
     ] {
         let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
@@ -117,10 +114,10 @@ fn probe_which_scenarios_save() {
             arrivals.schedule_due(&mut world).unwrap();
             world.step();
         }
-        assert_eq!(
-            world.save().err(),
-            Some(SaveError::Unsupported(section)),
-            "{name}"
-        );
+        let got = world.save().err();
+        if got != Some(SaveError::Unsupported(section)) {
+            wrong.push(format!("{name}: {got:?}"));
+        }
     }
+    assert!(wrong.is_empty(), "{wrong:?}");
 }

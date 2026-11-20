@@ -12,14 +12,15 @@
 //!
 //! * Header: the magic `SFSV`, `format_version` ([`FORMAT_VERSION`]), the rules digest, the tick
 //!   and the number of sections.
-//! * Sections, each a tag byte and a `u32` length: `W` the world scalars, `E` the entities, `Q` the
-//!   command queue, `P` the path service (WP13.1b), `F` the flowfields, `M` the formations, in that
-//!   order.
+//! * Sections, each a tag byte and a `u32` length: `W` the world scalars, `E` the entities (with
+//!   the weapon slots, the engagement memory and the kills, WP13.1c-1), `Q` the command queue, `X`
+//!   the projectiles and `D` the wrecks and the tally (WP13.1c-1), `P` the path service (WP13.1b),
+//!   `F` the flowfields, `M` the formations, in that order.
 //!
 //! # Not yet saved
 //!
-//! Weapons, projectiles, targeting, destruction, buildings (construction), economy, production,
-//! power, repair, vision and outcome come in WP13.1c. Until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
+//! Buildings (construction), economy, production, power, repair, vision and outcome come in
+//! WP13.1c-2. Until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
 //! section, any world in which one of them holds something that is not its tick-0 state; the exact
 //! test per section is in `docs/rules/save.md`. A world that saves therefore restores whole.
 //!
