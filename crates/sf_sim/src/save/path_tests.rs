@@ -617,7 +617,7 @@ fn other_path_settings_are_other_rules() {
 /// states.
 #[test]
 fn the_new_tags_are_pinned() {
-    assert_eq!(SECTIONS, *b"WEQPFM");
+    assert_eq!(SECTIONS, *b"WEQXDPFM");
     use crate::formation::MemberMode;
     assert_eq!(
         [

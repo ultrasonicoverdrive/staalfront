@@ -36,11 +36,16 @@
 use sf_math::hash::Fnv1a64;
 use sf_math::{Facing, Fx, Vec2};
 
+use sf_math::bytes::{ByteReader, ByteWriter};
+
 use crate::entities::Entities;
 use crate::ids::{EntityId, PlayerId};
 use crate::orders::{live_slot, radius_of};
+use crate::save::{
+    SaveError, SaveResult, ensure, get_fx, get_id, get_vec2, put_fx, put_id, put_vec2,
+};
 use crate::units::UnitTable;
-use crate::weapons::{ProjectileKind, WeaponStats};
+use crate::weapons::{ProjectileKind, WeaponStats, WeaponTable};
 
 /// How far from the edge of its target a projectile still counts as touching it: a quarter of a cell
 /// (a metre). A projectile is not a point.
@@ -417,6 +422,72 @@ fn fly_guided(
     None
 }
 
+/// The slack of a step toward the aim point: `with_length` rounds each component, so a shell
+/// that started on the map edge can stand a few raw units past it. Not measured; a 256th of a cell
+/// is far more than the rounding of one step (each step starts again from where the last ended,
+/// so the error does not add up).
+const STEP_SLACK: Fx = Fx::from_ratio(1, 256);
+
+/// Whether the weapon stage leaves projectile `p` of weapon `w` in the store at the end of a tick
+/// (`docs/rules/save.md`): a weapon that launches one (not instant); a point target only for a
+/// guided one (it gives its entity up); an aim on the map (where a target stood); a fuse of one
+/// tick or more (at zero it goes off) and at most the fuse it was launched with ([`fuse_for`]); a
+/// span of a falling shell zero and of the others at most the width plus the height of the map
+/// (the distance between two points on it); the height zero for a straight or guided one, at most
+/// the flight height for an arc and above zero for a falling one (it lands when it reaches the
+/// ground); a falling shell over its aim point; a straight or arcing one on the map (between the
+/// shooter and the aim point, [`STEP_SLACK`] round it); a guided one at most `speed` a tick away
+/// from the map for every tick it has flown.
+fn reachable(p: &Projectile, w: &WeaponStats, map: (u32, u32)) -> bool {
+    let (max_x, max_y) = (
+        Fx::from_i64(i64::from(map.0)),
+        Fx::from_i64(i64::from(map.1)),
+    );
+    let within = |v: Vec2, slack: Fx| {
+        v.x >= -slack && v.y >= -slack && v.x <= max_x + slack && v.y <= max_y + slack
+    };
+    let speed = w.projectile_speed_per_tick;
+    let launched_fuse = fuse_for(w, p.span);
+    let heights = |h: Fx| match w.projectile {
+        ProjectileKind::Instant => false,
+        ProjectileKind::Straight | ProjectileKind::Guided => h == Fx::ZERO,
+        // `arc_height` lies between zero and the peak (the table does not forbid a negative one).
+        ProjectileKind::Arc => {
+            h >= w.flight_height.min(Fx::ZERO) && h <= w.flight_height.max(Fx::ZERO)
+        }
+        ProjectileKind::Falling => h > Fx::ZERO && h <= w.flight_height,
+    };
+    let places = match w.projectile {
+        ProjectileKind::Instant => false,
+        ProjectileKind::Falling => p.pos == p.aim && p.prev_pos == p.aim,
+        ProjectileKind::Straight | ProjectileKind::Arc => {
+            within(p.pos, STEP_SLACK) && within(p.prev_pos, STEP_SLACK)
+        }
+        ProjectileKind::Guided => {
+            let flown = launched_fuse.saturating_sub(p.fuse);
+            let far = speed * Fx::from_i64(i64::from(flown));
+            within(p.pos, far) && within(p.prev_pos, far)
+        }
+    };
+    let span = if w.projectile == ProjectileKind::Falling {
+        p.span == Fx::ZERO
+    } else {
+        p.span >= Fx::ZERO && p.span <= max_x + max_y
+    };
+    let target = match p.target {
+        Target::Entity(_) => true,
+        Target::Point => w.projectile == ProjectileKind::Guided,
+    };
+    target
+        && span
+        && places
+        && heights(p.height)
+        && heights(p.prev_height)
+        && within(p.aim, Fx::ZERO)
+        && p.fuse >= 1
+        && p.fuse <= launched_fuse
+}
+
 /// Every projectile in flight: a slot vector with a free list and a generation per slot. A slot whose
 /// generation is used up is retired, not reused (see [`Projectiles::remove`]).
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
@@ -492,6 +563,159 @@ impl Projectiles {
             row.as_ref()
                 .map(|p| (ProjectileId::new(i as u32, self.generation[i]), p))
         })
+    }
+
+    /// Writes the whole store (section `X` of a save, WP13.1c-1): the generation of every slot,
+    /// every slot's projectile (a flag, then every field, `prev_pos` and `prev_height` too, so a
+    /// restored store is equal by `PartialEq`), and the free list in stack order. `live` is
+    /// derived. Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> SaveResult<()> {
+        let Projectiles {
+            generation,
+            rows,
+            free,
+            // Derived: the rows that hold a projectile.
+            live: _,
+        } = self;
+        crate::save::put_u32s(w, generation)?;
+        w.usize(rows.len())?;
+        for row in rows {
+            w.bool(row.is_some());
+            let Some(p) = row else { continue };
+            let Projectile {
+                weapon,
+                owner,
+                player,
+                target,
+                aim,
+                pos,
+                prev_pos,
+                height,
+                prev_height,
+                heading,
+                span,
+                fuse,
+            } = p;
+            w.u16(*weapon);
+            put_id(w, *owner);
+            w.u8(player.0);
+            match target {
+                Target::Point => w.u8(0),
+                Target::Entity(id) => {
+                    w.u8(1);
+                    put_id(w, *id);
+                }
+            }
+            put_vec2(w, *aim);
+            put_vec2(w, *pos);
+            put_vec2(w, *prev_pos);
+            put_fx(w, *height);
+            put_fx(w, *prev_height);
+            w.u8(heading.raw());
+            put_fx(w, *span);
+            w.u32(*fuse);
+        }
+        crate::save::put_u32s(w, free)?;
+        Ok(())
+    }
+
+    /// Reads what [`Projectiles::save`] wrote. Refused as `Corrupt`: a generation list of another
+    /// length than the rows; a projectile the weapon stage never leaves in the store
+    /// ([`reachable`]); a free list with a live slot, a slot out of range or one twice; a free slot
+    /// that is not on the list without being retired (generation `u32::MAX`).
+    pub(crate) fn restore(
+        r: &mut ByteReader<'_>,
+        table: &WeaponTable,
+        map: (u32, u32),
+    ) -> SaveResult<Projectiles> {
+        let generation = crate::save::get_u32s(r)?;
+        let n = r.count(1)?;
+        ensure(n == generation.len(), "projectile slots of two lengths")?;
+        let mut rows = Vec::with_capacity(n);
+        for _ in 0..n {
+            if !r.bool()? {
+                rows.push(None);
+                continue;
+            }
+            let weapon = r.u16()?;
+            let owner = get_id(r)?;
+            let player = PlayerId(r.u8()?);
+            let target = match r.u8()? {
+                0 => Target::Point,
+                1 => Target::Entity(get_id(r)?),
+                _ => return Err(SaveError::Corrupt("unknown projectile target")),
+            };
+            let p = Projectile {
+                weapon,
+                owner,
+                player,
+                target,
+                aim: get_vec2(r)?,
+                pos: get_vec2(r)?,
+                prev_pos: get_vec2(r)?,
+                height: get_fx(r)?,
+                prev_height: get_fx(r)?,
+                heading: Facing::new(r.u8()?),
+                span: get_fx(r)?,
+                fuse: r.u32()?,
+            };
+            ensure(
+                table.weapon(weapon).is_some_and(|w| reachable(&p, w, map)),
+                "a projectile the weapon stage never leaves in flight",
+            )?;
+            rows.push(Some(p));
+        }
+        let free = crate::save::get_u32s(r)?;
+        let mut listed = vec![false; n];
+        for &index in &free {
+            let i = index as usize;
+            ensure(
+                i < n && rows[i].is_none() && !listed[i],
+                "the projectile free list",
+            )?;
+            listed[i] = true;
+        }
+        for i in 0..n {
+            ensure(
+                rows[i].is_some() || listed[i] || generation[i] == u32::MAX,
+                "a free projectile slot is missing from the free list",
+            )?;
+        }
+        let live = rows.iter().filter(|p| p.is_some()).count() as u32;
+        Ok(Projectiles {
+            generation,
+            rows,
+            free,
+            live,
+        })
+    }
+
+    /// Breaks the store (save tests): 0 one generation too many, 1 a live slot on the free list, 2
+    /// a free slot dropped from the free list (a slot is freed first if none is).
+    #[cfg(test)]
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.generation.push(0),
+            1 => {
+                let live = self
+                    .rows
+                    .iter()
+                    .position(Option::is_some)
+                    .expect("a live slot");
+                self.free.push(live as u32);
+            }
+            _ => {
+                if self.free.is_empty() {
+                    let live = self
+                        .rows
+                        .iter()
+                        .position(Option::is_some)
+                        .expect("a live slot");
+                    self.remove(live as u32);
+                }
+                self.free.pop();
+            }
+        }
     }
 
     /// Folds the whole store into the checksum: the slots, the free list (it decides which slot a later

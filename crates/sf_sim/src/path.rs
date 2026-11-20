@@ -382,6 +382,7 @@ impl Pathing {
         r: &mut sf_math::bytes::ByteReader<'_>,
         e: &mut Entities,
         b: &job::Bounds,
+        lag: u32,
     ) -> crate::save::SaveResult<()> {
         use crate::save::ensure;
         self.epoch = r.u32()?;
@@ -400,11 +401,16 @@ impl Pathing {
         } else {
             None
         };
-        // Only a map change moves the epoch (`refresh_sectors`), and it comes either before the
-        // service runs (commands), which then replans a job of the old epoch at once, or after it
-        // (a structure destroyed), whose tick saves nothing. So a saved job is of this epoch.
+        // Only a map change moves the epoch (`refresh_sectors`). Before the service (commands) the
+        // service then replans a job of the old epoch at once; after it only the death stage
+        // (`World::reap`) moves it, once per structure destroyed (`World::despawn` refreshes the
+        // cells of each). So a saved job is exactly `lag` epochs behind the service: the number of
+        // structures destroyed in the last tick, which the caller counts from the rubble born then
+        // (WP13.1c-1, `docs/rules/save.md`).
         ensure(
-            self.job.as_ref().is_none_or(|j| j.epoch() == self.epoch),
+            self.job
+                .as_ref()
+                .is_none_or(|j| self.epoch.wrapping_sub(j.epoch()) == lag),
             "a job of another epoch than the path service",
         )?;
         let nodes = (b.sectors * graph::SLOTS) as u64;
@@ -560,9 +566,12 @@ impl Pathing {
     /// the local search a job or a field build has in flight fits the rectangle its stage
     /// searches ([`Job::search_fits`]).
     pub(crate) fn check_in_flight(&self, e: &Entities) -> crate::save::SaveResult<()> {
-        // The job is of the service's epoch (`Pathing::restore`), so the rebuilt graph is the one
-        // its memory was made on.
-        if let Some(job) = self.job.as_ref() {
+        // A job of the service's epoch was made on the rebuilt graph, so its memory is judged
+        // against it. A job behind the service (`Pathing::restore`: structures were destroyed after
+        // the service) is replanned by the next service before it reads anything (`Job::run`
+        // returns `Replan` on another epoch): its memory was made on a graph that no longer exists
+        // and is not judged.
+        if let Some(job) = self.job.as_ref().filter(|j| j.epoch() == self.epoch) {
             let g = &self.graphs[job.graph];
             // After the service ran, an arrival, a formation or a replan may have reset or
             // re-ticketed the unit's route; the next service drops such a job unread
@@ -592,6 +601,12 @@ impl Pathing {
     /// Whether a job is in flight (save tests and [`crate::save::SaveContents`]).
     pub(crate) fn has_job(&self) -> bool {
         self.job.is_some()
+    }
+
+    /// Whether the job in flight is of an earlier epoch than the service: structures were
+    /// destroyed after the service ran ([`crate::save::SaveContents`]).
+    pub(crate) fn job_behind(&self) -> bool {
+        self.job.as_ref().is_some_and(|j| j.epoch() != self.epoch)
     }
 
     /// The flowfields in the pool, and whether one is being built.

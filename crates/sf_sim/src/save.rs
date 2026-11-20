@@ -12,14 +12,15 @@
 //!
 //! * Header: the magic `SFSV`, `format_version` ([`FORMAT_VERSION`]), the rules digest, the tick
 //!   and the number of sections.
-//! * Sections, each a tag byte and a `u32` length: `W` the world scalars, `E` the entities, `Q` the
-//!   command queue, `P` the path service (WP13.1b), `F` the flowfields, `M` the formations, in that
-//!   order.
+//! * Sections, each a tag byte and a `u32` length: `W` the world scalars, `E` the entities (with
+//!   the weapon slots, the engagement memory and the kills, WP13.1c-1), `Q` the command queue, `X`
+//!   the projectiles and `D` the wrecks and the tally (WP13.1c-1), `P` the path service (WP13.1b),
+//!   `F` the flowfields, `M` the formations, in that order.
 //!
 //! # Not yet saved
 //!
-//! Weapons, projectiles, targeting, destruction, buildings (construction), economy, production,
-//! power, repair, vision and outcome come in WP13.1c. Until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
+//! Buildings (construction), economy, production, power, repair, vision and outcome come in
+//! WP13.1c-2; until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
 //! section, any world in which one of them holds something that is not its tick-0 state; the exact
 //! test per section is in `docs/rules/save.md`. A world that saves therefore restores whole.
 //!
@@ -44,7 +45,8 @@ use crate::ids::{EntityId, Kind, PlayerId, Tick};
 use crate::orders::{GuardTarget, ORDER_QUEUE_CAP, Order, OrderQueue};
 use crate::targeting::Engage;
 use crate::terrain::{Cell, NO_CELL, Occupancy};
-use crate::weapons::REST;
+use crate::units::UnitClass;
+use crate::weapons::{REST, SlotState, WeaponState};
 use crate::world::{World, footprint_cells};
 
 /// The first bytes of every save file.
@@ -52,19 +54,24 @@ pub const MAGIC: [u8; 4] = *b"SFSV";
 
 /// The layout of the bytes after the magic. Raised whenever that layout changes; an older save is
 /// refused with [`SaveError::Version`] (no migration yet).
-pub const FORMAT_VERSION: u32 = 2;
+pub const FORMAT_VERSION: u32 = 3;
 
 const SECTION_WORLD: u8 = b'W';
 const SECTION_ENTITIES: u8 = b'E';
 const SECTION_QUEUE: u8 = b'Q';
+const SECTION_PROJECTILES: u8 = b'X';
+const SECTION_DESTRUCTION: u8 = b'D';
 const SECTION_PATHING: u8 = b'P';
 const SECTION_FIELDS: u8 = b'F';
 const SECTION_FORMATIONS: u8 = b'M';
-/// The sections of this format, in file order.
-const SECTIONS: [u8; 6] = [
+/// The sections of this format, in file order. `D` comes before `P`: the path service's restore
+/// check of the job's epoch counts the rubble of the last tick (WP13.1c-1).
+const SECTIONS: [u8; 8] = [
     SECTION_WORLD,
     SECTION_ENTITIES,
     SECTION_QUEUE,
+    SECTION_PROJECTILES,
+    SECTION_DESTRUCTION,
     SECTION_PATHING,
     SECTION_FIELDS,
     SECTION_FORMATIONS,
@@ -89,6 +96,31 @@ pub struct SaveContents {
     pub formations: u32,
     /// Live units that carry part of a turn step to the next tick (`turn_carry != 0`).
     pub turning: u32,
+    /// Projectiles in flight (WP13.1c-1).
+    pub projectiles: u32,
+    /// Weapon slots of live entities that are reloading (`wait > 0`) outside a burst.
+    pub reloading: u32,
+    /// Weapon slots of live entities in the middle of a burst (`burst_left > 0`).
+    pub bursting: u32,
+    /// Live units on a target they chose themselves (an engagement, `Pursue`).
+    pub engaged: u32,
+    /// Live armed structures with a target (a defence).
+    pub defending: u32,
+    /// Live entities whose engagement memory is not at rest (an engagement, a held anchor, a
+    /// scan cooldown).
+    pub engage_memory: u32,
+    /// Wrecks and rubble lying on the map.
+    pub wrecks: u32,
+    /// Players with a tally.
+    pub tallies: u32,
+    /// Live entities with kills.
+    pub killers: u32,
+    /// The last tick's reports of the weapon stage are not empty (shots, impacts, attacks, damage
+    /// records): derived, not saved (the next weapon stage clears them first).
+    pub reports: bool,
+    /// The job in flight is behind the path service's epoch (a structure was destroyed after the
+    /// service ran).
+    pub job_behind: bool,
 }
 
 impl World {
@@ -115,6 +147,45 @@ impl World {
                 .filter(live)
                 .filter(|&i| e.turn_carry[i] != 0)
                 .count() as u32,
+            projectiles: self.arsenal.projectiles.len() as u32,
+            reloading: (0..e.len())
+                .filter(live)
+                .flat_map(|i| e.weapon[i].iter())
+                .filter(|s| s.burst_left == 0 && s.wait > 0)
+                .count() as u32,
+            bursting: (0..e.len())
+                .filter(live)
+                .flat_map(|i| e.weapon[i].iter())
+                .filter(|s| s.burst_left > 0)
+                .count() as u32,
+            engaged: (0..e.len())
+                .filter(live)
+                .filter(|&i| matches!(e.order[i], Order::Pursue(_)))
+                .count() as u32,
+            defending: (0..e.len())
+                .filter(live)
+                .filter(|&i| {
+                    e.def[i] != NO_DEF
+                        && self.units.at(e.def[i] as usize).class() == UnitClass::Structure
+                        && self.arsenal.is_armed(e.def[i])
+                        && e.turret_target[i].is_some()
+                })
+                .count() as u32,
+            engage_memory: (0..e.len())
+                .filter(live)
+                .filter(|&i| e.eng[i] != Engage::REST)
+                .count() as u32,
+            wrecks: self.destruction.wrecks.len() as u32,
+            tallies: self.destruction.tally.len() as u32,
+            killers: (0..e.len())
+                .filter(live)
+                .filter(|&i| e.kills[i] > 0)
+                .count() as u32,
+            reports: !self.arsenal.shots.is_empty()
+                || !self.arsenal.impacts.is_empty()
+                || !self.arsenal.attacks.is_empty()
+                || !self.arsenal.hurt.is_empty(),
+            job_behind: self.pathing.job_behind(),
         }
     }
 }
@@ -845,23 +916,179 @@ fn get_member(r: &mut ByteReader<'_>) -> SaveResult<Member> {
 /// that a freshly spawned (or freed) entity does not.
 fn check_unsaved_columns(e: &Entities) -> SaveResult<()> {
     for i in 0..e.len() {
-        if e.weapon[i] != REST {
-            return Err(SaveError::Unsupported("weapons"));
-        }
-        if e.eng[i] != Engage::REST {
-            return Err(SaveError::Unsupported("targeting"));
-        }
         if e.build_left[i] != 0 {
             return Err(SaveError::Unsupported("buildings"));
         }
         if e.repairing[i] || e.sell_left[i] != 0 {
             return Err(SaveError::Unsupported("repair"));
         }
-        if e.kills[i] != 0 {
-            return Err(SaveError::Unsupported("destruction"));
-        }
     }
     Ok(())
+}
+
+/// The weapon slots of a unit (WP13.1c-1): per slot the reload count and the shots left of a
+/// burst. Destructured without `..`.
+fn put_weapon(w: &mut ByteWriter, state: &WeaponState) {
+    for slot in state {
+        let SlotState { wait, burst_left } = slot;
+        w.u32(*wait);
+        w.u8(*burst_left);
+    }
+}
+
+fn get_weapon(r: &mut ByteReader<'_>) -> SaveResult<WeaponState> {
+    let mut state = REST;
+    for slot in &mut state {
+        slot.wait = r.u32()?;
+        slot.burst_left = r.u8()?;
+    }
+    Ok(state)
+}
+
+/// A unit's engagement memory (WP13.1c-1), every field. Destructured without `..`.
+fn put_engage(w: &mut ByteWriter, eng: &Engage) {
+    let Engage {
+        resume,
+        chase,
+        anchor,
+        held,
+        rest,
+        aim,
+        reach,
+        cool,
+    } = eng;
+    w.bool(resume.is_some());
+    if let Some(o) = resume {
+        put_order(w, *o);
+    }
+    w.bool(*chase);
+    put_vec2(w, *anchor);
+    w.bool(*held);
+    w.u16(*rest);
+    put_vec2(w, *aim);
+    put_fx(w, *reach);
+    w.u16(*cool);
+}
+
+fn get_engage(r: &mut ByteReader<'_>) -> SaveResult<Engage> {
+    Ok(Engage {
+        resume: if r.bool()? { Some(get_order(r)?) } else { None },
+        chase: r.bool()?,
+        anchor: get_vec2(r)?,
+        held: r.bool()?,
+        rest: r.u16()?,
+        aim: get_vec2(r)?,
+        reach: get_fx(r)?,
+        cool: r.u16()?,
+    })
+}
+
+/// What the weapon stage and the targeting stage can leave in the weapon and engagement columns of
+/// a unit (WP13.1c-1, `docs/rules/save.md`).
+struct Combat<'a> {
+    arsenal: &'a crate::weapons::Arsenal,
+    /// The targeting settings when units choose targets: settings and a weapon table.
+    aim: Option<crate::targeting::TargetingConfig>,
+    destruction: bool,
+}
+
+impl Combat<'_> {
+    /// Whether every weapon slot of an entity of table position `def` holds a state the weapon
+    /// stage leaves: a slot without a weapon at rest; a slot with weapon `w` fewer shots left of
+    /// its burst than the burst has (the first shot is taken off at once), and a reload count of at
+    /// most what the last shot set: `burst_delay_ticks` inside a burst, `tail_ticks` after it.
+    fn weapon_fits(&self, def: u32, state: &WeaponState) -> bool {
+        state.iter().enumerate().all(|(s, slot)| {
+            let weapon = (def != NO_DEF && self.arsenal.is_armed(def))
+                .then(|| self.arsenal.weapons_of(def).nth(s))
+                .flatten();
+            match weapon {
+                None => *slot == REST[s],
+                Some(w) => {
+                    slot.burst_left < w.burst
+                        && slot.wait
+                            <= if slot.burst_left > 0 {
+                                w.burst_delay_ticks
+                            } else {
+                                w.tail_ticks()
+                            }
+                }
+            }
+        })
+    }
+
+    /// Whether the engagement memory `eng` of an entity of table position `def` (with `class`),
+    /// on current order `order`, is one the targeting stage leaves. See `docs/rules/save.md`.
+    fn engage_fits(
+        &self,
+        eng: &Engage,
+        def: u32,
+        class: Option<UnitClass>,
+        order: Order,
+        inside: &impl Fn(Vec2) -> bool,
+    ) -> bool {
+        let pursuing = matches!(order, Order::Pursue(_));
+        let armed = def != NO_DEF && self.arsenal.is_armed(def);
+        let Some(config) = self.aim.filter(|_| armed) else {
+            // Nothing runs the targeting stage for this entity: its memory stays at rest.
+            return *eng == Engage::REST && !pursuing;
+        };
+        let reach_of_a_weapon = || self.arsenal.weapons_of(def).any(|w| w.range == eng.reach);
+        let Engage {
+            resume,
+            chase,
+            anchor,
+            held,
+            rest,
+            aim,
+            reach,
+            cool,
+        } = *eng;
+        let common = cool <= config.scan_cooldown && inside(anchor) && inside(aim);
+        match class {
+            Some(UnitClass::Mobile) => {
+                let engaged = match resume {
+                    // An engagement: the order it goes back to is one a unit may scan from, the
+                    // weapon that chose fixed the reach, the anchor binds and the unit is not at
+                    // rest.
+                    Some(o) => {
+                        pursuing
+                            && matches!(
+                                o,
+                                Order::Idle
+                                    | Order::HoldPosition
+                                    | Order::Guard(_)
+                                    | Order::AttackMove(_)
+                            )
+                            && order_point(o).is_none_or(inside)
+                            && reach_of_a_weapon()
+                            && held
+                            && rest == 0
+                    }
+                    // Not engaged: `forget` cleared what the engagement held.
+                    None => !pursuing && !chase && aim == Vec2::ZERO && reach == Fx::ZERO,
+                };
+                // `rest` counts up to `pursuit_reset` and starts again there, only while `held`;
+                // dropping `held` clears the anchor.
+                let leash =
+                    rest < config.pursuit_reset && (held || (rest == 0 && anchor == Vec2::ZERO));
+                common && engaged && leash
+            }
+            Some(UnitClass::Structure) => {
+                // A defence takes no order: its target is the turret target, its memory the scan
+                // cooldown and where and with what reach it last chose.
+                !pursuing
+                    && resume.is_none()
+                    && !chase
+                    && !held
+                    && rest == 0
+                    && anchor == Vec2::ZERO
+                    && (reach == Fx::ZERO || reach_of_a_weapon())
+                    && common
+            }
+            _ => *eng == Engage::REST && !pursuing,
+        }
+    }
 }
 
 fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
@@ -900,17 +1127,15 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         prev_turret: _,
         turret_target,
         form,
-        // Gated (weapons, WP13.1c): at rest.
-        weapon: _,
-        // Gated (targeting, WP13.1c): at rest.
-        eng: _,
-        // Gated (buildings, WP13.1c): zero.
+        // Saved (WP13.1c-1).
+        weapon,
+        eng,
+        kills,
+        // Gated (buildings, WP13.1c-2): zero.
         build_left: _,
-        // Gated (repair, WP13.1c): false and zero.
+        // Gated (repair, WP13.1c-2): false and zero.
         repairing: _,
         sell_left: _,
-        // Gated (destruction, WP13.1c): zero.
-        kills: _,
     } = e;
     check_unsaved_columns(e)?;
     w.usize(e.len())?;
@@ -944,6 +1169,9 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         put_crowd(w, &crowd[i]);
         w.u16(turn_carry[i]);
         put_member(w, &form[i]);
+        put_weapon(w, &weapon[i]);
+        put_engage(w, &eng[i]);
+        w.u16(kills[i]);
     }
     Ok(())
 }
@@ -966,6 +1194,12 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         replan_max: replan.max,
         replan_cooldown: replan.cooldown,
         retarget_cooldown: replan.retarget_cooldown,
+    };
+    let combat = Combat {
+        arsenal: &world.arsenal,
+        // As `World::step` runs the targeting stage: settings and a weapon table.
+        aim: world.targeting.config.filter(|_| !world.arsenal.is_empty()),
+        destruction: world.destruction.config.is_some(),
     };
     let e = &mut world.entities;
     for i in 0..n {
@@ -1030,9 +1264,9 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
             ));
         }
         e.order[i] = get_order(r)?;
-        // `begin` turns a scatter into a move, and a pursuit is current only with an engagement,
-        // which a save never holds: neither can be the current order of a saved unit.
-        if matches!(e.order[i], Order::Scatter | Order::Pursue(_)) {
+        // `begin` turns a scatter into a move. (A pursuit is current only with an engagement:
+        // checked with the engagement memory below.)
+        if e.order[i] == Order::Scatter {
             return Err(SaveError::Corrupt(
                 "a current order the simulation never holds",
             ));
@@ -1075,6 +1309,45 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
             return Err(SaveError::Corrupt("a turn carry of a whole step or more"));
         }
         e.form[i] = get_member(r)?;
+        e.weapon[i] = get_weapon(r)?;
+        if !combat.weapon_fits(e.def[i], &e.weapon[i]) {
+            return Err(SaveError::Corrupt(
+                "a weapon slot the weapon stage never leaves",
+            ));
+        }
+        e.eng[i] = get_engage(r)?;
+        let class = stats.map(|s| s.class());
+        if !combat.engage_fits(&e.eng[i], e.def[i], class, e.order[i], &inside) {
+            return Err(SaveError::Corrupt(
+                "an engagement the targeting stage never leaves",
+            ));
+        }
+        e.kills[i] = r.u16()?;
+        // Kill credit goes to a shooter that stands (an armed entity) in a world with destruction.
+        if e.kills[i] != 0
+            && !(combat.destruction && e.def[i] != NO_DEF && combat.arsenal.is_armed(e.def[i]))
+        {
+            return Err(SaveError::Corrupt("kills without a weapon or destruction"));
+        }
+    }
+    Ok(())
+}
+
+/// Refuses kills of live entities that add up, per player, to more than the player's tally: each
+/// kill is counted in both (`World::reap`), and only a death or a new entity in the slot clears the
+/// entity's count. A tally at its maximum (saturated) is not compared.
+fn check_kills(world: &World) -> SaveResult<()> {
+    let e = &world.entities;
+    let mut sums: BTreeMap<PlayerId, u64> = BTreeMap::new();
+    for i in (0..e.len()).filter(|&i| e.alive[i] && e.kills[i] != 0) {
+        *sums.entry(e.owner[i]).or_default() += u64::from(e.kills[i]);
+    }
+    for (player, sum) in sums {
+        let tally = world.destruction.kills_of(player);
+        ensure(
+            tally == u32::MAX || sum <= u64::from(tally),
+            "more kills than the tally",
+        )?;
     }
     Ok(())
 }
@@ -1157,22 +1430,8 @@ fn check_crowd(c: &CrowdState, l: &CrowdLimits, inside: &impl Fn(Vec2) -> bool) 
 
 /// Refuses a world whose subsystem state outside the entity columns is not its tick-0 state.
 fn check_unsaved_sections(w: &World) -> SaveResult<()> {
-    if let Some(section) = w.arsenal.unsaved_section() {
-        return Err(SaveError::Unsupported(section));
-    }
-    // Destructured without `..` here or in the module: a new field of these parts fails to compile
-    // until it is placed.
-    let crate::destruction::Destruction {
-        // Rules: in the rules digest.
-        config: _,
-        wrecks,
-        tally,
-        // The report of the last tick; a world with deaths in it also has kill credit pending.
-        deaths,
-    } = &w.destruction;
-    if !wrecks.is_empty() || !tally.is_empty() || !deaths.is_empty() {
-        return Err(SaveError::Unsupported("destruction"));
-    }
+    // The arsenal, the destruction and the targeting are saved (WP13.1c-1); their fields are named
+    // in `Arsenal::save_parts`, `Destruction::save` and `Targeting::has_state`.
     if w.targeting.has_state() {
         return Err(SaveError::Unsupported("targeting"));
     }
@@ -1244,7 +1503,7 @@ impl World {
         h.write_u64(self.units.reach_digest());
         h.write_u64(self.units.turret_digest());
         h.write_u64(self.movement.digest());
-        h.write_u64(self.arsenal.table.digest());
+        h.write_u64(self.arsenal.table.rules_digest());
         h.write_u64(self.buildings.digest());
         h.write_u64(self.buildings.placement_digest());
         h.write_u64(self.placement.players.len() as u64);
@@ -1394,9 +1653,10 @@ impl World {
             crowd: _,
             // Saved in section `M`; the settings are rules. Fields named in `Formations::save`.
             formations,
-            // Rules (the table and what is derived from it) and the reports of the last tick;
-            // projectiles gated. Its fields are named in `Arsenal::unsaved_section`.
-            arsenal: _,
+            // Saved in section `X` (the projectiles); the table and what is derived from it are
+            // rules, the reports of the last tick derived. Its fields are named in
+            // `Arsenal::save_parts`.
+            arsenal,
             // Rules.
             buildings: _,
             // Gated.
@@ -1420,10 +1680,10 @@ impl World {
             // Rules and scratch; the state is the entity column. Fields named in
             // `Targeting::has_state`.
             targeting: _,
-            // Rules and the report of the last tick; wrecks and tally gated. The fields of this
-            // and of `ore`, `money`, `repair` and `placement` are named in
-            // `check_unsaved_sections` (or the gate it calls).
-            destruction: _,
+            // Saved in section `D` (wrecks and tally); the settings are rules, the deaths the
+            // report of the last tick. Fields named in `Destruction::save`. The fields of `ore`,
+            // `money`, `repair` and `placement` are named in `check_unsaved_sections`.
+            destruction,
             queue,
             // Not saved: a restored world starts a new history at its tick.
             history: _,
@@ -1448,6 +1708,8 @@ impl World {
         })?;
         w.section(SECTION_ENTITIES, |s| save_entities(s, entities))?;
         w.section(SECTION_QUEUE, |s| save_queue(s, queue))?;
+        w.section(SECTION_PROJECTILES, |s| arsenal.save_parts(s))?;
+        w.section(SECTION_DESTRUCTION, |s| destruction.save(s))?;
         w.section(SECTION_PATHING, |s| pathing.save(s, entities))?;
         w.section(SECTION_FIELDS, |s| pathing.save_fields(s))?;
         w.section(SECTION_FORMATIONS, |s| formations.save(s))?;
@@ -1509,13 +1771,30 @@ impl World {
         world.queue = restore_queue(&mut s, tick)?;
         s.end()?;
 
+        let map = (world.config.width, world.config.height);
+        let mut s = r.section(SECTION_PROJECTILES)?;
+        world.arsenal.projectiles =
+            crate::projectiles::Projectiles::restore(&mut s, &world.arsenal.table, map)?;
+        s.end()?;
+
+        let mut s = r.section(SECTION_DESTRUCTION)?;
+        world.destruction.restore(&mut s, &world.units, tick, map)?;
+        s.end()?;
+        check_kills(&world)?;
+
+        // A job is as many epochs behind the service as structures were destroyed in the last
+        // tick (`Pathing::restore`).
+        let lag = match tick.0.checked_sub(1) {
+            Some(last) => world.destruction.rubble_born(Tick(last)),
+            None => 0,
+        };
         let bounds = world
             .pathing
             .bounds(&world.entities, world.config.width, world.config.height);
         let mut s = r.section(SECTION_PATHING)?;
         world
             .pathing
-            .restore(&mut s, &mut world.entities, &bounds)?;
+            .restore(&mut s, &mut world.entities, &bounds, lag)?;
         s.end()?;
 
         let mut s = r.section(SECTION_FIELDS)?;
@@ -1591,3 +1870,6 @@ mod tests;
 
 #[cfg(test)]
 mod path_tests;
+
+#[cfg(test)]
+mod combat_tests;
