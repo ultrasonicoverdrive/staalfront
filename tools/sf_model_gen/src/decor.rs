@@ -12,18 +12,26 @@
 
 use crate::kit::{
     Lod, Mat, Mesh, Model, Node, P, RECESS, SEAM, Tone, bevel_box, chamfer_rect, closed_box,
-    cuboid, extrude_z, frame, lathe, lathe_x, lathe_z, loft, on_circle,
+    cuboid, frame, lathe, lathe_x, lathe_z, loft, on_circle,
 };
 use crate::models::anchors;
 use crate::palette::{Palette, slot::*};
 use crate::stages::{chunk, fallen_plate, hash};
 
 /// The tone of burnt paint (per mille of the baked colour; `kit::Tone`).
-pub const SOOT: Tone = 430;
+pub const SOOT: Tone = 200;
 /// The tone of steel in a wreck.
 pub const BURNT_STEEL: Tone = 420;
 /// The tone of the soot on the ground round a wreck and on its steel debris.
 pub const CHAR: Tone = 380;
+/// The tone of rust on a wreck (rust-brown patches on the soot-dark hull).
+pub const RUST: Tone = 650;
+/// The tone of old fence wire and posts.
+pub const OLD_WIRE: Tone = 430;
+/// The tone of ore nuggets (a darker, warmer mineral than the rust-brown palette accent).
+pub const ORE_TONE: Tone = 800;
+/// Nuggets on the ore field stages 1 to 4 (pinned by `the_ore_field_stages_grow`).
+pub const ORE_NUGGETS: [i32; 4] = [4, 6, 9, 13];
 /// The tone of a dark pit (burnt-through deck, engine hole): rubber needs at least this much
 /// light left, or the baked corner crushes to black (`no_baked_vertex_crushes_to_black`).
 pub const PIT: Tone = 560;
@@ -195,7 +203,7 @@ pub fn fence() -> Model {
                 let x = -1750 + k * 3500 / (n - 1);
                 // The bars of the torn end stand shorter.
                 let top = if x > 1200 { 760 + (k % 3) * 120 } else { 1380 };
-                m.add(closed_box([x - 20, 90, -20], [x + 20, top, 20], PAINT3).toned(SOOT));
+                m.add(closed_box([x - 20, 90, -20], [x + 20, top, 20], PAINT3).toned(OLD_WIRE));
             }
         }
         if lod.has(0) {
@@ -321,23 +329,26 @@ pub fn ore_field(stage: u32) -> Model {
             )
             .toned(760),
         );
-        let n = [4, 6, 9, 13][(stage - 1) as usize];
+        let n = ORE_NUGGETS[(stage - 1) as usize];
         for i in 0..n {
             let s = 300 + stage * 40 + i as u32;
             let a = hash(s) as i32 * 64 / 1000;
             let d = (hash(s ^ 1) as i32 * 7 / 10 + 80) * (r - 350) / 1000;
             let [x, z] = on_circle(d, a, 64);
             let big = 230 + hash(s ^ 2) as i32 / 6 + stage as i32 * 25;
-            m.add(blob(
-                [x, 60, z],
-                big,
-                big * 9 / 10,
-                big * 14 / 10,
-                s,
-                lod,
-                [ACCENT, ACCENT],
-                PAINT,
-            ));
+            m.add(
+                blob(
+                    [x, 60, z],
+                    big,
+                    big * 9 / 10,
+                    big * 14 / 10,
+                    s,
+                    lod,
+                    [ACCENT, ACCENT],
+                    ACCENT,
+                )
+                .toned(ORE_TONE),
+            );
         }
         m
     })
@@ -413,7 +424,7 @@ pub fn broadleaf() -> Model {
 pub fn broadleaf_fallen() -> Model {
     Model::new("neutral_tree_broadleaf_fallen", tree_materials(), |lod| {
         let mut m = lathe_x(
-            &[(0, -3200), (170, -3000), (230, 0), (150, 2500)],
+            &[(0, -3200), (170, -3000), (230, 0), (90, 3300)],
             lod.segs(8),
             &[METAL],
             Some(METAL),
@@ -434,7 +445,34 @@ pub fn broadleaf_fallen() -> Model {
         if lod.has(0) {
             m.add(closed_box([-3400, 0, -500], [-3150, 70, 500], RUBBER).toned(RECESS));
         }
-        m.add(crown([2900, 0, 0], 1500, lod));
+        // The crown lies along the trunk: four lumps from the middle to the tip, the trunk
+        // running through them, each narrower than the one before.
+        let lumps: [(i32, i32, i32, i32, u32); 4] = [
+            (700, 150, 1050, 1300, 61),
+            (1500, -200, 1000, 1250, 62),
+            (2250, 150, 880, 1100, 63),
+            (2950, -100, 700, 900, 64),
+        ];
+        for (i, &(x, z, r, h, seed)) in lumps.iter().enumerate() {
+            if !lod.has(1) && i % 3 == 2 {
+                continue;
+            }
+            m.add(blob(
+                [x, 0, z],
+                r,
+                r * 95 / 100,
+                h,
+                seed,
+                lod,
+                [
+                    [PAINT2, PAINT],
+                    [PAINT, PAINT3],
+                    [PAINT2, PAINT3],
+                    [PAINT2, PAINT],
+                ][i],
+                PAINT3,
+            ));
+        }
         vec![Node::part("body", [0, 0, 0], m)]
     })
 }
@@ -586,22 +624,74 @@ fn vehicle_wreck(w: &'static Wreck) -> Model {
             );
         }
         let (px, pz) = (-w.hx * 35 / 100, w.hz * 30 / 100);
+        // The level of the engine deck: the cab roof of a truck, the hull top of a tank.
+        let deck_y = if w.wheeled {
+            900 + w.hull_h * 40 / 100
+        } else {
+            top
+        };
         if lod.has(1) {
             // The engine deck burnt through: a dark pit with a frame round it.
             hull.add(
                 cuboid(
-                    [px - 520, top - 10, pz - 420],
-                    [px + 520, top + 25, pz + 420],
+                    [px - 520, deck_y - 10, pz - 420],
+                    [px + 520, deck_y + 25, pz + 420],
                     RUBBER,
                 )
                 .toned(PIT),
             );
         }
+        if lod.has(1) {
+            // Rust-brown patches on the deck and charred strips along its edges.
+            let patches: [(i32, i32, i32, i32); 3] = if w.wheeled {
+                [
+                    (w.hx * 55 / 100, -w.hz * 20 / 100, 700, 380),
+                    (w.hx * 78 / 100, w.hz * 25 / 100, 520, 340),
+                    (w.hx * 45 / 100, w.hz * 40 / 100, 420, 300),
+                ]
+            } else {
+                [
+                    (w.hx * 10 / 100, -w.hz * 30 / 100, 760, 420),
+                    (-w.hx * 55 / 100, -w.hz * 10 / 100, 640, 300),
+                    (w.hx * 55 / 100, w.hz * 20 / 100, 560, 360),
+                ]
+            };
+            for (x, z, a, b) in patches {
+                hull.add(
+                    cuboid(
+                        [x - a / 2, top, z - b / 2],
+                        [x + a / 2, top + 25, z + b / 2],
+                        ACCENT,
+                    )
+                    .toned(RUST),
+                );
+            }
+        }
         if lod.has(0) {
+            let edge = (w.hz - 700).min(w.hz * 6 / 10 + 200);
+            for s in [-1, 1] {
+                let (z0, z1) = (s * edge - 60, s * edge + 60);
+                hull.add(
+                    cuboid(
+                        [
+                            if w.wheeled {
+                                w.hx * 30 / 100
+                            } else {
+                                -w.hx * 45 / 100
+                            },
+                            top,
+                            z0.min(z1),
+                        ],
+                        [w.hx * 65 / 100, top + 30, z0.max(z1)],
+                        METAL,
+                    )
+                    .toned(CHAR),
+                );
+            }
             let o = chamfer_rect(600, 500, 80);
             let i = chamfer_rect(520, 420, 60);
             hull.add(
-                frame(&o, &i, top, top + 60, METAL)
+                frame(&o, &i, deck_y, deck_y + 60, METAL)
                     .toned(BURNT_STEEL)
                     .moved([px, 0, pz]),
             );
@@ -614,7 +704,7 @@ fn vehicle_wreck(w: &'static Wreck) -> Model {
                         [*x + 360, top - 120, -zz + 6],
                         ACCENT,
                     )
-                    .toned(SOOT),
+                    .toned(RUST),
                 );
             }
             hull.add(
@@ -644,12 +734,12 @@ fn vehicle_wreck(w: &'static Wreck) -> Model {
                         PAINT2,
                         lod,
                     )
-                    .toned(CHAR),
+                    .toned(SOOT),
                 );
             }
         }
         // The turret: thrown back by the blast, resting on the hull off the middle.
-        let t_at = [-w.hx * 10 / 100, top, w.hz * 22 / 100];
+        let t_at = [-w.hx * 10 / 100, deck_y, w.hz * 22 / 100];
         let tr = w.turret_r;
         let tring = |s: i32| {
             let c = if flat { 0 } else { (tr * s / 1000) / 3 };
@@ -695,7 +785,7 @@ fn vehicle_wreck(w: &'static Wreck) -> Model {
         let barrel = Node::part("barrel", [tr * 130 / 100, tr * 26 / 100, 0], barrel_mesh);
         let turret_node = Node::part("turret", t_at, turret).child(barrel);
         let hull_node = Node::part("hull", [0, 0, 0], hull).child(turret_node);
-        vec![anchors(hull_node, [px, top + 300, pz], [px, top, pz])]
+        vec![anchors(hull_node, [px, deck_y + 300, pz], [px, deck_y, pz])]
     })
 }
 
@@ -755,16 +845,33 @@ pub fn wreck_vessel() -> Model {
     let pal = Palette::shipped();
     Model::new("neutral_wreck_vessel", pal.materials("neutral"), |lod| {
         let hz = 2250;
-        let profile: [[i32; 2]; 5] = [
-            [-8600, -400],
-            [6500, -400],
-            [8900, 500],
-            [7800, 1150],
-            [-8800, 250],
-        ];
-        let mats = [PAINT2, PAINT2, PAINT, PAINT2, PAINT2];
-        let mut hull = extrude_z(&profile, -hz, hz, &mats, PAINT2).toned(SOOT);
-        let deck = 560;
+        // The plan of the hull at one level: a square stern, parallel sides, and a bow that
+        // narrows to a point (nine corners, the same at every level, convex).
+        let plan = |w: i32, xs: i32, xb: i32| -> Vec<[i32; 2]> {
+            vec![
+                [xs, -w],
+                [1500, -w],
+                [5200, -w * 80 / 100],
+                [8000, -w * 30 / 100],
+                [xb, 0],
+                [8000, w * 30 / 100],
+                [5200, w * 80 / 100],
+                [1500, w],
+                [xs, w],
+            ]
+        };
+        let deck = 800;
+        let mut hull = loft(
+            &[
+                (plan(hz * 65 / 100, -8200, 8300), -400),
+                (plan(hz, -8600, 8900), 300),
+                (plan(hz * 95 / 100, -8600, 8700), deck),
+            ],
+            &[PAINT2, PAINT2],
+            Some(PAINT),
+            None,
+        )
+        .toned(SOOT);
         // The bridge, leaning forward on the deck (every level: it sets the height).
         hull.add(
             bevel_box(
@@ -779,28 +886,34 @@ pub fn wreck_vessel() -> Model {
         hull.add(cuboid([2300, deck + 1950, -1400], [4800, deck + 2010, 1400], METAL).toned(CHAR));
         if lod.has(1) {
             // The torn deck: a dark hole with ribs standing in it.
-            hull.add(cuboid([-3600, 220, -1300], [900, 620, 1300], RUBBER).toned(PIT));
+            hull.add(cuboid([-3600, deck - 10, -1300], [900, deck + 25, 1300], RUBBER).toned(PIT));
             if lod.has(0) {
                 for k in 0..6 {
                     let x = -3300 + k * 700;
                     hull.add(
                         closed_box(
-                            [x, 620, -1300],
-                            [x + 90, 1100 - (k % 3) * 160, -1220],
+                            [x, deck, -1300],
+                            [x + 90, deck + 480 - (k % 3) * 160, -1220],
                             METAL,
                         )
                         .toned(CHAR),
                     );
                     hull.add(
-                        closed_box([x, 620, 1220], [x + 90, 1000 - (k % 2) * 220, 1300], METAL)
-                            .toned(CHAR),
+                        closed_box(
+                            [x, deck, 1220],
+                            [x + 90, deck + 380 - (k % 2) * 220, 1300],
+                            METAL,
+                        )
+                        .toned(CHAR),
                     );
                 }
                 for k in 0..7 {
                     let x = -8000 + k * 2300;
-                    hull.add(closed_box([x, 130, hz], [x + 520, 330, hz + 60], ACCENT).toned(SOOT));
                     hull.add(
-                        closed_box([x + 300, 780, -hz - 40], [x + 900, 900, -hz + 40], METAL)
+                        closed_box([x, 300, hz - 60], [x + 520, 520, hz + 20], ACCENT).toned(RUST),
+                    );
+                    hull.add(
+                        closed_box([x + 300, 560, -hz - 40], [x + 900, 680, -hz + 40], METAL)
                             .toned(CHAR),
                     );
                 }
@@ -828,7 +941,7 @@ pub fn wreck_vessel() -> Model {
                 for k in 0..9 {
                     let x = -8200 + k * 1500;
                     hull.add(
-                        closed_box([x, deck, -hz + 60], [x + 50, deck + 700, -hz + 110], METAL)
+                        closed_box([x, deck, -2130], [x + 50, deck + 700, -2080], METAL)
                             .toned(BURNT_STEEL),
                     );
                 }
@@ -847,7 +960,7 @@ pub fn wreck_vessel() -> Model {
         )
         .toned(SOOT);
         if lod.has(0) {
-            turret.add(closed_box([-500, 120, 640], [300, 380, 690], ACCENT).toned(SOOT));
+            turret.add(closed_box([-500, 120, 640], [300, 380, 690], ACCENT).toned(RUST));
         }
         let barrel = Node::part(
             "barrel",
@@ -861,7 +974,7 @@ pub fn wreck_vessel() -> Model {
             )
             .toned(BURNT_STEEL),
         );
-        let turret_node = Node::part("turret", [5600, deck + 900, -500], turret).child(barrel);
+        let turret_node = Node::part("turret", [5600, deck, -500], turret).child(barrel);
         let mut hull_node = Node::part("hull", [0, 0, 0], hull).child(turret_node);
         hull_node = anchors(hull_node, [-1500, deck + 400, 0], [-1500, deck + 100, 400]);
         vec![hull_node]

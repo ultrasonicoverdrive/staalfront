@@ -476,9 +476,11 @@ fn every_level_has_the_nodes_of_its_role() {
                 assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
                 need.push("body");
             } else if is_wreck(&m.stem) {
-                // WP11.6d: the four wrecks have the three vehicle nodes, the anchors the
-                // engine's wreck smoke and fire read (the four set v4 wrecks were left out for
-                // lacking them), and no muzzle.
+                // WP11.6d: the four wrecks have the three vehicle nodes and the smoke and fire
+                // anchors that `sf_asset_check` requires of a wreck (the four set v4 wrecks were
+                // left out for lacking them). The engine does not read the anchors for wrecks yet
+                // (crates/sf_game/src/fx.rs: a wreck slot has no anchor, the smoke spawns at the
+                // wreck's position); they are kept for a later fx WP. No muzzle.
                 need.extend(["hull", "turret", "barrel", "fx_smoke_0", "fx_fire_0"]);
                 assert!(root.find("muzzle").is_none(), "{}", m.stem);
                 let (hull, _) = (root.find("hull").unwrap(), ());
@@ -490,7 +492,18 @@ fn every_level_has_the_nodes_of_its_role() {
                 );
                 assert!(
                     hull.find("fx_smoke_0").is_some(),
-                    "{}: anchors under hull",
+                    "{}: smoke under hull",
+                    m.stem
+                );
+                assert!(
+                    hull.find("fx_fire_0").is_some(),
+                    "{}: fire under hull",
+                    m.stem
+                );
+                let turret = hull.find("turret").unwrap();
+                assert!(
+                    turret.find("fx_fire_0").is_none() && turret.find("fx_smoke_0").is_none(),
+                    "{}: the anchors hang under the hull, not under the turret",
                     m.stem
                 );
             } else {
@@ -575,8 +588,8 @@ const V4_SIZES: [(&str, f32, f32); 44] = [
     // WP11.6d: wrecks inside the vehicle they stand for (light tank, the amphibious transport,
     // the heavy tank, the gunboat); rocks inside the set v3 rocks, the fence and the cliff edge
     // inside the set v4 files, the ore field stages inside the set v4 field (3.1 x 3.0 m), and the
-    // trees inside the crown width the recipe was drawn for (no earlier size: broadleaf 5.5 m,
-    // fallen 8.5 x 3.5 m).
+    // trees inside the bounds chosen for them (not roles, no earlier size: 2 x 2 cells at most,
+    // pinned at what the recipe draws, docs/art-style.md section 12).
     ("wreck_light_vehicle", 5.11, 2.90),
     ("wreck_medium_vehicle", 6.33, 3.26),
     ("wreck_heavy_vehicle", 7.25, 3.80),
@@ -589,8 +602,8 @@ const V4_SIZES: [(&str, f32, f32); 44] = [
     ("ore_field_stage_02", 3.10, 3.00),
     ("ore_field_stage_03", 3.10, 3.00),
     ("ore_field_stage_04", 3.10, 3.00),
-    ("tree_broadleaf", 5.50, 5.50),
-    ("tree_broadleaf_fallen", 8.50, 3.50),
+    ("tree_broadleaf", 5.00, 4.00),
+    ("tree_broadleaf_fallen", 7.10, 2.40),
 ];
 /// The units of WP11.6b: the set v4 file they replace (the heavy gun team: its infantry cell).
 const UNIT_FOOTPRINTS: &[(&str, f32, f32)] = &[

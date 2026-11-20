@@ -2,7 +2,7 @@
 //! The per-model rules (budget, strictly fewer triangles per level, nodes, footprint, ground, the
 //! checker with no finding) live in `models.rs`, which runs over every file of `set::all`.
 
-use sf_model_gen::decor::{self, BURNT_STEEL, CHAR, PIT, SOOT, blob};
+use sf_model_gen::decor::{self, BURNT_STEEL, CHAR, ORE_NUGGETS, ORE_TONE, PIT, RUST, SOOT, blob};
 use sf_model_gen::kit::{Lod, Mat, Model, at_level};
 use sf_model_gen::palette::Palette;
 use sf_model_gen::set;
@@ -14,7 +14,10 @@ fn decor_models() -> Vec<Model> {
 
 #[test]
 fn the_tones_of_a_burnt_wreck_are_pinned() {
-    assert_eq!((SOOT, BURNT_STEEL, CHAR, PIT), (430, 420, 380, 560));
+    assert_eq!(
+        (SOOT, BURNT_STEEL, CHAR, PIT, RUST, ORE_TONE),
+        (200, 420, 380, 560, 650, 800)
+    );
 }
 
 /// Rule 1 (blobs): the 16-, 8- and 4-sided levels of a rock-like solid share their extremes, so
@@ -45,9 +48,13 @@ fn a_blob_keeps_its_extent_in_every_level() {
     }
 }
 
-/// Rule 2 (burnt wrecks): no paint or rust triangle of a wreck is brighter than `SOOT` per mille
-/// of its baked colour, and nothing is brighter than `PIT` (the dark pits, which are rubber and
-/// need the light left); steel and debris are `BURNT_STEEL` / `CHAR`.
+/// Rule 2 (burnt wrecks): every slot of a wreck is held to the tone it is meant to have: the
+/// paints (and the light paint) at most `SOOT`, the rust at most `RUST`, steel and debris at most
+/// `BURNT_STEEL` (`CHAR` is darker still), rubber at most `PIT` (the dark pits need the light
+/// left). And the baked colour is dark: no corner of any wreck (LOD0) is brighter than
+/// `BAKED_LIMIT` in linear luminance, where the unburnt paint alone is 0.26 and the measured wrecks are 0.061 to 0.072.
+const BAKED_LIMIT: f32 = 0.10;
+
 #[test]
 fn every_triangle_of_a_wreck_is_burnt() {
     let wrecks: Vec<Model> = decor_models()
@@ -55,20 +62,45 @@ fn every_triangle_of_a_wreck_is_burnt() {
         .filter(|m| m.stem.starts_with("neutral_wreck_"))
         .collect();
     assert_eq!(wrecks.len(), 4);
+    // Slots: 0 paint, 1 paint2, 2 paint3, 3 metal, 4 rubber, 5 accent (rust).
+    let ceiling = |slot: u8| match slot {
+        0..=2 => SOOT,
+        3 => BURNT_STEEL,
+        4 => PIT,
+        _ => RUST,
+    };
     for m in &wrecks {
         for (n, lod) in m.lods.iter().enumerate() {
             let tris = lod.world_tris();
-            // Slots 0 and 1 are the paints, 5 the rust.
-            let paint = |t: &&sf_model_gen::kit::Tri| matches!(t.mat.0, 0 | 1 | 5);
-            let loud = tris.iter().filter(paint).filter(|t| t.tone > SOOT).count();
-            assert_eq!(
-                loud, 0,
-                "{} LOD{n}: {loud} paint triangles above the soot tone",
-                m.stem
-            );
-            let bright = tris.iter().filter(|t| t.tone > PIT).count();
-            assert_eq!(bright, 0, "{} LOD{n}: {bright} triangles unburnt", m.stem);
+            for t in &tris {
+                assert!(
+                    t.tone <= ceiling(t.mat.0),
+                    "{} LOD{n}: a triangle of slot {} at tone {} (ceiling {})",
+                    m.stem,
+                    t.mat.0,
+                    t.tone,
+                    ceiling(t.mat.0)
+                );
+            }
         }
+        let world = m.lods[0].world_tris();
+        let lin: Vec<[f32; 3]> = m
+            .materials
+            .iter()
+            .map(|x| x.srgb.map(sf_model_gen::glb::linear))
+            .collect();
+        let baked = sf_model_gen::shade::bake_team(&world, &lin, None);
+        let mut brightest = 0.0f32;
+        for (i, t) in world.iter().enumerate() {
+            let f = sf_model_gen::shade::factor(lin[usize::from(t.mat.0)]);
+            for c in 0..3 {
+                let b = baked[i * 3 + c];
+                let l = 0.2126 * b[0] * f[0] + 0.7152 * b[1] * f[1] + 0.0722 * b[2] * f[2];
+                brightest = brightest.max(l);
+            }
+        }
+        println!("{}: brightest baked corner {brightest:.3}", m.stem);
+        assert!(brightest <= BAKED_LIMIT, "{}: {brightest}", m.stem);
     }
 }
 
@@ -89,6 +121,8 @@ fn the_ore_field_stages_grow() {
         );
         last = (t, w);
     }
+    // The nugget counts, as literals (the recipe reads this constant).
+    assert_eq!(ORE_NUGGETS, [4, 6, 9, 13]);
 }
 
 /// The trees use the `flora` palette entry (dark olive greens, bark, soil), the rest the neutral

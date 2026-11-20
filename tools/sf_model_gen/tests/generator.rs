@@ -529,10 +529,10 @@ const PINNED_UNITS: [(&str, usize, u64); 14] = [
 const PINNED_DECOR: [(&str, usize, u64); 14] = [
     ("neutral_cliff_edge.glb", 169688, 0x108efa20ebdf6087),
     ("neutral_fence.glb", 78184, 0x995919e27c48e56f),
-    ("neutral_ore_field_stage_01.glb", 66152, 0x2737f303fdc49326),
-    ("neutral_ore_field_stage_02.glb", 91248, 0x2d965d162d60a0f0),
-    ("neutral_ore_field_stage_03.glb", 128888, 0xb95da5095cf1409b),
-    ("neutral_ore_field_stage_04.glb", 179056, 0xc8dec64318788c05),
+    ("neutral_ore_field_stage_01.glb", 64204, 0x41e683a6b3105b4b),
+    ("neutral_ore_field_stage_02.glb", 89288, 0x59413127b3685582),
+    ("neutral_ore_field_stage_03.glb", 126924, 0xfbe0a511e75a2e86),
+    ("neutral_ore_field_stage_04.glb", 177088, 0xe0c50157f919eacc),
     ("neutral_rock_large.glb", 189340, 0x40f97822c06afd32),
     ("neutral_rock_small.glb", 118188, 0x80732670133e829c),
     ("neutral_tree_broadleaf.glb", 82252, 0xcac08d62e8a80cc7),
@@ -556,7 +556,7 @@ const PINNED_DECOR: [(&str, usize, u64); 14] = [
         209752,
         0xb40137b663d348d3,
     ),
-    ("neutral_wreck_vessel.glb", 127972, 0xf6b3b3d5c7f9a12b),
+    ("neutral_wreck_vessel.glb", 134040, 0xaba3b05c3074a07a),
 ];
 
 fn fnv1a(bytes: &[u8]) -> u64 {
