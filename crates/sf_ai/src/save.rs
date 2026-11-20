@@ -330,6 +330,7 @@ impl AiState {
 
     /// The state saved in the section at the front of `r`, restored onto `fresh`: the state the host made for
     /// the same player, profile and start sites exactly as for a new match (it must not have thought yet).
+    /// The random stream comes from the bytes: the seed `fresh` was made with does not matter.
     ///
     /// Errors: [`SaveError::NotFresh`] when `fresh` has thought or holds anything a new state does not;
     /// [`SaveError::Version`] for another AI format; [`SaveError::Rules`] for another profile, player or start
@@ -681,6 +682,18 @@ impl Reader<'_, '_> {
             check(
                 g.merge_into.is_none_or(|m| m < s.next_group && m != g.id),
                 "a group merges into a group that never was",
+            )?;
+            // `army.rs` only adds to `recalled` and `closing` what it adds to (or already holds in) `members`
+            // (lines 208, 1018-1021, 1141/1162-1190) and drops a unit from all three with the same `live` test
+            // (lines 80-82), so both stay subsets of `members`.
+            let member = |id: &EntityId| g.members.binary_search(id).is_ok();
+            check(
+                g.recalled.iter().all(member),
+                "a group recalls a unit that is not its member",
+            )?;
+            check(
+                g.closing.iter().all(member),
+                "a group closes in with a unit that is not its member",
             )?;
         }
         let mut members: Vec<EntityId> = groups.iter().flat_map(|g| g.members.clone()).collect();

@@ -376,7 +376,8 @@ AiState::save(&self, w: &mut ByteWriter) -> Result<(), SaveError>
 AiState::restore(fresh: AiState, r: &mut ByteReader, bounds: &SaveBounds) -> Result<AiState, SaveError>
 ```
 
-`fresh` is the AI the host makes for the same player, profile, seed and start sites as for a new match
+`fresh` is the AI the host makes for the same player, profile and start sites as for a new match; its seed
+does not matter, because the random stream is restored from the bytes
 (`Scenario::ais`, `sf_ai::match_ais`); `world` is the world restored from the same save. `SaveBounds::of(world)`
 (in `observe.rs`, the one file that names the world) takes the world's tick, map size, entity slot count and
 unit-table kinds. The error type is the world's `SaveError`.
@@ -410,18 +411,32 @@ Restore refuses, besides `Truncated`, a wrong tag and trailing bytes:
   refused places; maps or id lists not strictly ascending (a key twice would merge); unit orders not
   strictly ascending by factory; the scout past its last waypoint (the other start sites plus four); more
   scouts sent than `max(scouts_max, 1)`; more than `GROUPS_MAX` groups, groups not ascending by id, a group
-  id not below `next_group`, a merge into itself or into an id never given out, a unit in two groups; a
+  id not below `next_group`, a merge into itself or into an id never given out, a unit in two groups, a
+  recalled or closing unit that is not a member of its group; a
   jitter outside plus or minus `timing_jitter_permille`; a cleared site that is not another player's start
   site; a tally with the counter mix off, a bounce ledger with the escalation off, harvesters seen with the
   harvester threat off; an unknown posture, group role or stage.
 
 Dead entities: the AI keeps the ids of structures and units it has seen and drops them at its next look, so
 a remembered id may name a dead entity or a reused slot. Restore keeps them as they are
-(`a_dead_entity_the_ai_remembers_is_kept_as_the_live_ai_keeps_it`). Known gap: the generation of a
-remembered id is not checked against its slot (the world has no public accessor for a slot's generation,
-and this WP does not change `sf_sim`); a generation higher than the slot's would be a future id. The
+(`a_dead_entity_the_ai_remembers_is_kept_as_the_live_ai_keeps_it` proves the round trip of such a state;
+that the run then goes on as before is shown by the continue-equals runs, whose save points include such
+states). Known gap: the generation of a remembered id is not checked against its slot (the world has no
+public accessor for a slot's generation, and this WP does not change `sf_sim`); a generation higher than
+the slot's would be a future id. A recycled slot (an id with the same index as a live entity and an older
+generation) is restored unchanged and is not tested on its own. The
 counters the live AI never bounds (`previews`, `full_turns`, `stalled_turns`, `attacks_launched`,
 `launch_value`, `bounce_value`, the per-unit order counts, the resumption skips) are not bounded either.
+
+Bounds left for WP13.1h (looser than the live AI may keep, but not proven from the AI code, so not checked
+now; a check a real save could fail is worse than a loose one): `thinks` against the number of ticks
+`think_interval` allows (the host, not the AI, decides when it thinks); `last_think` against
+`schedule::due`; the order, uniqueness and single tick of `sales`; `merge_into` naming a group that still
+exists (the strike may be dissolved before its reinforcements notice).
+
+Save point: the AI state is saved at a tick after the arrivals of that tick are scheduled and before the
+AIs think, that is right before the AIs think ahead of `World::step` (`sf_game` `sim_thread.rs`). The
+headless runner's `run_hooked` puts its hook there.
 
 Guard 1: `AiState::save` destructures `AiState` (and `Known`, `Group`, `Directive`) without `..`. A field
 added by a later phase-9 work package is a compile error there until it is saved or named as derived

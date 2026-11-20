@@ -133,7 +133,7 @@ pub fn run_observed(
 }
 
 /// [`run_observed`] with a hook that may replace the AIs (ascending by player) right before they think at each
-/// tick, the save point of `docs/rules/save.md`: WP13.1d's tests put a restored AI in place of the live one
+/// tick, the save point of `docs/rules/save.md` ("Save point"): WP13.1d's tests put a restored AI in place of the live one
 /// there and the run goes on with it. Without a change by `between` the run is that of [`run_observed`].
 pub fn run_hooked(
     scenario: &Scenario,

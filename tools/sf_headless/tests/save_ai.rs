@@ -78,10 +78,62 @@ struct Seen {
     defending: u32,
     scouting_memory: u32,
     saves: u32,
+    /// Per rare field (`RARE`), whether it was ever non-default at a save point.
+    rare: [bool; RARE.len()],
+}
+
+/// The fields that are default in most states; the coverage record says which the scenarios reach.
+const RARE: [&str; 18] = [
+    "sales",
+    "rescue_used",
+    "stalled_turns",
+    "emergency",
+    "repair_backoff",
+    "rally_backoff",
+    "resume",
+    "refused",
+    "blocked_until",
+    "jitter",
+    "sites_cleared",
+    "intel",
+    "harv_seen",
+    "merge_into",
+    "target_hp",
+    "recalled",
+    "closing",
+    "full_turns",
+];
+
+/// Which of `RARE` are non-default in `s`, in that order.
+fn rare_of(s: &AiState) -> [bool; RARE.len()] {
+    let g = |f: &dyn Fn(&sf_ai::state::Group) -> bool| s.groups.iter().any(f);
+    [
+        !s.sales.is_empty(),
+        s.rescue_used,
+        s.stalled_turns != 0,
+        s.emergency.is_some(),
+        !s.repair_backoff.is_empty(),
+        !s.rally_backoff.is_empty(),
+        !s.resume.is_empty(),
+        !s.refused.is_empty(),
+        !s.blocked_until.is_empty(),
+        s.jitter.is_some(),
+        !s.sites_cleared.is_empty(),
+        !s.intel.is_empty(),
+        !s.harv_seen.is_empty(),
+        g(&|g| g.merge_into.is_some()),
+        g(&|g| g.target_hp.is_some()),
+        g(&|g| !g.recalled.is_empty()),
+        g(&|g| !g.closing.is_empty()),
+        s.full_turns != 0,
+    ]
 }
 
 fn note(seen: &mut Seen, s: &AiState) {
     seen.saves += 1;
+    for (r, now) in seen.rare.iter_mut().zip(rare_of(s)) {
+        *r |= now;
+    }
     if s.groups.iter().any(|g| g.stage == GroupStage::Staging) {
         seen.wave_forming += 1;
     }
@@ -135,6 +187,89 @@ fn every_ai_state_of_the_ci_games_survives_a_round_trip_and_resaves_byte_equal()
     assert!(seen.attack_under_way > 0, "{seen:?}");
     assert!(seen.defending > 0, "{seen:?}");
     assert!(seen.scouting_memory > 0, "{seen:?}");
+    let missed: Vec<&str> = RARE
+        .iter()
+        .zip(seen.rare)
+        .filter(|(_, r)| !r)
+        .map(|(n, _)| *n)
+        .collect();
+    eprintln!("rare fields never reached: {missed:?}");
+    assert_eq!(
+        missed, NOT_REACHED,
+        "the rare fields the scenarios never reach"
+    );
+}
+
+/// The rare fields no CI scenario holds at a save point; each has its own round trip in
+/// `the_rare_fields_no_scenario_reaches_round_trip`.
+const NOT_REACHED: [&str; 9] = [
+    "repair_backoff",
+    "resume",
+    "refused",
+    "jitter",
+    "sites_cleared",
+    "intel",
+    "merge_into",
+    "recalled",
+    "closing",
+];
+
+#[test]
+fn the_rare_fields_no_scenario_reaches_round_trip() {
+    let (base, b) = rich();
+    let kind = *b.kinds.first().unwrap();
+    let id = base.groups[0].members[0];
+    let t = base.last_think.unwrap();
+    let other = base
+        .start_sites
+        .iter()
+        .find(|(p, _)| *p != base.player)
+        .unwrap()
+        .0;
+    let edits: [(&str, &dyn Fn(&mut AiState)); 9] = [
+        ("repair_backoff", &|s| {
+            s.repair_backoff.insert(id, t);
+        }),
+        ("resume", &|s| {
+            s.resume.insert(kind, 3);
+        }),
+        ("refused", &|s| {
+            s.refused.insert((kind, Cell::new(1, 2)), t);
+        }),
+        ("jitter", &|s| s.jitter = Some(0)),
+        ("sites_cleared", &|s| s.sites_cleared = vec![other]),
+        ("intel", &|s| {
+            s.profile.army.counter_permille = 100;
+            s.intel.insert(kind, (2, t));
+        }),
+        ("merge_into", &|s| {
+            let mut g = s.groups[0].clone();
+            g.id = s.next_group;
+            g.members.clear();
+            g.recalled.clear();
+            g.closing.clear();
+            g.merge_into = Some(s.groups[0].id);
+            s.next_group += 1;
+            s.groups.push(g);
+        }),
+        ("recalled", &|s| s.groups[0].recalled = vec![id]),
+        ("closing", &|s| s.groups[0].closing = vec![id]),
+    ];
+    assert_eq!(
+        edits.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+        NOT_REACHED
+    );
+    for (name, edit) in edits {
+        let mut s = base.clone();
+        edit(&mut s);
+        let i = RARE.iter().position(|n| *n == name).unwrap();
+        assert!(rare_of(&s)[i], "{name} is not set");
+        let bytes = save_state(&s);
+        let back =
+            restore_state(fresh_of(&s), &bytes, &b).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(back, s, "{name}");
+        assert_eq!(save_state(&back), bytes, "{name}: resave");
+    }
 }
 
 /// Per tick, `(tick, digest of every AI)`.
@@ -580,6 +715,26 @@ fn every_restore_check_refuses_its_value_with_its_message_and_passes_the_bound()
         noop,
         |s, _| s.groups[0].merge_into = Some(s.groups[0].id),
     );
+    refuses(
+        &base,
+        "a group recalls a unit that is not its member",
+        |s, _| s.groups[0].recalled = s.groups[0].members.clone(),
+        |s, _| {
+            let g = &mut s.groups[0];
+            g.recalled = g.members.clone();
+            g.members.remove(0);
+        },
+    );
+    refuses(
+        &base,
+        "a group closes in with a unit that is not its member",
+        |s, _| s.groups[0].closing = s.groups[0].members.clone(),
+        |s, _| {
+            let g = &mut s.groups[0];
+            g.closing = g.members.clone();
+            g.members.remove(0);
+        },
+    );
     refuses(&base, "a unit is in two groups", noop, |s, _| {
         let mut g = s.groups[0].clone();
         g.id = s.next_group;
@@ -850,7 +1005,9 @@ fn the_profile_the_player_the_sites_the_version_and_a_used_fresh_state_are_refus
 #[test]
 fn a_dead_entity_the_ai_remembers_is_kept_as_the_live_ai_keeps_it() {
     // The AI remembers structures and units that die later and drops them at its next look. A remembered id
-    // whose entity is dead in the world is restored unchanged, and the run goes on as before (continue-equals).
+    // whose entity is dead in the world is restored unchanged. This test proves only the round trip; that the
+    // run goes on as before is the continue-equals tests' part, whose save points include such states. A
+    // recycled slot (same index, newer generation in the world) is a known gap, not tested here.
     let mut found = 0;
     for name in ["ai_vs_passive", "ai_raid_guard", "ai_bounce"] {
         let s = load(name);
@@ -893,4 +1050,43 @@ fn trailing_bytes_after_the_ai_section_are_refused() {
         Ai::restore(s.ais[0].clone(), &bytes, &f.world).err(),
         Some(SaveError::Corrupt("a section has the wrong tag or length"))
     );
+}
+
+#[test]
+fn save_bounds_take_the_worlds_tick_map_slots_and_sorted_kinds() {
+    // A world from a scenario after 200 ticks: entities, so the slots are not zero.
+    let s = load("ai_fog");
+    let f = run_observed(
+        &s,
+        &RunOptions {
+            ticks: 200,
+            every: 100,
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    let b = SaveBounds::of(&f.world);
+    assert_eq!(b.tick, f.world.tick());
+    assert_eq!(b.tick, Tick(200));
+    assert_eq!(b.map, f.world.map_size());
+    assert!(f.world.slot_count() > 0);
+    assert_eq!(b.slots as usize, f.world.slot_count());
+    // A unit table handed over in descending order: the kinds come out ascending, once each.
+    let embedded = sf_bridge::unit_table(&sf_data::units::UnitDefs::embedded()).unwrap();
+    let mut stats: Vec<_> = embedded.iter().copied().collect();
+    stats.reverse();
+    assert!(stats.len() > 1 && stats[0].kind > stats[1].kind);
+    let table = sf_sim::UnitTable::new(stats).unwrap();
+    let mut world = World::new(sf_sim::WorldConfig::new(5).with_map_size(40, 30))
+        .unwrap()
+        .with_units(table)
+        .unwrap();
+    world.step();
+    let b = SaveBounds::of(&world);
+    let mut want: Vec<Kind> = embedded.iter().map(|u| u.kind).collect();
+    want.sort();
+    want.dedup();
+    assert_eq!(b.kinds, want);
+    assert!(b.kinds.windows(2).all(|p| p[0] < p[1]));
+    assert_eq!((b.tick, b.map, b.slots), (Tick(1), (40, 30), 0));
 }
