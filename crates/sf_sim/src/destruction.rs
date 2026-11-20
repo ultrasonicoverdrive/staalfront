@@ -24,14 +24,16 @@
 //! stood, `(y, x)`, not by its slot; a shooter that is already gone (a shell that outlived its gunner) comes
 //! after those that are there.
 
+use sf_math::bytes::{ByteReader, ByteWriter};
 use sf_math::hash::Fnv1a64;
 use sf_math::{Facing, Fx, Vec2};
 
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
 use crate::orders::live_slot;
+use crate::save::{SaveError, SaveResult, ensure, get_fx, get_vec2, put_fx, put_vec2};
 use crate::terrain::Cell;
-use crate::units::{Footprint, UnitClass};
+use crate::units::{Footprint, UnitClass, UnitTable};
 use crate::world::World;
 
 /// Ticks a vehicle wreck lasts unless the settings say otherwise: half a minute.
@@ -90,11 +92,18 @@ impl DestructionConfig {
             && self.wreck_min_size <= Fx::from_ratio(MAX_WRECK_MIN_SIZE_TENTHS as i64, 10)
     }
 
+    /// In the checksum and in the rules digest of a save. Destructured without `..`: a new
+    /// setting fails to compile until it is hashed.
     pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
+        let DestructionConfig {
+            wreck_ticks,
+            rubble_ticks,
+            wreck_min_size,
+        } = self;
         h.write_bytes(SETTINGS_TAG);
-        h.write_u32(self.wreck_ticks);
-        h.write_u32(self.rubble_ticks);
-        h.write_fx(self.wreck_min_size);
+        h.write_u32(*wreck_ticks);
+        h.write_u32(*rubble_ticks);
+        h.write_fx(*wreck_min_size);
     }
 }
 
@@ -235,6 +244,170 @@ pub(crate) struct Destruction {
 }
 
 impl Destruction {
+    /// Writes the wrecks and the tally (section `D` of a save, WP13.1c-1). The deaths are the
+    /// report of the last tick: `reap` clears them before it reads anything, so they are not
+    /// saved. Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> SaveResult<()> {
+        let Destruction {
+            // Rules: in the rules digest.
+            config: _,
+            wrecks,
+            tally,
+            // The report of the last tick, cleared by the next `reap` before anything reads it.
+            deaths: _,
+        } = self;
+        w.usize(wrecks.len())?;
+        for wreck in wrecks {
+            let Wreck {
+                kind,
+                unit,
+                owner,
+                pos,
+                facing,
+                size,
+                footprint,
+                anchor,
+                born,
+                expires,
+            } = wreck;
+            w.u8(match kind {
+                WreckKind::Vehicle => 0,
+                WreckKind::Rubble => 1,
+            });
+            w.u16(unit.0);
+            w.u8(owner.0);
+            put_vec2(w, *pos);
+            w.u8(facing.raw());
+            put_fx(w, *size);
+            w.bool(footprint.is_some());
+            if let Some(f) = footprint {
+                w.u8(f.width);
+                w.u8(f.height);
+            }
+            w.bool(anchor.is_some());
+            if let Some(a) = anchor {
+                w.u32(a.x);
+                w.u32(a.y);
+            }
+            w.u64(born.0);
+            w.u64(expires.0);
+        }
+        w.usize(tally.len())?;
+        for (player, t) in tally {
+            let Tally {
+                kills,
+                assists,
+                losses,
+            } = t;
+            w.u8(player.0);
+            w.u32(*kills);
+            w.u32(*assists);
+            w.u32(*losses);
+        }
+        Ok(())
+    }
+
+    /// Reads what [`Destruction::save`] wrote into the part of a fresh world. Refused as
+    /// `Corrupt`: wrecks or a tally in a world without destruction settings, wrecks out of their
+    /// order, a wreck the death stage never leaves (see `docs/rules/save.md`), a tally out of
+    /// player order, twice or all zero.
+    pub(crate) fn restore(
+        &mut self,
+        r: &mut ByteReader<'_>,
+        units: &UnitTable,
+        now: Tick,
+        map: (u32, u32),
+    ) -> SaveResult<()> {
+        let n = r.count(36)?;
+        let mut wrecks = Vec::with_capacity(n);
+        for _ in 0..n {
+            let kind = match r.u8()? {
+                0 => WreckKind::Vehicle,
+                1 => WreckKind::Rubble,
+                _ => return Err(SaveError::Corrupt("unknown wreck kind")),
+            };
+            let unit = Kind(r.u16()?);
+            let owner = PlayerId(r.u8()?);
+            let pos = get_vec2(r)?;
+            let facing = Facing::new(r.u8()?);
+            let size = get_fx(r)?;
+            let footprint = if r.bool()? {
+                Some(Footprint {
+                    width: r.u8()?,
+                    height: r.u8()?,
+                })
+            } else {
+                None
+            };
+            let anchor = if r.bool()? {
+                Some(Cell::new(r.u32()?, r.u32()?))
+            } else {
+                None
+            };
+            let born = Tick(r.u64()?);
+            let expires = Tick(r.u64()?);
+            let wreck = Wreck {
+                kind,
+                unit,
+                owner,
+                pos,
+                facing,
+                size,
+                footprint,
+                anchor,
+                born,
+                expires,
+            };
+            ensure(
+                self.config
+                    .is_some_and(|c| wreck_reachable(&wreck, &c, units, now, map)),
+                "a wreck the death stage never leaves",
+            )?;
+            ensure(
+                wrecks.last().is_none_or(|l: &Wreck| l.key() <= wreck.key()),
+                "the wrecks are out of order",
+            )?;
+            wrecks.push(wreck);
+        }
+        let n = r.count(13)?;
+        let mut tally: Vec<(PlayerId, Tally)> = Vec::with_capacity(n);
+        for _ in 0..n {
+            let player = PlayerId(r.u8()?);
+            let t = Tally {
+                kills: r.u32()?,
+                assists: r.u32()?,
+                losses: r.u32()?,
+            };
+            ensure(
+                self.config.is_some()
+                    && t != Tally::default()
+                    && tally.last().is_none_or(|&(p, _)| p < player),
+                "a tally out of order, all zero or without destruction",
+            )?;
+            tally.push((player, t));
+        }
+        self.wrecks = wrecks;
+        self.tally = tally;
+        Ok(())
+    }
+
+    /// The kills a player has in the tally (for the restore check of the kills column).
+    pub(crate) fn kills_of(&self, player: PlayerId) -> u32 {
+        self.tally
+            .binary_search_by_key(&player, |t| t.0)
+            .map_or(0, |at| self.tally[at].1.kills)
+    }
+
+    /// The structures destroyed in tick `tick`: the rubble born then. Each one moved the path
+    /// service's epoch once after the service ran (`World::despawn`), so a job saved after that
+    /// tick is this many epochs behind (`Pathing::restore`).
+    pub(crate) fn rubble_born(&self, tick: Tick) -> u32 {
+        self.wrecks
+            .iter()
+            .filter(|w| w.kind == WreckKind::Rubble && w.born == tick)
+            .count() as u32
+    }
+
     fn tally_of(&mut self, player: PlayerId) -> &mut Tally {
         let at = match self.tally.binary_search_by_key(&player, |t| t.0) {
             Ok(at) => at,
@@ -315,6 +488,60 @@ impl Destruction {
             h.write_bytes(&e.kills[i].to_le_bytes());
         }
     }
+}
+
+/// Whether the death stage leaves `w` in a world saved before tick `now`: made in an earlier tick,
+/// not expired (the stage removes a wreck on its `expires` tick), lasting exactly the setting of
+/// its kind, of a kind of the unit table whose class leaves it (a mobile unit at least
+/// `wreck_min_size` across leaves a vehicle wreck of its size and no cells; a structure rubble with
+/// its footprint on an anchor of the map, size zero and facing zero), and lying on the map.
+fn wreck_reachable(
+    w: &Wreck,
+    c: &DestructionConfig,
+    units: &UnitTable,
+    now: Tick,
+    map: (u32, u32),
+) -> bool {
+    let Some(def) = units.index_of(w.unit) else {
+        return false;
+    };
+    let stats = units.at(def);
+    let (max_x, max_y) = (
+        Fx::from_i64(i64::from(map.0)),
+        Fx::from_i64(i64::from(map.1)),
+    );
+    let on_map =
+        w.pos.x >= Fx::ZERO && w.pos.y >= Fx::ZERO && w.pos.x <= max_x && w.pos.y <= max_y;
+    let ticks = match w.kind {
+        WreckKind::Vehicle => c.wreck_ticks,
+        WreckKind::Rubble => c.rubble_ticks,
+    };
+    let times = w.born < now
+        && w.expires >= now
+        && w.expires == w.born.saturating_add(u64::from(ticks));
+    let shape = match w.kind {
+        WreckKind::Vehicle => {
+            stats.class() == UnitClass::Mobile
+                && stats.size >= c.wreck_min_size
+                && w.size == stats.size
+                && w.footprint.is_none()
+                && w.anchor.is_none()
+        }
+        WreckKind::Rubble => {
+            stats.class() == UnitClass::Structure
+                && w.size == Fx::ZERO
+                && w.facing == Facing::default()
+                && w.footprint == stats.footprint
+                && match (w.anchor, w.footprint) {
+                    (Some(a), Some(f)) => {
+                        u64::from(a.x) + u64::from(f.width) <= u64::from(map.0)
+                            && u64::from(a.y) + u64::from(f.height) <= u64::from(map.1)
+                    }
+                    _ => false,
+                }
+        }
+    };
+    on_map && times && shape
 }
 
 /// The order shooters are ranked in: most damage first, then the one that stood farthest north, then
@@ -422,15 +649,20 @@ impl World {
         // (b) The credit, while every shooter still stands in its slot: a kill count of a shooter that
         // dies on the same tick goes with it.
         for d in &deaths {
-            self.destruction.tally_of(d.owner).losses += 1;
+            // Saturating (WP13.1c-1): a restored tally at its maximum must not overflow; below it
+            // the numbers are the same as before.
+            let t = self.destruction.tally_of(d.owner);
+            t.losses = t.losses.saturating_add(1);
             if let Some(k) = d.killer {
-                self.destruction.tally_of(k.owner).kills += 1;
+                let t = self.destruction.tally_of(k.owner);
+                t.kills = t.kills.saturating_add(1);
                 if let Some(j) = live_slot(&self.entities, k.shooter) {
                     self.entities.kills[j] = self.entities.kills[j].saturating_add(1);
                 }
             }
             for a in &d.assists {
-                self.destruction.tally_of(a.owner).assists += 1;
+                let t = self.destruction.tally_of(a.owner);
+                t.assists = t.assists.saturating_add(1);
             }
         }
         // (c) The wrecks, from the anchor of each structure before its cells are freed.

@@ -65,8 +65,11 @@
 
 use core::fmt;
 
+use sf_math::bytes::ByteWriter;
 use sf_math::hash::Fnv1a64;
 use sf_math::{Fx, Vec2};
+
+use crate::save::SaveResult;
 
 use crate::armor::{ArmorTable, scaled_damage};
 use crate::crowd::Index;
@@ -468,6 +471,23 @@ impl WeaponTable {
     pub fn digest(&self) -> u64 {
         self.digest
     }
+
+    /// The digest for the rules digest of a save (`World::rules_digest`). Destructured without
+    /// `..`: a new field of the table fails to compile until it is placed here. The three parts
+    /// are all in [`WeaponTable::digest`] (`digest_of` destructures each weapon and loadout, the
+    /// armor table its own digest).
+    pub(crate) fn rules_digest(&self) -> u64 {
+        let WeaponTable {
+            weapons: _,
+            loadouts: _,
+            armor,
+            digest,
+        } = self;
+        if let Some(a) = armor {
+            debug_assert_eq!(a.rules_digest(), a.digest());
+        }
+        *digest
+    }
 }
 
 fn digest_of(weapons: &[WeaponStats], loadouts: &[Loadout], armor: Option<&ArmorTable>) -> u64 {
@@ -475,38 +495,60 @@ fn digest_of(weapons: &[WeaponStats], loadouts: &[Loadout], armor: Option<&Armor
     h.write_bytes(DIGEST_TAG);
     h.write_u64(u64::try_from(weapons.len()).unwrap_or(u64::MAX));
     for w in weapons {
-        h.write_bytes(&w.kind.to_le_bytes());
-        h.write_fx(w.range);
-        h.write_fx(w.min_range);
-        h.write_u32(w.reload_ticks);
-        h.write_u8(w.burst);
-        h.write_u32(w.burst_delay_ticks);
-        h.write_u32(w.damage);
-        h.write_bytes(&w.damage_type.to_le_bytes());
-        h.write_u8(match w.projectile {
+        // Destructured without `..`: a new weapon field fails to compile until it is hashed (this
+        // digest is in the checksum and in the rules digest of a save, WP13.1c-1).
+        let WeaponStats {
+            kind,
+            range,
+            min_range,
+            reload_ticks,
+            burst,
+            burst_delay_ticks,
+            damage,
+            damage_type,
+            projectile,
+            projectile_speed_per_tick,
+            flight_height,
+            guide_turn_per_tick,
+            splash_radius,
+            splash_inner,
+            friendly_fire,
+            mount,
+            fire_arc,
+        } = w;
+        h.write_bytes(&kind.to_le_bytes());
+        h.write_fx(*range);
+        h.write_fx(*min_range);
+        h.write_u32(*reload_ticks);
+        h.write_u8(*burst);
+        h.write_u32(*burst_delay_ticks);
+        h.write_u32(*damage);
+        h.write_bytes(&damage_type.to_le_bytes());
+        h.write_u8(match projectile {
             ProjectileKind::Instant => 0,
             ProjectileKind::Straight => 1,
             ProjectileKind::Arc => 2,
             ProjectileKind::Guided => 3,
             ProjectileKind::Falling => 4,
         });
-        h.write_fx(w.projectile_speed_per_tick);
-        h.write_fx(w.flight_height);
-        h.write_u8(w.guide_turn_per_tick);
-        h.write_fx(w.splash_radius);
-        h.write_fx(w.splash_inner);
-        h.write_u8(u8::from(w.friendly_fire));
-        h.write_u8(match w.mount {
+        h.write_fx(*projectile_speed_per_tick);
+        h.write_fx(*flight_height);
+        h.write_u8(*guide_turn_per_tick);
+        h.write_fx(*splash_radius);
+        h.write_fx(*splash_inner);
+        h.write_u8(u8::from(*friendly_fire));
+        h.write_u8(match mount {
             Mount::Hull => 0,
             Mount::Turret => 1,
         });
-        h.write_u8(w.fire_arc);
+        h.write_u8(*fire_arc);
     }
     h.write_u64(u64::try_from(loadouts.len()).unwrap_or(u64::MAX));
     for l in loadouts {
-        h.write_bytes(&l.unit.0.to_le_bytes());
-        h.write_u8(l.weapons.len() as u8);
-        for w in &l.weapons {
+        let Loadout { unit, weapons } = l;
+        h.write_bytes(&unit.0.to_le_bytes());
+        h.write_u8(weapons.len() as u8);
+        for w in weapons {
             h.write_bytes(&w.to_le_bytes());
         }
     }
@@ -649,16 +691,11 @@ impl PartialEq for SplashIndex {
 impl Eq for SplashIndex {}
 
 impl Arsenal {
-    /// Whether no projectile was ever launched: the store is as a fresh world has it (WP13.1a
-    /// saves a world only then).
-    pub(crate) fn projectiles_at_start(&self) -> bool {
-        self.projectiles == Projectiles::default()
-    }
 
-    /// The section a save of this format cannot hold yet, if the arsenal has state of it
-    /// (`docs/rules/save.md`). Destructured without `..`: a new field fails to compile until it
-    /// is placed here.
-    pub(crate) fn unsaved_section(&self) -> Option<&'static str> {
+    /// Writes the state of the arsenal: the projectiles in flight (section `X` of a save,
+    /// WP13.1c-1, `docs/rules/save.md`). Destructured without `..`: a new field fails to compile
+    /// until it is placed here.
+    pub(crate) fn save_parts(&self, w: &mut ByteWriter) -> SaveResult<()> {
         let Arsenal {
             // Rules, and what is derived from them.
             table: _,
@@ -667,25 +704,16 @@ impl Arsenal {
             widest: _,
             // Scratch.
             splash: _,
-            projectiles: _,
-            // The reports of the last tick: the return fire and the kill credit of the next tick
-            // read them, so a world with any of them waits for WP13.1c.
-            shots,
-            impacts,
-            attacks,
-            hurt,
+            projectiles,
+            // The reports of the last tick: derived. `update_all` clears all four before it does
+            // anything else, and nothing in a step reads them before it (the return fire of the
+            // tick reads `attacks` after the weapon stage filled it, `reap` reads `hurt` after it).
+            shots: _,
+            impacts: _,
+            attacks: _,
+            hurt: _,
         } = self;
-        if !self.projectiles_at_start() {
-            Some("projectiles")
-        } else if !shots.is_empty()
-            || !impacts.is_empty()
-            || !attacks.is_empty()
-            || !hurt.is_empty()
-        {
-            Some("weapons")
-        } else {
-            None
-        }
+        projectiles.save(w)
     }
 
     /// Checks `table` against the unit table and builds the lookup from unit-table position
