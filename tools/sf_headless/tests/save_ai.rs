@@ -763,7 +763,7 @@ fn the_rules_gated_parts_and_the_enum_tags_are_checked() {
         let mut st = t.rng.state();
         st.inc ^= 2;
         t.rng = sf_math::Rng::from_state(st);
-    }) - 0;
+    });
     assert_eq!(bytes[inc] & 1, 1);
     assert_eq!(
         probe(inc, bytes[inc] & !1),
