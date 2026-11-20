@@ -159,11 +159,11 @@
 //!
 //! # What is deliberately left out
 //!
-//! * `prev_pos` and `prev_facing`. They exist for render interpolation only
-//!   and are derived (at the end of a tick they equal the state before that
-//!   tick's step), so they cannot carry a divergence that `pos` and `facing`
-//!   do not already show a tick later. A world rebuilt from a save does not
-//!   need to restore them.
+//! * `prev_pos` and `prev_facing`. At the end of a tick they equal the state
+//!   before that tick's step, so they cannot carry a divergence that `pos` and
+//!   `facing` do not already show a tick later. They are not only for
+//!   rendering: the formation and crowd passes read `prev_pos`, so a save does
+//!   restore them (docs/rules/save.md).
 //! * The checksum history itself, the count of live entities (derived from the
 //!   live flags) and the queue's insertion counter (only the resulting order
 //!   matters, and that is covered).

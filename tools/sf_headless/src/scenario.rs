@@ -1812,6 +1812,24 @@ impl Scenario {
     ///
     /// Validates first, so a scenario edited in memory cannot run invalid.
     pub fn build_world(&self) -> Result<World, ScenarioError> {
+        self.build(true)
+    }
+
+    /// The world [`Scenario::build_world`] makes before anything is scheduled: the rules, the
+    /// map and the tables, no entity and no command. What a save is restored onto
+    /// (`World::restore`, WP13.1b). Not for a recorded game (`game`), whose world is made with
+    /// its starting objects.
+    pub fn build_fresh_world(&self) -> Result<World, ScenarioError> {
+        if self.game.is_some() {
+            return Err(ScenarioError::Invalid {
+                path: None,
+                problems: vec!["game: a recorded game has no fresh world to restore onto".into()],
+            });
+        }
+        self.build(false)
+    }
+
+    fn build(&self, schedule: bool) -> Result<World, ScenarioError> {
         let problems = self.problems();
         if !problems.is_empty() {
             return Err(ScenarioError::Invalid {
@@ -2042,6 +2060,9 @@ impl Scenario {
             world = world
                 .with_match(rules)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if !schedule {
+            return Ok(world);
         }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
         for (player, command) in &self.match_commands {

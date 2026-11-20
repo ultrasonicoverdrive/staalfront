@@ -17,6 +17,8 @@
 
 use crate::path::grid::{DIRS, Grid, Heuristic, INF, SECTOR_SIZE};
 use crate::path::heap::IndexedHeap;
+use crate::save::{SaveResult, ensure};
+use sf_math::bytes::{ByteError, ByteReader, ByteWriter};
 
 /// Cells in a full sector.
 pub(crate) const SECTOR_CELLS: usize = (SECTOR_SIZE * SECTOR_SIZE) as usize;
@@ -194,7 +196,7 @@ impl Local {
             used += 1;
             let at = top as usize;
             let (x, y) = Local::cell(rect, at as u16);
-            self.run.expanded += 1;
+            self.run.expanded = self.run.expanded.saturating_add(1);
             if let Some(t) = q.toward {
                 let key = (heur.octile((x, y), t), self.dist[at], grid.index(x, y));
                 if self.run.nearest_key.is_none_or(|best| key < best) {
@@ -264,6 +266,149 @@ impl Local {
             at = p;
         }
         out[from..].reverse();
+    }
+}
+
+impl Local {
+    /// Writes every array and the run (WP13.1b): a search that was begun goes on next tick from
+    /// exactly here. Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut ByteWriter) -> Result<(), ByteError> {
+        let Local {
+            dist,
+            parent,
+            wanted,
+            heap,
+            run,
+        } = self;
+        crate::save::put_u32s(w, dist)?;
+        w.usize(parent.len())?;
+        for &p in parent {
+            w.u16(p);
+        }
+        crate::save::put_bools(w, wanted)?;
+        heap.save(w)?;
+        let Run {
+            expanded,
+            still_wanted,
+            nearest_key,
+            nearest,
+            nearest_cost,
+        } = run;
+        w.u32(*expanded);
+        w.u32(*still_wanted);
+        w.bool(nearest_key.is_some());
+        if let Some((a, b, c)) = nearest_key {
+            w.u64(*a);
+            w.u32(*b);
+            w.u32(*c);
+        }
+        w.bool(nearest.is_some());
+        if let Some((x, y)) = nearest {
+            w.u32(*x);
+            w.u32(*y);
+        }
+        w.u32(*nearest_cost);
+        Ok(())
+    }
+
+    /// Reads what [`Local::save`] wrote, on a map of `width` by `height` cells. Refused: arrays of
+    /// another size, a parent outside the window or a chain of parents that goes round (the way
+    /// back from a cell must end), an element in the heap that was never reached, fewer wanted
+    /// cells left to find than are marked, a nearest cell off the map.
+    pub(crate) fn restore(r: &mut ByteReader<'_>, width: u32, height: u32) -> SaveResult<Local> {
+        let mut out = Local::new();
+        let dist = crate::save::get_u32s(r)?;
+        ensure(
+            dist.len() == WINDOW_CELLS,
+            "a local search has another size",
+        )?;
+        out.dist.copy_from_slice(&dist);
+        ensure(
+            r.count(2)? == WINDOW_CELLS,
+            "a local search has another size",
+        )?;
+        for p in out.parent.iter_mut() {
+            *p = r.u16()?;
+            ensure(
+                *p == NO_PARENT || usize::from(*p) < WINDOW_CELLS,
+                "a local search parent",
+            )?;
+        }
+        let wanted = crate::save::get_bools(r)?;
+        ensure(
+            wanted.len() == WINDOW_CELLS,
+            "a local search has another size",
+        )?;
+        out.wanted.copy_from_slice(&wanted);
+        out.heap = IndexedHeap::restore(r, WINDOW_CELLS)?;
+        out.run.expanded = r.u32()?;
+        out.run.still_wanted = r.u32()?;
+        out.run.nearest_key = if r.bool()? {
+            Some((r.u64()?, r.u32()?, r.u32()?))
+        } else {
+            None
+        };
+        out.run.nearest = if r.bool()? {
+            Some((r.u32()?, r.u32()?))
+        } else {
+            None
+        };
+        out.run.nearest_cost = r.u32()?;
+        ensure(
+            out.run.nearest.is_none_or(|(x, y)| x < width && y < height),
+            "a local search nearest cell",
+        )?;
+        let marks = out.wanted.iter().filter(|&&w| w).count();
+        ensure(
+            out.run.still_wanted as usize >= marks,
+            "a local search wanted count",
+        )?;
+        ensure(
+            out.heap
+                .elements()
+                .iter()
+                .all(|&e| out.dist[e as usize] != INF),
+            "a local search heap element",
+        )?;
+        ensure(
+            crate::save::parents_end(&out.parent, |p| (p != NO_PARENT).then_some(usize::from(p))),
+            "a local search parent",
+        )?;
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+impl Local {
+    /// 0: two cells each other's parent; 1: the heap holds an element twice; 2: cell 300 (past a
+    /// sector, inside the window) reached and in the heap; 3: the expansion count at its most
+    /// (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => {
+                self.parent[3] = 4;
+                self.parent[4] = 3;
+            }
+            1 => self.heap.corrupt_for_test(),
+            2 => {
+                self.dist[300] = 0;
+                self.heap.push_or_lower(300, (0, 0));
+            }
+            _ => self.run.expanded = u32::MAX,
+        }
+    }
+}
+
+impl Local {
+    /// Whether a search begun in `rect` can go on from this memory (restore checks): every cell in
+    /// the heap is a cell of the rectangle, and so is the parent of every cell of it.
+    pub(crate) fn fits(&self, rect: Rect) -> bool {
+        let cells = cells_in(rect) as usize;
+        cells <= WINDOW_CELLS
+            && self.heap.elements().iter().all(|&e| (e as usize) < cells)
+            && self.parent[..cells]
+                .iter()
+                .all(|&p| p == NO_PARENT || usize::from(p) < cells)
     }
 }
 

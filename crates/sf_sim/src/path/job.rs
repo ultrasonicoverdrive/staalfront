@@ -39,6 +39,10 @@ use crate::path::grid::INF;
 use crate::path::local::{Local, Outcome, Query, Rect, union};
 use crate::path::los;
 use crate::path::route::{ABS_CAP, RING_CAP, Route, RouteState};
+use crate::save::{
+    SaveError, SaveResult, ensure, get_links, get_u32s, get_vec2, put_links, put_u32s, put_vec2,
+};
+use sf_math::bytes::{ByteError, ByteReader};
 
 /// Legs (a sector, or two sectors side by side) refined per job.
 pub(crate) const REFINE_LEGS: u8 = 3;
@@ -289,11 +293,7 @@ impl Job {
     pub fn write_hash(&self, h: &mut sf_math::hash::Fnv1a64) {
         h.write_u32(self.slot);
         h.write_u32(self.ticket);
-        h.write_u8(match self.mode {
-            Mode::Fresh => 0,
-            Mode::Refill => 1,
-            Mode::Continue => 2,
-        });
+        h.write_u8(self.mode.tag());
         h.write_u8(self.phase.tag());
         if self.overlay_on {
             h.write_u8(0x5E | u8::from(self.strict) << 7);
@@ -419,6 +419,13 @@ impl Job {
         self.slot == slot && self.ticket == ticket
     }
 
+    /// Whether `route` (the route of the unit in `slot`) still belongs to this job: its request
+    /// and still wanted. [`Job::run`] drops a job that fails this, unread.
+    pub(crate) fn owns(&self, slot: u32, route: &Route) -> bool {
+        self.is_for(slot, route.ticket)
+            && matches!(route.state, RouteState::Wanted | RouteState::Active)
+    }
+
     /// The epoch of the graph the job began in.
     pub fn epoch(&self) -> u32 {
         self.epoch
@@ -434,9 +441,7 @@ impl Job {
         rem: &mut u32,
         epoch: u32,
     ) -> Progress {
-        if route.ticket != self.ticket
-            || !matches!(route.state, RouteState::Wanted | RouteState::Active)
-        {
+        if !self.owns(self.slot, route) {
             return Progress::Dropped;
         }
         if self.epoch != epoch {
@@ -1135,6 +1140,506 @@ impl Job {
             self.sm_from = self.sm_lo;
             self.sm_active = false;
         }
+    }
+}
+
+/// The sizes a restored job and its memory are checked against.
+pub(crate) struct Bounds {
+    /// Map cells across and down (every graph has the map's size).
+    pub width: u32,
+    pub height: u32,
+    /// Sectors of the map's graphs (zero for a world without graphs).
+    pub sectors: usize,
+    /// Class graphs.
+    pub graphs: usize,
+    /// Entity slots.
+    pub slots: usize,
+}
+
+impl Bounds {
+    pub fn cells(&self) -> u64 {
+        u64::from(self.width) * u64::from(self.height)
+    }
+
+    pub fn cell(&self, c: u32) -> bool {
+        u64::from(c) < self.cells()
+    }
+
+    pub fn node(&self, n: u32) -> bool {
+        (n as usize) < self.sectors * SLOTS
+    }
+
+    pub fn inside(&self, p: Vec2) -> bool {
+        p.x >= Fx::ZERO
+            && p.y >= Fx::ZERO
+            && p.x <= Fx::from_i64(i64::from(self.width))
+            && p.y <= Fx::from_i64(i64::from(self.height))
+    }
+}
+
+impl Work {
+    /// Writes the planner's memory whole (WP13.1b): a job in flight goes on from it next tick.
+    /// Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut sf_math::bytes::ByteWriter) -> Result<(), ByteError> {
+        let Work {
+            local,
+            search,
+            start_links,
+            goal_links,
+            cells,
+            nodes,
+            raw,
+        } = self;
+        local.save(w)?;
+        search.save(w)?;
+        put_links(w, start_links)?;
+        put_links(w, goal_links)?;
+        put_u32s(w, cells)?;
+        put_u32s(w, nodes)?;
+        w.usize(raw.len())?;
+        for &(p, c) in raw {
+            put_vec2(w, p);
+            w.u32(c);
+        }
+        Ok(())
+    }
+
+    /// Reads what [`Work::save`] wrote. Refused: a node or cell out of range, a point off the map.
+    pub(crate) fn restore(r: &mut ByteReader<'_>, b: &Bounds) -> SaveResult<Work> {
+        let mut out = Work::new(b.sectors);
+        out.local = Local::restore(r, b.width, b.height)?;
+        out.search = AbstractSearch::restore(r, b.sectors, b.width, b.height)?;
+        out.start_links = get_links(r)?;
+        out.goal_links = get_links(r)?;
+        out.cells = get_u32s(r)?;
+        out.nodes = get_u32s(r)?;
+        let n = r.count(20)?;
+        out.raw = (0..n)
+            .map(|_| Ok((get_vec2(r)?, r.u32()?)))
+            .collect::<SaveResult<_>>()?;
+        ensure(
+            out.start_links
+                .iter()
+                .chain(&out.goal_links)
+                .all(|&(n, _)| b.node(n))
+                && out.nodes.iter().all(|&n| b.node(n)),
+            "the planner's memory names a node out of range",
+        )?;
+        ensure(
+            out.cells.iter().all(|&c| b.cell(c))
+                && out.raw.iter().all(|&(p, c)| b.cell(c) && b.inside(p)),
+            "the planner's memory names a cell off the map",
+        )?;
+        Ok(out)
+    }
+}
+
+impl Mode {
+    const fn tag(self) -> u8 {
+        match self {
+            Mode::Fresh => 0,
+            Mode::Refill => 1,
+            Mode::Continue => 2,
+        }
+    }
+}
+
+impl Job {
+    /// Writes the job (WP13.1b). Destructured without `..`.
+    pub(crate) fn save(&self, w: &mut sf_math::bytes::ByteWriter) {
+        let Job {
+            slot,
+            ticket,
+            graph,
+            mode,
+            strict,
+            overlay_on,
+            banned,
+            banned_len,
+            epoch,
+            phase,
+            pos,
+            start_cell,
+            abs_started,
+            legs,
+            leg_ready,
+            pop_after,
+            sm_from,
+            sm_lo,
+            sm_hi,
+            sm_active,
+            sm_far_tried,
+            searching,
+            near_stage,
+            near_node,
+        } = self;
+        w.u32(*slot);
+        w.u32(*ticket);
+        w.u32(*graph as u32);
+        w.u8(mode.tag());
+        w.bool(*strict);
+        w.bool(*overlay_on);
+        w.u8(*banned_len);
+        for &s in &banned[..usize::from(*banned_len)] {
+            w.u32(s);
+        }
+        w.u32(*epoch);
+        w.u8(phase.tag());
+        put_vec2(w, *pos);
+        w.u32(*start_cell);
+        w.bool(*abs_started);
+        w.u8(*legs);
+        w.bool(*leg_ready);
+        w.u8(*pop_after);
+        w.u32(*sm_from as u32);
+        w.u32(*sm_lo as u32);
+        w.u32(*sm_hi as u32);
+        w.bool(*sm_active);
+        w.bool(*sm_far_tried);
+        w.bool(*searching);
+        w.u8(*near_stage);
+        w.bool(near_node.is_some());
+        if let Some(((a, bb, c), cell)) = near_node {
+            w.u64(*a);
+            w.u64(*bb);
+            w.u32(*c);
+            w.u32(*cell);
+        }
+    }
+
+    /// Reads what [`Job::save`] wrote, with the planner's memory `work` already read. Refused:
+    /// a slot, graph, sector or cell out of range, an unknown mode or stage, more legs than a job
+    /// refines, a smoothing cursor past the raw route, and a state the planner never yields in
+    /// (a stage it does not stop in, a leg ready, a search flag of another stage, an abstract
+    /// search not begun where every way to the stage begins it).
+    pub(crate) fn restore(r: &mut ByteReader<'_>, b: &Bounds, work: &Work) -> SaveResult<Job> {
+        let slot = r.u32()?;
+        let ticket = r.u32()?;
+        // The counter skips 0 (`next_ticket_after`): ticket 0 belongs to the routes commands write.
+        ensure(ticket != 0, "a job ticket at zero")?;
+        let graph = r.u32()? as usize;
+        let mode = match r.u8()? {
+            0 => Mode::Fresh,
+            1 => Mode::Refill,
+            2 => Mode::Continue,
+            _ => return Err(SaveError::Corrupt("unknown job mode")),
+        };
+        let strict = r.bool()?;
+        let overlay_on = r.bool()?;
+        let banned_len = r.u8()?;
+        ensure(
+            usize::from(banned_len) <= BAN_CAP,
+            "a job bans too many sectors",
+        )?;
+        let mut banned = [0; BAN_CAP];
+        for s in banned.iter_mut().take(usize::from(banned_len)) {
+            *s = r.u32()?;
+        }
+        let epoch = r.u32()?;
+        let phase = match r.u8()? {
+            0 => Phase::Begin,
+            1 => Phase::Direct,
+            2 => Phase::ConnectStart,
+            3 => Phase::ConnectGoal,
+            4 => Phase::Abstract,
+            5 => Phase::Nearest,
+            6 => Phase::Refine,
+            7 => Phase::Smooth,
+            8 => Phase::Finish,
+            _ => return Err(SaveError::Corrupt("unknown job stage")),
+        };
+        let job = Job {
+            slot,
+            ticket,
+            graph,
+            mode,
+            strict,
+            overlay_on,
+            banned,
+            banned_len,
+            epoch,
+            phase,
+            pos: get_vec2(r)?,
+            start_cell: r.u32()?,
+            abs_started: r.bool()?,
+            legs: r.u8()?,
+            leg_ready: r.bool()?,
+            pop_after: r.u8()?,
+            sm_from: r.u32()? as usize,
+            sm_lo: r.u32()? as usize,
+            sm_hi: r.u32()? as usize,
+            sm_active: r.bool()?,
+            sm_far_tried: r.bool()?,
+            searching: r.bool()?,
+            near_stage: r.u8()?,
+            near_node: if r.bool()? {
+                Some(((r.u64()?, r.u64()?, r.u32()?), r.u32()?))
+            } else {
+                None
+            },
+        };
+        ensure(
+            (job.slot as usize) < b.slots && job.graph < b.graphs,
+            "a job for a slot or graph that does not exist",
+        )?;
+        ensure(
+            job.banned[..usize::from(banned_len)]
+                .iter()
+                .all(|&s| (s as usize) < b.sectors),
+            "a job bans a sector that does not exist",
+        )?;
+        ensure(
+            b.inside(job.pos)
+                && b.cell(job.start_cell)
+                && job.near_node.is_none_or(|(_, c)| b.cell(c)),
+            "a job names a point or cell off the map",
+        )?;
+        ensure(
+            job.legs <= REFINE_LEGS && job.near_stage <= 1,
+            "a job counter the planner never reaches",
+        )?;
+        // A saved job is always one the planner yielded in (`Pathing::serve` keeps a job only
+        // after `Progress::Yield`): never in Begin or Finish, never with a leg ready (that leg is
+        // used in the same call), searching exactly in the stages that yield inside a search, and
+        // with its abstract search begun in every stage after it.
+        ensure(
+            !matches!(job.phase, Phase::Begin | Phase::Finish) && !job.leg_ready,
+            "a job stopped where the planner never yields",
+        )?;
+        let searches = matches!(
+            job.phase,
+            Phase::ConnectStart | Phase::ConnectGoal | Phase::Nearest | Phase::Refine
+        );
+        ensure(
+            job.searching == searches,
+            "a job's search flag does not match its stage",
+        )?;
+        ensure(
+            (job.abs_started || !matches!(job.phase, Phase::Abstract | Phase::Nearest))
+                && (job.abs_started || job.phase != Phase::Refine || job.mode == Mode::Refill)
+                && (!job.overlay_on || job.mode == Mode::Fresh)
+                && (!job.strict || job.overlay_on),
+            "a job's abstract search was never begun",
+        )?;
+        let n = work.raw.len();
+        ensure(
+            job.phase != Phase::Smooth
+                || (n > 0
+                    && job.sm_from < n
+                    && (!job.sm_active || (job.sm_lo < n && job.sm_hi < n))),
+            "a job's smoothing is past its route",
+        )?;
+        Ok(job)
+    }
+}
+
+#[cfg(test)]
+impl Job {
+    /// 0: more legs than a job refines; 1: a slot past the entities; 2: a ready leg without cells
+    /// (with `work`); 3: the smoothing past the raw route; 4: a search past its sector; 5: a
+    /// search in flight in the abstract stage; 6: a search in flight with the leg's cells ready;
+    /// 7: the stage Finish; 8: the search flag turned over; 9: the abstract search not begun;
+    /// 10: an overlay; 11: strict without an overlay; 12: the epoch one on; 13: a leg ready;
+    /// 14: the raw route past the route's goal (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8, work: &mut Work) {
+        match what {
+            0 => self.legs = REFINE_LEGS + 1,
+            1 => self.slot = u32::MAX,
+            2 => {
+                self.leg_ready = true;
+                work.cells.clear();
+            }
+            3 => {
+                self.phase = Phase::Smooth;
+                self.searching = false;
+                if work.raw.is_empty() {
+                    work.raw.push((self.pos, self.start_cell));
+                }
+                self.sm_from = work.raw.len();
+            }
+            5 => {
+                // The abstract stage runs no local search.
+                self.phase = Phase::Abstract;
+                self.searching = true;
+            }
+            6 => {
+                // A Refine leg whose cells are ready skips its search, so `searching` never stays.
+                self.phase = Phase::Refine;
+                self.searching = true;
+                self.leg_ready = true;
+                if work.cells.is_empty() {
+                    work.cells.push(self.start_cell);
+                }
+            }
+            7 => self.phase = Phase::Finish,
+            8 => self.searching = !self.searching,
+            9 => self.abs_started = false,
+            10 => self.overlay_on = true,
+            11 => {
+                self.strict = true;
+                self.overlay_on = false;
+            }
+            12 => self.epoch = self.epoch.wrapping_add(1),
+            13 => self.leg_ready = true,
+            14 => {
+                // The raw route of the leg ends one cell further on than the route's goal.
+                let &(at, c) = work.raw.last().expect("a leg being smoothed");
+                work.raw.push((at, if c > 0 { c - 1 } else { c + 1 }));
+            }
+            _ => {
+                // A search of the start sector in flight, with a cell past the sector in its heap.
+                self.phase = Phase::ConnectStart;
+                self.searching = true;
+                work.local.corrupt_for_test(2);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+impl Job {
+    /// The stage, mode, search flag and whether the abstract search is begun (save tests).
+    pub(crate) fn shape_for_test(&self) -> (u8, u8, bool, bool) {
+        (
+            self.phase.tag(),
+            self.mode.tag(),
+            self.searching,
+            self.abs_started,
+        )
+    }
+
+    /// The memory this job reads given a node that is no portal of graph `g` (save tests): 0 in
+    /// the start links, 1 in the abstract search's heap, 2 as the abstract search's nearest node
+    /// (any node not reached by the search going on).
+    pub(crate) fn corrupt_memory_for_test(&self, what: u8, g: &ClassGraph, work: &mut Work) {
+        let none = (0..g.sector.len() as u32 * SLOTS as u32)
+            .find(|&n| g.sector[node_sector(n) as usize].portal[node_slot(n)] == NO_PORTAL)
+            .expect("a slot without a portal");
+        match what {
+            0 => work.start_links.push((none, 1)),
+            1 => work.search.push_for_test(none),
+            _ => work.search.set_nearest_for_test(none),
+        }
+    }
+}
+
+#[cfg(test)]
+impl Work {
+    /// 0: a cell off the map; 1: a node out of range; 2, 3: the local search (`Local`); 4: the
+    /// abstract search (save tests).
+    pub(crate) fn corrupt_for_test(&mut self, what: u8) {
+        match what {
+            0 => self.cells.push(u32::MAX),
+            1 => self.nodes.push(u32::MAX),
+            2 => self.local.corrupt_for_test(0),
+            3 => self.local.corrupt_for_test(1),
+            5 => self.local.corrupt_for_test(3),
+            _ => self.search.corrupt_for_test(),
+        }
+    }
+}
+
+/// The file tags of the modes and the stages of a job (save tests).
+#[cfg(test)]
+pub(crate) fn tags_for_test() -> ([u8; 3], [u8; 9]) {
+    (
+        [Mode::Fresh.tag(), Mode::Refill.tag(), Mode::Continue.tag()],
+        [
+            Phase::Begin.tag(),
+            Phase::Direct.tag(),
+            Phase::ConnectStart.tag(),
+            Phase::ConnectGoal.tag(),
+            Phase::Abstract.tag(),
+            Phase::Nearest.tag(),
+            Phase::Refine.tag(),
+            Phase::Smooth.tag(),
+            Phase::Finish.tag(),
+        ],
+    )
+}
+
+impl Job {
+    /// The rectangle of the local search this job has begun and not finished, as the stage it is
+    /// in computes it when it goes on: `None` when no local search is in flight.
+    fn search_rect(&self, g: &ClassGraph, route: &Route, work: &Work) -> Option<Rect> {
+        if !self.searching {
+            return None;
+        }
+        match self.phase {
+            Phase::ConnectStart => Some(g.sectors.rect(Job::sector_of(g, self.start_cell))),
+            Phase::ConnectGoal => Some(g.sectors.rect(Job::sector_of(g, route.want))),
+            Phase::Nearest => match (self.near_stage, work.search.nearest()) {
+                (0, Some((_, _, n))) => Some(g.sectors.rect(node_sector(n))),
+                _ => Some(g.sectors.rect(Job::sector_of(g, self.start_cell))),
+            },
+            Phase::Refine => match Job::next_leg(g, route) {
+                Ok(Leg::Search { rect, .. }) => Some(rect),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Whether the planner's memory fits the local search this job will go on with (restore
+    /// checks, after the graphs are rebuilt): the cells in its heap and their parents lie in the
+    /// rectangle the job's stage searches. A search of another rectangle would read cells outside
+    /// it, past the edge of the map.
+    ///
+    /// `Job::restore` already ties `searching` to the stages that search; a Refine job whose next
+    /// leg is no search (a step, the goal reached) must not be searching either.
+    pub(crate) fn search_fits(&self, g: &ClassGraph, route: &Route, work: &Work) -> bool {
+        match self.search_rect(g, route, work) {
+            Some(rect) => work.local.fits(rect),
+            None => !self.searching,
+        }
+    }
+
+    /// Whether the planner's memory this job will read names only portals of its graph (restore
+    /// checks, after the graphs are rebuilt; the job is of the service's epoch, so the graph is
+    /// the one the memory was made on). Once the abstract search is begun the job reads the start
+    /// and goal links, the search's heap, parents and nearest node: each node of the search
+    /// (save the goal) must be a portal that exists, or the planner would take `NO_PORTAL` as a
+    /// cell. In ConnectGoal only the start links are this job's already. Without the abstract
+    /// search begun, a job may carry an earlier job's links, and reads none of them: a Refill job
+    /// refines its route, and the job that reached its goal in its own sector (saved only in
+    /// Smooth) must have a leg that ends that route. `route` is `None` when the unit's route no
+    /// longer belongs to the job ([`Job::owns`]): that job is dropped unread, so its leg is not
+    /// judged; its portals are.
+    pub(crate) fn memory_fits(
+        &self,
+        g: &ClassGraph,
+        route: Option<&Route>,
+        work: &Work,
+    ) -> SaveResult<()> {
+        let exists = |n: u32| {
+            g.sector
+                .get(node_sector(n) as usize)
+                .is_some_and(|s| s.portal[node_slot(n)] != NO_PORTAL)
+        };
+        let links = |l: &[(u32, u32)]| l.iter().all(|&(n, _)| exists(n));
+        let fine = if self.abs_started {
+            links(&work.start_links) && links(&work.goal_links) && work.search.names_only(exists)
+        } else if self.phase == Phase::ConnectGoal {
+            links(&work.start_links)
+        } else {
+            true
+        };
+        ensure(
+            fine,
+            "the planner's memory names a portal that does not exist",
+        )?;
+        let shortcut =
+            self.phase == Phase::Smooth && self.mode != Mode::Refill && !self.abs_started;
+        let Some(route) = route else {
+            return Ok(());
+        };
+        ensure(
+            !shortcut
+                || (route.abs_len() == 0
+                    && !route.truncated
+                    && work.raw.last().is_some_and(|&(_, c)| c == route.goal)),
+            "a job's leg does not end its route",
+        )
     }
 }
 
