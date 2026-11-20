@@ -127,6 +127,18 @@ pub fn run_watched(
 pub fn run_observed(
     scenario: &Scenario,
     options: &RunOptions,
+    watch: impl FnMut(&World, &[Ai]),
+) -> Result<Finished, ScenarioError> {
+    run_hooked(scenario, options, |_, _| {}, watch)
+}
+
+/// [`run_observed`] with a hook that may replace the AIs (ascending by player) right before they think at each
+/// tick, the save point of `docs/rules/save.md`: WP13.1d's tests put a restored AI in place of the live one
+/// there and the run goes on with it. Without a change by `between` the run is that of [`run_observed`].
+pub fn run_hooked(
+    scenario: &Scenario,
+    options: &RunOptions,
+    mut between: impl FnMut(&World, &mut [Ai]),
     mut watch: impl FnMut(&World, &[Ai]),
 ) -> Result<Finished, ScenarioError> {
     let mut problems = Vec::new();
@@ -158,6 +170,7 @@ pub fn run_observed(
     let mut ai_commands = Vec::new();
     for done in first..=options.ticks {
         arrivals.schedule_due(&mut world)?;
+        between(&world, &mut ais);
         for ai in &mut ais {
             if ai.due(world.tick()) {
                 wanted.clear();
