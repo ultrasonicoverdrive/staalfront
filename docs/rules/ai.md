@@ -30,8 +30,9 @@ The AI state is **not** in the world checksum, so `Ai::digest()` hashes it (play
 think, manager counts, every remembered structure in id order) and `sf_headless` prints it beside the checksum (`ai 0: 0x...`) and writes
 it into the log (`"ai": [{"player": 0, "digest": "0x..."}]`, only for a scenario with `ai`). CI compares the logs of Linux and Windows
 except the `host` block, so the digest is compared too. `--expect` checks only the world checksum; the AI digest is pinned in
-`tests/ai_fog.rs` and compared across platforms by that log comparison. The state is plain data (integers, vectors, `BTreeMap`), ready to be saved
-(WP13.1).
+`tests/ai_fog.rs` and compared across platforms by that log comparison. The state is plain data (integers, vectors, `BTreeMap`), saved with the game
+since WP13.1d (`AiState::save`/`restore`, `docs/rules/save.md`, "The AI"). A field added to `AiState` is a compile error in
+`AiState::save` until it is saved or named as derived there.
 
 ## The fence: no cheating on information
 

@@ -3884,3 +3884,15 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
 * **New kit rules**: blobs keep their extent in every level (jitter on the absolute angle, compass points at full radius), a wreck is burnt (soot, steel, debris and pit tones), wrecks have hull, turret, barrel and the fx anchors. Tests: `tools/sf_model_gen/tests/decor.rs` and the table-driven tests of `models.rs` (wreck and scenery branches, 14 new footprints), the 14 files pinned in `generator.rs` (`PINNED_DECOR`), `far_levels.rs` leaves the new files out of the pre-round table, `set_v5_load.rs` (file count, anchors for wrecks, a `decor` contact sheet).
 * **Sweep fixes (21-11-2026)**: ore nuggets are a darker, warmer mineral (`accent` at tone 800); wrecks are soot-dark (`SOOT` 200, rust patches at 650, charred strips) and every slot is held to its tone and to a baked brightness of 0.10 (measured 0.061-0.072); the boat has a lofted hull with a pointed bow; the fallen broadleaf lies along its trunk; the wreck anchors are required by the checker, not read by the engine (`fx.rs`), and the node test checks `fx_fire_0` under the hull; an in-game decor picture (`decor_in_game_both_factions.png`, scratch test, decor is not a role so no M1 match can place it).
 * **Gaps**: the decor is not placed on any map yet (the map WPs do that); the wrecks are seen in the game only after a fight (`destruction_screenshot`); the boat wreck is unused; broadleaf height is 4.8 m (a low tree); the wreck anchors are unused by the engine.
+
+### WP13.1d notes: saving the computer player's state (20-11-2026)
+
+* `AiState::save`/`restore` and `Ai::save`/`restore` in `crates/sf_ai/src/save.rs` (one section `A`, AI format
+  version 1, the profile as its digest only); `SaveBounds::of(world)` in `observe.rs`. Details and the field
+  table: `docs/rules/save.md`, "The AI". `sf_headless::run::run_hooked` lets a test swap the AIs before
+  their thinks; `run_observed` is that hook with nothing in it.
+* Tests: `tools/sf_headless/tests/save_ai.rs` (round trip and byte-equal resave in the 15 AI scenarios of
+  CI every 97 ticks, continue-equals every 97 ticks in all 15, every tick of `ai_raid`, single ticks, every
+  restore check at and past its bound). No pin moved; no change in `sf_sim`.
+* Gap: the generation of a remembered entity id is not checked against its slot (needs an `sf_sim`
+  accessor). The world is not saved alongside in these tests; WP13.1e joins both.
