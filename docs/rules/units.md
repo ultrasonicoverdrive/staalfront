@@ -402,3 +402,9 @@ definitions; duplicate and retired numbers; appending a unit, a weapon, a damage
 and a movement class as data only; refusals with file and line, including numbers with
 too many decimals; the conversion, and the speed per tick against the exact rounding
 for every speed from 0.001 to 20.000 cells per second.
+
+* **WP11.6d (decor and wrecks, set v5):** `ore_field` now shows `set_v5/neutral_ore_field_stage_04.glb`
+  (the full field; the other stages `_01` to `_03` are in the set for the map WPs). The wreck models of
+  `wrecks.ron` are `set_v5/neutral_wreck_*_vehicle.glb`; `neutral_wreck_vessel.glb` has no class there yet
+  (no vessel leaves a wreck). Rocks, fence, cliff edge and broadleaf trees are in the set and the
+  `set_v5` pack, not roles of `unit_defs.ron`. Details: `docs/art-style.md` section 12.

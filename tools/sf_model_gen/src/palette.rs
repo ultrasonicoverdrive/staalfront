@@ -55,7 +55,7 @@ impl Palette {
     pub fn materials(&self, faction: &str) -> Vec<Material> {
         let f = &self.factions[faction];
         // A neutral model has no player colour: its third slot is a second light paint.
-        let third = if faction == "neutral" {
+        let third = if faction == "neutral" || faction == "flora" {
             Material {
                 name: "paint3".to_owned(),
                 srgb: f.paint_light,

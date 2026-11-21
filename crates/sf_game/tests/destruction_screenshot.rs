@@ -9,7 +9,7 @@
 //! rubble lying there; then again after they have expired.
 //!
 //! No golden image (the two software drivers differ a little). The checks say what has to be true: the
-//! wreck is drawn from a glTF model of art set v4 in the wreck colour (not a placeholder), the picture
+//! wreck is drawn from a glTF model of art set v5 in the wreck colour (not a placeholder), the picture
 //! changes where each wreck lies, the rubble is as big as the footprint it came from, and the ground is
 //! empty again after the wrecks expired. Set `SF_SAVE_SHOTS=<dir>` to write the images; the ones in
 //! `docs/screenshots/wp5.5/` were made so, with the tick in the name.

@@ -562,7 +562,7 @@
         (
             kind: 42, id: "ore_field", factions: [Neutral], category: Object,
             hp: 0, armor: "none", size: 1, sight: 0,
-            model: Glb("set_v4/neutral_ore_field.glb"), strategic_icon: Square,
+            model: Glb("set_v5/neutral_ore_field_stage_04.glb"), strategic_icon: Square,
             // placeholder: size, model. A terrain resource: no hit points ("—" in units.md).
         ),
     ],

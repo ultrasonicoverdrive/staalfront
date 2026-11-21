@@ -87,9 +87,30 @@ fn is_heap(stem: &str) -> bool {
     stem.starts_with("neutral_rubble_")
 }
 
+/// A wreck (WP11.6d): `hull` -> `turret` -> `barrel` and the empty smoke and fire anchors.
+fn is_wreck(stem: &str) -> bool {
+    stem.starts_with("neutral_wreck_")
+}
+
+/// Rocks, fences, cliff edges, ore field stages and trees (WP11.6d): a single `body`, no anchors.
+fn is_scenery(stem: &str) -> bool {
+    [
+        "neutral_rock_",
+        "neutral_fence",
+        "neutral_cliff_edge",
+        "neutral_ore_field_stage_",
+        "neutral_tree_",
+    ]
+    .iter()
+    .any(|p| stem.starts_with(p))
+}
+
 /// Decor: the budget of a vehicle.
 fn is_decor(stem: &str) -> bool {
-    is_heap(stem) || stem.starts_with("neutral_evidence_crate")
+    is_heap(stem)
+        || stem.starts_with("neutral_evidence_crate")
+        || is_wreck(stem)
+        || is_scenery(stem)
 }
 
 /// A faction's finished structure (not a state, not a mission object).
@@ -112,7 +133,7 @@ fn is_infantry(stem: &str) -> bool {
 
 /// A vessel floats: the waterline `Y = 0` lies inside the hull (WP11.6b).
 fn is_vessel(stem: &str) -> bool {
-    stem.ends_with("gunboat") || stem.ends_with("ferry")
+    stem.ends_with("gunboat") || stem.ends_with("ferry") || stem.ends_with("wreck_vessel")
 }
 
 /// A model with a gun: a muzzle under its barrel (the heavy tank has two, `muzzle_l`/`_r`).
@@ -450,6 +471,41 @@ fn every_level_has_the_nodes_of_its_role() {
                 // The six figure nodes of the checker (`sf_asset_check::check::FIGURE_NODES`).
                 assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
                 need.extend(["torso", "head", "arm_l", "arm_r", "leg_l", "leg_r"]);
+            } else if is_scenery(&m.stem) {
+                // WP11.6d: decor is one body, no hull, no anchors.
+                assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
+                need.push("body");
+            } else if is_wreck(&m.stem) {
+                // WP11.6d: the four wrecks have the three vehicle nodes and the smoke and fire
+                // anchors that `sf_asset_check` requires of a wreck (the four set v4 wrecks were
+                // left out for lacking them). The engine does not read the anchors for wrecks yet
+                // (crates/sf_game/src/fx.rs: a wreck slot has no anchor, the smoke spawns at the
+                // wreck's position); they are kept for a later fx WP. No muzzle.
+                need.extend(["hull", "turret", "barrel", "fx_smoke_0", "fx_fire_0"]);
+                assert!(root.find("muzzle").is_none(), "{}", m.stem);
+                let (hull, _) = (root.find("hull").unwrap(), ());
+                assert!(!hull.mesh.is_empty(), "{}", m.stem);
+                assert!(
+                    hull.find("turret").is_some(),
+                    "{}: turret under hull",
+                    m.stem
+                );
+                assert!(
+                    hull.find("fx_smoke_0").is_some(),
+                    "{}: smoke under hull",
+                    m.stem
+                );
+                assert!(
+                    hull.find("fx_fire_0").is_some(),
+                    "{}: fire under hull",
+                    m.stem
+                );
+                let turret = hull.find("turret").unwrap();
+                assert!(
+                    turret.find("fx_fire_0").is_none() && turret.find("fx_smoke_0").is_none(),
+                    "{}: the anchors hang under the hull, not under the turret",
+                    m.stem
+                );
             } else {
                 // Vehicles smoke by the engine's rule (no anchors), like every other vehicle.
                 assert!(root.find("fx_smoke_0").is_none(), "{}", m.stem);
@@ -496,7 +552,7 @@ fn every_level_has_the_nodes_of_its_role() {
 /// Size of LOD0 (x, z) in metres must stay inside the set v4 model of its role, and a structure
 /// inside its footprint in `unit_defs.ron` (4 m a cell); the v4 sizes as `sf_asset_check` measured
 /// them on 14-11-2026 (`size` column), as literals. A state shares its role's size.
-const V4_SIZES: [(&str, f32, f32); 30] = [
+const V4_SIZES: [(&str, f32, f32); 44] = [
     ("meridian_construction_center", 15.20, 15.20),
     ("meridian_harvester", 6.46, 3.46),
     ("meridian_light_tank", 5.11, 2.90),
@@ -529,6 +585,25 @@ const V4_SIZES: [(&str, f32, f32); 30] = [
     ("rubble_1x1", 2.80, 2.75),
     ("rubble_2x2", 5.60, 5.50),
     ("rubble_2x3", 5.60, 8.25),
+    // WP11.6d: wrecks inside the vehicle they stand for (light tank, the amphibious transport,
+    // the heavy tank, the gunboat); rocks inside the set v3 rocks, the fence and the cliff edge
+    // inside the set v4 files, the ore field stages inside the set v4 field (3.1 x 3.0 m), and the
+    // trees inside the bounds chosen for them (not roles, no earlier size: 2 x 2 cells at most,
+    // pinned at what the recipe draws, docs/art-style.md section 12).
+    ("wreck_light_vehicle", 5.11, 2.90),
+    ("wreck_medium_vehicle", 6.33, 3.26),
+    ("wreck_heavy_vehicle", 7.25, 3.80),
+    ("wreck_vessel", 18.00, 5.00),
+    ("rock_large", 5.04, 4.17),
+    ("rock_small", 2.09, 1.58),
+    ("fence", 4.00, 0.15),
+    ("cliff_edge", 4.00, 2.00),
+    ("ore_field_stage_01", 3.10, 3.00),
+    ("ore_field_stage_02", 3.10, 3.00),
+    ("ore_field_stage_03", 3.10, 3.00),
+    ("ore_field_stage_04", 3.10, 3.00),
+    ("tree_broadleaf", 5.00, 4.00),
+    ("tree_broadleaf_fallen", 7.10, 2.40),
 ];
 /// The units of WP11.6b: the set v4 file they replace (the heavy gun team: its infantry cell).
 const UNIT_FOOTPRINTS: &[(&str, f32, f32)] = &[
@@ -643,7 +718,11 @@ fn every_structure_has_all_its_states() {
         assert!(stems.contains(&stem), "{stem} missing");
     }
     // WP11.6a 6, WP11.6b 14 units, WP11.6c the rest.
-    assert_eq!(stems.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6);
+    assert_eq!(
+        stems.len(),
+        6 + 14 + 22 * 5 - 3 + 24 + 6 + 14,
+        "WP11.6d: 14 decor and wreck files"
+    );
     let mut sorted = stems.clone();
     sorted.sort_unstable();
     assert_eq!(stems, sorted, "set::all is sorted by file name");

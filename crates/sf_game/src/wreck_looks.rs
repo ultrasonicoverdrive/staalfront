@@ -178,19 +178,19 @@ mod tests {
             [
                 (
                     "wreck_light_vehicle",
-                    "set_v3/neutral_wreck_light_vehicle.glb",
+                    "set_v5/neutral_wreck_light_vehicle.glb",
                     12,
                     Some(12)
                 ),
                 (
                     "wreck_medium_vehicle",
-                    "set_v3/neutral_wreck_medium_vehicle.glb",
+                    "set_v5/neutral_wreck_medium_vehicle.glb",
                     13,
                     Some(13)
                 ),
                 (
                     "wreck_heavy_vehicle",
-                    "set_v3/neutral_wreck_heavy_vehicle.glb",
+                    "set_v5/neutral_wreck_heavy_vehicle.glb",
                     15,
                     None
                 ),
