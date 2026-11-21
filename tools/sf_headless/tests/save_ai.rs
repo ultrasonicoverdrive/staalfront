@@ -214,6 +214,9 @@ const NOT_REACHED: [&str; 9] = [
     "closing",
 ];
 
+/// A change to a state, for the table of rare fields.
+type Edit<'a> = dyn Fn(&mut AiState) + 'a;
+
 #[test]
 fn the_rare_fields_no_scenario_reaches_round_trip() {
     let (base, b) = rich();
@@ -226,7 +229,7 @@ fn the_rare_fields_no_scenario_reaches_round_trip() {
         .find(|(p, _)| *p != base.player)
         .unwrap()
         .0;
-    let edits: [(&str, &dyn Fn(&mut AiState)); 9] = [
+    let edits: [(&str, &Edit<'_>); 9] = [
         ("repair_backoff", &|s| {
             s.repair_backoff.insert(id, t);
         }),
