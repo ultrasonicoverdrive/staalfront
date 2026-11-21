@@ -3872,3 +3872,15 @@ Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the m
 * **Also**: `play_at_scaled` with scale 0 starts nothing (it took a voice slot); config tests for the shipped values, a file without the new fields, the range edges; a mapped original is left alone with the load full; the heavy-moment numbers (0.719, 0.703, 0.627) are pinned.
 * **Mutations** (each reverted, failing tests named in the PR): see the PR body.
 * **Gaps**: not listened to by the builder (Tijmen did, 18-11-2026, see "Heard." above); the cue limiter is a gain model; the master limiter has no attack time (a little distortion on a sharp transient is possible, not judged by ear); the steady fight is 5 dB louder than the music at most, by decision (confirmed by Tijmen 18-11-2026).
+
+### WP13.1d notes: saving the computer player's state (20-11-2026)
+
+* `AiState::save`/`restore` and `Ai::save`/`restore` in `crates/sf_ai/src/save.rs` (one section `A`, AI format
+  version 1, the profile as its digest only); `SaveBounds::of(world)` in `observe.rs`. Details and the field
+  table: `docs/rules/save.md`, "The AI". `sf_headless::run::run_hooked` lets a test swap the AIs before
+  their thinks; `run_observed` is that hook with nothing in it.
+* Tests: `tools/sf_headless/tests/save_ai.rs` (round trip and byte-equal resave in the 15 AI scenarios of
+  CI every 97 ticks, continue-equals every 97 ticks in all 15, every tick of `ai_raid`, single ticks, every
+  restore check at and past its bound). No pin moved; no change in `sf_sim`.
+* Gap: the generation of a remembered entity id is not checked against its slot (needs an `sf_sim`
+  accessor). The world is not saved alongside in these tests; WP13.1e joins both.
