@@ -109,9 +109,14 @@ through the ore fingerprint, which at `version == 0` is the start), the money ru
 sets (harvest, production, power, vision, match) only whether the world has them is hashed: a world
 with any of them does not save yet, and their numbers join in WP13.1c-2; the AI profile digests join
 in WP13.1d. The weapon table enters through `WeaponTable::rules_digest`, which destructures the
-table without `..`; its digest is made by `digest_of`, which destructures every weapon and loadout
-(the bytes are the ones the checksum always hashed, so no pin moves), and the armor table's
-`rules_digest` destructures its fields and works the digest out again. A different digest on restore is `SaveError::Rules`
+table without `..` and returns its stored digest (nothing is recomputed on save or restore); that
+digest is made by `digest_of` when the table is built, which destructures every weapon and loadout
+and hashes the armor table's stored digest (the bytes are the ones the checksum always hashed, so no
+pin moves). The armor table's `rules_digest` destructures its fields and works the digest out again,
+but only a `debug_assert_eq!` against the stored digest uses it. The test
+`every_weapon_loadout_and_armor_field_is_in_the_rules_digest` changes each weapon, loadout and armor
+field on its own and asserts the digest changes, and asserts the armor work-out equals the stored
+digest (so dropping a field fails it in a release build too). A different digest on restore is `SaveError::Rules`
 (`other_assets_or_settings_are_refused`: other hit points in the unit table, another collision
 setting, another seed; `other_ore_money_or_repair_numbers_are_other_rules`: another ore start
 amount, another `credits_per_ore`, another sale time; `other_combat_rules_are_refused`: another

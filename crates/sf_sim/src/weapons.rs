@@ -474,8 +474,11 @@ impl WeaponTable {
 
     /// The digest for the rules digest of a save (`World::rules_digest`). Destructured without
     /// `..`: a new field of the table fails to compile until it is placed here. The three parts
-    /// are all in [`WeaponTable::digest`] (`digest_of` destructures each weapon and loadout, the
-    /// armor table its own digest).
+    /// are all in the stored [`WeaponTable::digest`] (`digest_of` destructures each weapon and
+    /// loadout and hashes the armor table's stored digest); that stored value is what is returned,
+    /// nothing is recomputed. Debug builds check that the armor table's `rules_digest` works out
+    /// its stored digest again; `every_weapon_loadout_and_armor_field_is_in_the_rules_digest`
+    /// pins that every field changes the digest.
     pub(crate) fn rules_digest(&self) -> u64 {
         let WeaponTable {
             weapons: _,

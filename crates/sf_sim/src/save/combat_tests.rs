@@ -1031,6 +1031,89 @@ fn combat_state_at_its_bounds_restores_and_steps() {
     }
 }
 
+/// A tally counter at `u32::MAX` stays there when one more death comes in (fix round 0 of
+/// WP13.1c-1): the tally saturates, in a debug and in a release build alike. The battle has no
+/// assists, so losses and kills are what this case reaches.
+#[test]
+fn a_tally_at_its_most_saturates_on_one_more_death() {
+    let has_credit = |w: &World| {
+        let mut next = w.clone();
+        next.step();
+        next.destruction.deaths.iter().any(|d| d.killer.is_some())
+    };
+    let mut w = battle_until(0, has_credit);
+    let mut next = w.clone();
+    next.step();
+    let mut players: Vec<PlayerId> = Vec::new();
+    for d in &next.destruction.deaths {
+        players.push(d.owner);
+        players.extend(d.killer.map(|k| k.owner));
+        players.extend(d.assists.iter().map(|a| a.owner));
+    }
+    players.sort_unstable();
+    players.dedup();
+    let most = Tally {
+        kills: u32::MAX,
+        assists: u32::MAX,
+        losses: u32::MAX,
+    };
+    w.destruction.tally = players.iter().map(|&p| (p, most)).collect();
+    w.step();
+    assert!(!w.destruction.deaths.is_empty());
+    for (player, t) in &w.destruction.tally {
+        if players.contains(player) {
+            assert_eq!(*t, most, "player {player:?}");
+        }
+    }
+}
+
+/// Two structures and more fall on the tick a route is being planned (fix round 0 of WP13.1c-1):
+/// the job is as many epochs behind as fell, at least two, and the save restores and runs on.
+#[test]
+fn a_job_two_epochs_behind_restores_and_runs_on() {
+    let mut w = battle_until(0, |w| {
+        let mut next = w.clone();
+        next.step();
+        next.save_contents().job_behind
+    });
+    let standing: Vec<usize> = live(&w)
+        .filter(|&i| {
+            w.units.at(w.entities.def[i] as usize).class() == crate::units::UnitClass::Structure
+                && w.entities.hp[i] > 0
+        })
+        .take(2)
+        .collect();
+    assert_eq!(standing.len(), 2, "two structures standing");
+    for i in standing {
+        w.entities.hp[i] = 0;
+    }
+    w.step();
+    let fallen = w.destruction.rubble_born(Tick(w.tick.0 - 1));
+    assert!(fallen >= 2, "fell {fallen}");
+    assert_eq!(w.pathing.job_lag(), Some(fallen));
+    let mut straight = w.clone();
+    let mut back = World::restore(fresh(), &w.save().unwrap()).unwrap();
+    assert_eq!(back.pathing.job_lag(), Some(fallen));
+    for _ in 0..120 {
+        assert_eq!(back.step().checksum, straight.step().checksum);
+    }
+    // One rubble of the last tick forgotten: the job is still behind, but by one more than fell.
+    let last = Tick(w.tick.0 - 1);
+    let k = w
+        .destruction
+        .wrecks
+        .iter()
+        .position(|r| r.kind == WreckKind::Rubble && r.born == last)
+        .unwrap();
+    w.destruction.wrecks.remove(k);
+    assert_eq!(
+        World::restore(fresh(), &w.save().unwrap()),
+        Err(SaveError::Corrupt(
+            "a job of another epoch than the path service"
+        ))
+    );
+}
+
 /// Saved on a tick a structure fell while a route was being planned: the job is behind the
 /// service's epoch by the structures that fell. It restores without its memory being judged (the
 /// next service replans it unread) and the run goes on like the original; one epoch more or less

@@ -603,6 +603,14 @@ impl Pathing {
         self.job.is_some()
     }
 
+    /// How many epochs the job in flight is behind the service (save tests).
+    #[cfg(test)]
+    pub(crate) fn job_lag(&self) -> Option<u32> {
+        self.job
+            .as_ref()
+            .map(|j| self.epoch.wrapping_sub(j.epoch()))
+    }
+
     /// Whether the job in flight is of an earlier epoch than the service: structures were
     /// destroyed after the service ran ([`crate::save::SaveContents`]).
     pub(crate) fn job_behind(&self) -> bool {
