@@ -45,6 +45,16 @@ impl Ai {
         }
     }
 
+    /// Its state, taken out (for [`Ai::restore`](crate::Ai::restore)).
+    pub(crate) fn into_state(self) -> AiState {
+        self.state
+    }
+
+    /// An AI around a restored state.
+    pub(crate) fn from_state(state: AiState) -> Ai {
+        Ai { state }
+    }
+
     /// The player it plays.
     pub fn player(&self) -> PlayerId {
         self.state.player
