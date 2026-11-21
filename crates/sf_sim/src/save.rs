@@ -1335,7 +1335,9 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
 
 /// Refuses kills of live entities that add up, per player, to more than the player's tally: each
 /// kill is counted in both (`World::reap`), and only a death or a new entity in the slot clears the
-/// entity's count. A tally at its maximum (saturated) is not compared.
+/// entity's count. A tally at its maximum (saturated) is not compared. Assumes an entity never
+/// changes owner: its kills are summed under its owner now, the player whose tally counted them
+/// (nothing changes an owner today; a rule that does must move or clear the kills).
 fn check_kills(world: &World) -> SaveResult<()> {
     let e = &world.entities;
     let mut sums: BTreeMap<PlayerId, u64> = BTreeMap::new();

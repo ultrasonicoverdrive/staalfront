@@ -485,6 +485,9 @@ fn a_wrong_header_is_refused() {
     let mut bad = bytes.clone();
     bad[4] = 1;
     assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Version(1)));
+    // The version before WP13.1c-1 (no combat sections).
+    bad[4] = 2;
+    assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Version(2)));
     let mut bad = bytes.clone();
     bad[9] ^= 0x40;
     assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Rules));

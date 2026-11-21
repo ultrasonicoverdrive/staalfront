@@ -312,8 +312,16 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   Shown by `a_job_behind_the_service_restores_and_replans` (the battle of `combat_tests.rs` saved on
   a tick a structure fell while a route was planned; restored, it runs 120 ticks with the same
   checksums as the original; the service's epoch one more, or the rubble of that tick taken away,
-  is refused) and by `the_battle_restores_after_every_tick`, which saves after every tick and holds a
-  job behind the service at two save ticks.
+  is refused), by `a_job_two_epochs_behind_restores_and_runs_on` (two structures and more fall on
+  that tick, so the job is K >= 2 epochs behind; it restores with K and runs on equal, and one
+  rubble of the tick forgotten is refused) and by `the_battle_restores_after_every_tick`, which
+  saves after every tick and holds a job behind the service at two save ticks.
+  **Why the skip stays without a test that needs it** (fix round 0 of WP13.1c-1): no case was found
+  in which a lagging job's memory fails the rebuilt graph (with the skip removed every test still
+  passes, also with every structure of the battle falling on that tick). It is kept because nothing
+  ties the old memory to the new graph: a structure that falls opens cells, and the portals of the
+  sectors it stood in are made again, so a portal the memory names may not exist on the rebuilt
+  graph; judging that memory could refuse a save the game wrote, and the job never reads it.
 * **Search memory** (the local, abstract and corridor searches, the field builder): arrays of
   another size than the map gives, a heap element out of range, in twice or out of heap order, a
   local parent outside the window or a parent chain that goes round, a local heap element never
@@ -417,7 +425,10 @@ tick (the writers are named), and each check has a case in `every_impossible_com
 * **Kills** ("kills without a weapon or destruction"; "more kills than the tally"). Kills only on an
   armed entity of a world with destruction; per player the kills of the live entities add up to at
   most the player's tally of kills (each kill counts in both, `reap`; a death or a new entity in the
-  slot clears the entity's count). A tally at `u32::MAX` is not compared (it saturates).
+  slot clears the entity's count). A tally at `u32::MAX` is not compared (it saturates). The check
+  assumes **an entity never changes owner**: its kills are summed under its owner now, which is the
+  player whose tally counted them. Nothing in the simulation changes an owner today; a rule that
+  does (capture) must move or clear the kills with it, or this check refuses a real save.
 * **Projectiles** ("a projectile the weapon stage never leaves in flight", `projectiles::reachable`;
   writers `launch`, `fly` and the `fly_*` functions, `Projectiles::insert`/`remove`). The weapon is
   in the table and launches one (not instant); a point target only for a guided one (it gives its
@@ -445,8 +456,12 @@ tick (the writers are named), and each check has a case in `every_impossible_com
   players strictly ascending, no tally of all zero (`tally_of` adds one only to count something).
 * **Epoch**: see *Epoch* above.
 
-Saturating now (WP13.1c-1): the tally counters (`kills`, `assists`, `losses`, were `+= 1`). Below
-their maximum the numbers are the same, so no checksum moves; a restored tally at `u32::MAX`
+Saturating now (WP13.1c-1, a behaviour change in sf_sim, R7): the tally counters (`kills`,
+`assists`, `losses`, were `+= 1`). Reason: with `+= 1` a restored tally at `u32::MAX` panics in a
+debug build and wraps to 0 in a release build, so the two builds would differ; a saturated counter
+is the same in both. A real game never gets there (four billion deaths). Below
+their maximum the numbers are the same, so no checksum moves (`a_tally_at_its_most_saturates_on_one_more_death`
+pins it, in a release build too); a restored tally at `u32::MAX`
 steps on (`combat_state_at_its_bounds_restores_and_steps`, which also restores every new bound at
 its value: a burst at its delay, a reload at its tail, a cooldown at the setting, `rest` one below
 `pursuit_reset`, kills at `u16::MAX`, an arc at its peak with its launch fuse, a guided missile as
