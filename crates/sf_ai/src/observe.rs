@@ -34,8 +34,12 @@ use sf_sim::{
     exit_cell,
 };
 
+use sf_math::bytes::{ByteReader, ByteWriter};
+use sf_sim::save::SaveError;
+
 use crate::ai::Ai;
-use crate::state::Known;
+use crate::save::SaveBounds;
+use crate::state::{AiState, Known};
 
 /// One entity of the player's own.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -420,6 +424,42 @@ impl Ai {
         let obs = Observation::build(world, self.player(), &self.state().known_structures);
         let mut lens = Lens::new(world, self.player());
         self.think_with(&obs, &mut lens, out);
+    }
+}
+
+impl SaveBounds {
+    /// What `world` allows a restored AI state to hold: its tick, map, entity slots and unit kinds.
+    pub fn of(world: &World) -> SaveBounds {
+        let mut kinds: Vec<Kind> = world.unit_table().iter().map(|s| s.kind).collect();
+        kinds.sort();
+        kinds.dedup();
+        SaveBounds {
+            tick: world.tick(),
+            map: world.map_size(),
+            slots: u32::try_from(world.slot_count()).unwrap_or(u32::MAX),
+            kinds,
+        }
+    }
+}
+
+impl Ai {
+    /// The AI's state as the bytes of one section ([`AiState::save`]). The host (WP13.1e) puts them in the
+    /// save file next to the world's; the profile goes in as its digest only.
+    pub fn save(&self) -> Result<Vec<u8>, SaveError> {
+        let mut w = ByteWriter::new();
+        self.state().save(&mut w)?;
+        Ok(w.finish())
+    }
+
+    /// The AI saved in `bytes`, restored onto `fresh` (the AI the host made for the same player, profile, seed
+    /// and start sites, as for a new match) next to `world`, the world restored from the same save: its tick,
+    /// map, slots and unit table bound what the state may hold. See [`AiState::restore`]; trailing bytes are
+    /// [`SaveError::Corrupt`].
+    pub fn restore(fresh: Ai, bytes: &[u8], world: &World) -> Result<Ai, SaveError> {
+        let mut r = ByteReader::new(bytes);
+        let state = AiState::restore(fresh.into_state(), &mut r, &SaveBounds::of(world))?;
+        r.end()?;
+        Ok(Ai::from_state(state))
     }
 }
 

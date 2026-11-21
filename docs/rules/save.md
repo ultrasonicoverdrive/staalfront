@@ -107,8 +107,8 @@ rule set a world that saves may have: the ore (its rules and the start amount of
 through the ore fingerprint, which at `version == 0` is the start), the money rules
 (`credits_per_ore`) and the repair and sale rules (all four numbers). Of the other optional rule
 sets (harvest, production, power, vision, match) only whether the world has them is hashed: a world
-with any of them does not save yet, and their numbers join in WP13.1c-2; the AI profile digests join
-in WP13.1d. The weapon table enters through `WeaponTable::rules_digest`, which destructures the
+with any of them does not save yet, and their numbers join in WP13.1c-2; the AI profile digests are
+checked by each AI part on its own (WP13.1d, "The AI" below). The weapon table enters through `WeaponTable::rules_digest`, which destructures the
 table without `..` and returns its stored digest (nothing is recomputed on save or restore); that
 digest is made by `digest_of` when the table is built, which destructures every weapon and loadout
 and hashes the armor table's stored digest (the bytes are the ones the checksum always hashed, so no
@@ -528,6 +528,94 @@ uninterrupted run.
 * Per-tick checksums after a restore equal an uninterrupted run
   (`a_restored_world_continues_like_the_original`, saves after 1, 7, 33 and 97 ticks, with and
   without the crowd pass).
+
+## The AI (WP13.1d)
+
+The state of a computer player (`sf_ai::AiState`) lives outside the world and is saved apart from it:
+`crates/sf_ai/src/save.rs`, tests in `tools/sf_headless/tests/save_ai.rs`. The host (WP13.1e) puts one
+such part per AI into the save file next to the world's.
+
+```rust
+Ai::save(&self) -> Result<Vec<u8>, SaveError>
+Ai::restore(fresh: Ai, bytes: &[u8], world: &World) -> Result<Ai, SaveError>
+// the same one level down, on a writer and a reader:
+AiState::save(&self, w: &mut ByteWriter) -> Result<(), SaveError>
+AiState::restore(fresh: AiState, r: &mut ByteReader, bounds: &SaveBounds) -> Result<AiState, SaveError>
+```
+
+`fresh` is the AI the host makes for the same player, profile and start sites as for a new match; its seed
+does not matter, because the random stream is restored from the bytes
+(`Scenario::ais`, `sf_ai::match_ais`); `world` is the world restored from the same save. `SaveBounds::of(world)`
+(in `observe.rs`, the one file that names the world) takes the world's tick, map size, entity slot count and
+unit-table kinds. The error type is the world's `SaveError`.
+
+Format: one section, tag `A`, a `u32` length, then the AI format version (`u32`, now **1**), the profile
+digest (`Profile::digest`, `u64`), the player, the start sites, and then every field of the state in
+declaration order (options as a flag byte and the value; maps and lists as a count and the entries, maps in
+key order; kinds as `u16`, cells as two `u32`, ids as index and generation, ticks as `u64`). Posture tags
+0 gather, 1 attack, 2 defend; group role 0 strike; group stages 0 staging, 1 advancing, 2 engaged, 3
+returning (the digest's numbers).
+
+| Field | Saved | Why |
+|---|---|---|
+| `profile` | digest only | rules: another profile is `SaveError::Rules` |
+| `player`, `start_sites` | written, compared | the match hands them over: another one is `SaveError::Rules` |
+| `manager_runs` | no (`_`) | derived: one manager per think in rotation, rebuilt from `thinks` |
+| every other field (42) | yes | the AI's memory |
+
+Restore refuses, besides `Truncated`, a wrong tag and trailing bytes:
+
+* `NotFresh`: `fresh` differs from a new state of its player, profile and start sites in anything but its
+  random stream (it has thought, or holds a memory). `Version(n)`: another AI format version.
+* `Corrupt` with its own message for: an entity id whose slot index is not below the world's slot count; a
+  cell (gather cell, anchors, goals, staging cells, threat cell, refused places, seen cells) outside the
+  map, or a structure seen that does not fit it or has a zero side; a kind not in the world's unit table;
+  an even random-stream increment; more thinks than the world has run ticks, a last think that disagrees
+  with the number of thinks or is not before the world's tick; a structure seen of the AI's own player; any
+  tick of something that happened (seen, sent, hit, launched, staged, peak, bounce) after the last think; a
+  backoff or block (`blocked_until`, `refused`, `repair_backoff`, `rally_backoff`, `rescue_after`) later
+  than the last think plus `blocked_ticks` (every one of them is set that way); more than `REFUSED_CAP`
+  refused places; maps or id lists not strictly ascending (a key twice would merge); unit orders not
+  strictly ascending by factory; the scout past its last waypoint (the other start sites plus four); more
+  scouts sent than `max(scouts_max, 1)`; more than `GROUPS_MAX` groups, groups not ascending by id, a group
+  id not below `next_group`, a merge into itself or into an id never given out, a unit in two groups, a
+  recalled or closing unit that is not a member of its group; a
+  jitter outside plus or minus `timing_jitter_permille`; a cleared site that is not another player's start
+  site; a tally with the counter mix off, a bounce ledger with the escalation off, harvesters seen with the
+  harvester threat off; an unknown posture, group role or stage.
+
+Dead entities: the AI keeps the ids of structures and units it has seen and drops them at its next look, so
+a remembered id may name a dead entity or a reused slot. Restore keeps them as they are
+(`a_dead_entity_the_ai_remembers_is_kept_as_the_live_ai_keeps_it` proves the round trip of such a state;
+that the run then goes on as before is shown by the continue-equals runs, whose save points include such
+states). Known gap: the generation of a remembered id is not checked against its slot (the world has no
+public accessor for a slot's generation, and this WP does not change `sf_sim`); a generation higher than
+the slot's would be a future id. A recycled slot (an id with the same index as a live entity and an older
+generation) is restored unchanged and is not tested on its own. The
+counters the live AI never bounds (`previews`, `full_turns`, `stalled_turns`, `attacks_launched`,
+`launch_value`, `bounce_value`, the per-unit order counts, the resumption skips) are not bounded either.
+
+Bounds left for WP13.1h (looser than the live AI may keep, but not proven from the AI code, so not checked
+now; a check a real save could fail is worse than a loose one): `thinks` against the number of ticks
+`think_interval` allows (the host, not the AI, decides when it thinks); `last_think` against
+`schedule::due`; the order, uniqueness and single tick of `sales`; `merge_into` naming a group that still
+exists (the strike may be dissolved before its reinforcements notice).
+
+Save point: the AI state is saved at a tick after the arrivals of that tick are scheduled and before the
+AIs think, that is right before the AIs think ahead of `World::step` (`sf_game` `sim_thread.rs`). The
+headless runner's `run_hooked` puts its hook there.
+
+Guard 1: `AiState::save` destructures `AiState` (and `Known`, `Group`, `Directive`) without `..`. A field
+added by a later phase-9 work package is a compile error there until it is saved or named as derived
+(shown: a field `probe: u8` gives `error[E0027]: pattern does not mention field `probe``).
+
+Tests (`save_ai.rs`): every 97 ticks of the 15 AI scenarios of CI each AI round-trips by `PartialEq` and
+resaves byte-equal, with a wave forming, an order in flight, an attack under way, a defence and scouting
+memory among the saved states; continue-equals (the AI digest after every tick, the AI commands and the
+final world checksum equal the uninterrupted run) with every AI restored every 97 ticks in all 15, at every
+tick of `ai_raid`, at the single ticks 101, 1009, 2503 and 4001 of `ai_raid`, and at other spacings of
+`ai_raid_guard` and `ai_bounce`; every check above with the value at its bound passing and one past it
+refused with its message. The world is not saved in these tests (WP13.1c is not done): it runs on.
 
 ## The test world
 
