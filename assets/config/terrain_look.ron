@@ -31,8 +31,8 @@
         wobble_m: 0.7,
         // Colour (linear 0..1) and strength of the light band along a shore,
         // where a `liquid` type meets another type.
-        shore: (0.80, 0.93, 0.96),
-        shore_amount: 0.40,
+        shore: (0.34, 0.42, 0.40),
+        shore_amount: 0.30,
     ),
     // How much ore a cell holds (WP7.1, docs/rules/economy.md): a cell of the `terrain` type
     // below is drawn from the first level whose `up_to_percent` is at least its fill (percent
@@ -44,54 +44,54 @@
     resource: (
         terrain: "ore",
         levels: [
-            (up_to_percent: 0, color: (84, 64, 44), flecks_percent: 0, minimap: (84, 64, 44)),
-            (up_to_percent: 33, color: (90, 63, 38), flecks_percent: 30, minimap: (104, 76, 40)),
-            (up_to_percent: 66, color: (94, 65, 36), flecks_percent: 65, minimap: (122, 88, 40)),
-            (up_to_percent: 100, color: (98, 66, 34), flecks_percent: 100, minimap: (138, 100, 39)),
+            (up_to_percent: 0, color: (56, 36, 28), flecks_percent: 0, minimap: (53, 34, 26)),
+            (up_to_percent: 33, color: (82, 53, 37), flecks_percent: 30, minimap: (82, 53, 36)),
+            (up_to_percent: 66, color: (93, 58, 38), flecks_percent: 65, minimap: (104, 64, 40)),
+            (up_to_percent: 100, color: (98, 59, 38), flecks_percent: 100, minimap: (120, 77, 45)),
         ],
     ),
     looks: [
         (
             terrain: "grass",
-            color: (82, 138, 54),
-            contrast: 0.30,
+            color: (81, 84, 27),
+            contrast: 0.14,
             pattern: Noise,
         ),
         (
             // Packed earth: light tan, clearly apart from the grey rock.
             terrain: "road",
-            color: (206, 184, 132),
-            contrast: 0.16,
+            color: (180, 146, 92),
+            contrast: 0.12,
             pattern: Noise,
         ),
         (
             // Drawn flat (no hill shading, the river bed's slope does not show)
             // with a light line along the shore.
             terrain: "water",
-            color: (40, 108, 164),
-            contrast: 0.14,
+            color: (48, 92, 90),
+            contrast: 0.12,
             pattern: Ripples,
             flat: true,
             liquid: true,
         ),
         (
             terrain: "rock",
-            color: (132, 128, 124),
-            contrast: 0.38,
+            color: (146, 142, 136),
+            contrast: 0.30,
             pattern: Cracks,
         ),
         (
             terrain: "ore",
-            color: (98, 66, 34),
-            contrast: 0.22,
-            pattern: Flecks(color: (244, 190, 52)),
+            color: (98, 59, 38),
+            contrast: 0.18,
+            pattern: Flecks(color: (226, 138, 66)),
             // The mean of the texture: the flecks make ore read gold-brown.
-            minimap: (138, 100, 39),
+            minimap: (130, 76, 44),
         ),
         (
             // A deck: flat, with planks across the tile.
             terrain: "bridge",
-            color: (202, 142, 76),
+            color: (70, 34, 26),
             contrast: 0.10,
             pattern: Planks(count: 8),
             flat: true,

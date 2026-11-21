@@ -115,15 +115,22 @@ fn the_looks_say_what_the_types_are() {
         mean("ore"),
         mean("bridge"),
     );
-    assert!(grass[1] > grass[0] && grass[1] > grass[2], "grass is green");
+    // WP11.6e: the muted look. Grass is dark olive (green leads, red close behind, blue far
+    // behind), water a dark grey-teal (it can no longer be "blue" the way the bright water was:
+    // that rule was `b > r + 40`; the teal that keeps Veyran grey-blue readable on it has
+    // `b > r + 25` and a green as strong as its blue), ore warm, the bridge a dark weathered timber.
     assert!(
-        water[2] > water[0] + 40.0 && water[2] > water[1],
-        "water is blue"
+        grass[1] >= grass[0] && grass[1] > grass[2] + 40.0,
+        "grass is olive green"
+    );
+    assert!(
+        water[2] > water[0] + 25.0 && water[1] >= water[2] - 5.0 && water[2] >= water[1] - 5.0,
+        "water is a blue-green: {water:?}"
     );
     assert!(ore[0] > ore[2] + 30.0, "ore is warm");
-    assert!(bridge[0] > bridge[2] + 30.0, "a bridge is wood");
+    assert!(bridge[0] > bridge[2] + 20.0, "a bridge is wood");
     let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    // Packed earth: a light tan, lighter and much warmer than the grey rock.
+    // Packed dry earth: a warm tan, lighter than the ground around it and much warmer than the rock.
     assert!(lum(road) > lum(rock), "the road is lighter than the rock");
     assert!(
         road[0] > road[2] + 50.0,
@@ -364,13 +371,22 @@ fn the_minimap_colours_say_what_the_types_are() {
     );
     let spread = |c: [i32; 3]| c.iter().max().unwrap() - c.iter().min().unwrap();
     let sum = |c: [i32; 3]| c.iter().sum::<i32>();
+    // Luminance, in tenths (a plain sum would call a warm tan darker than a light grey).
+    let lum = |c: [i32; 3]| 2126 * c[0] + 7152 * c[1] + 722 * c[2];
+    // WP11.6e: these rules were written for the bright palette. Muted colours cannot keep every
+    // old margin, so each is restated as what the muted type still has to say, and the ones that
+    // went are listed here: grass `g > r + 30` (olive: g is only level with r, b is far under),
+    // water `b > r + 60` and `b > g + 30` (a grey-teal), the road `sum > rock + 100` (the rock
+    // is a light grey now, the road a warmer, yellower tan: the road stays the lighter by
+    // luminance, no longer by 100 in the sum), the bridge `r > 160` and `r > b + 80` (a dark
+    // weathered timber), and `road[2] > bridge[2] + 30` (the road is still paler: below).
     assert!(
-        grass[1] > grass[0] + 30 && grass[1] > grass[2] + 30,
-        "grass is green: {grass:?}"
+        grass[1] >= grass[0] && grass[1] > grass[2] + 40,
+        "grass is olive green: {grass:?}"
     );
     assert!(
-        water[2] > water[0] + 60 && water[2] > water[1] + 30,
-        "water is blue: {water:?}"
+        water[2] > water[0] + 25 && (water[2] - water[1]).abs() <= 8,
+        "water is a blue-green: {water:?}"
     );
     assert!(
         spread(rock) <= 20 && (90..=170).contains(&rock[1]),
@@ -382,15 +398,57 @@ fn the_minimap_colours_say_what_the_types_are() {
     );
     assert!(sum(ore) < sum(road), "ore is darker than the road: {ore:?}");
     assert!(
-        road[0] > road[2] + 50 && sum(road) > sum(rock) + 100,
-        "the road is light tan: {road:?}"
+        road[0] > road[2] + 50 && lum(road) > lum(rock),
+        "the road is a warm tan, lighter than the rock: {road:?}"
     );
     assert!(
-        bridge[0] > bridge[2] + 80 && bridge[0] > 160,
-        "the bridge is light wood: {bridge:?}"
+        bridge[0] > bridge[2] + 20 && sum(bridge) < sum(ore),
+        "the bridge is dark timber, darker than the ore: {bridge:?}"
     );
     assert!(
-        road[2] > bridge[2] + 30,
-        "the road is paler than the wood: {road:?} {bridge:?}"
+        sum(road) > sum(bridge) + 200,
+        "the road is much paler than the wood: {road:?} {bridge:?}"
     );
+}
+
+/// WP11.6e: the shipped muted look, written out. Changing `terrain_look.ron` means changing this
+/// on purpose (and `tests/terrain_readability.rs`, which measures the same data as rendered).
+/// Each row: type, colour, contrast, minimap override, flat, liquid.
+#[test]
+fn the_shipped_terrain_colours_are_pinned() {
+    let (_, looks) = shipped();
+    #[allow(clippy::type_complexity)]
+    let want: [(&str, [u8; 3], f32, Option<[u8; 3]>, bool, bool); 6] = [
+        ("grass", [81, 84, 27], 0.14, None, false, false),
+        ("road", [180, 146, 92], 0.12, None, false, false),
+        ("water", [48, 92, 90], 0.12, None, true, true),
+        ("rock", [146, 142, 136], 0.30, None, false, false),
+        ("ore", [98, 59, 38], 0.18, Some([130, 76, 44]), false, false),
+        ("bridge", [70, 34, 26], 0.10, None, true, false),
+    ];
+    for (name, color, contrast, minimap, flat, liquid) in want {
+        let l = looks
+            .get(name)
+            .unwrap_or_else(|| panic!("no look for {name}"));
+        assert_eq!(l.color, color, "{name} colour");
+        assert_eq!(l.contrast, contrast, "{name} contrast");
+        assert_eq!(l.minimap, minimap, "{name} minimap");
+        assert_eq!((l.flat, l.liquid), (flat, liquid), "{name} style");
+    }
+    assert_eq!(
+        looks.get("ore").unwrap().pattern,
+        Pattern::Flecks {
+            color: [226, 138, 66]
+        }
+    );
+    assert_eq!(
+        looks.get("bridge").unwrap().pattern,
+        Pattern::Planks { count: 8 }
+    );
+    let e = looks.edge;
+    assert_eq!((e.ramp_m, e.wobble_m), (2.0, 0.7));
+    assert_eq!((e.shore, e.shore_amount), ([0.34, 0.42, 0.40], 0.30));
+    assert_eq!(looks.get("grass").unwrap().pattern, Pattern::Noise);
+    assert_eq!(looks.get("water").unwrap().pattern, Pattern::Ripples);
+    assert_eq!(looks.get("rock").unwrap().pattern, Pattern::Cracks);
 }

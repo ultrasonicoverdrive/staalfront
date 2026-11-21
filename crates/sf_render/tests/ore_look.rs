@@ -33,10 +33,10 @@ fn the_shipped_levels_are_pinned() {
     assert_eq!(
         got,
         vec![
-            (0, [84, 64, 44], 0, [84, 64, 44]),
-            (33, [90, 63, 38], 30, [104, 76, 40]),
-            (66, [94, 65, 36], 65, [122, 88, 40]),
-            (100, [98, 66, 34], 100, [138, 100, 39]),
+            (0, [56, 36, 28], 0, [53, 34, 26]),
+            (33, [82, 53, 37], 30, [82, 53, 36]),
+            (66, [93, 58, 38], 65, [104, 64, 40]),
+            (100, [98, 59, 38], 100, [130, 76, 44]),
         ]
     );
 }
@@ -108,7 +108,9 @@ fn an_empty_cell_has_no_flecks() {
     let looks = looks();
     let look = looks.look_for("ore");
     let r = looks.resource().unwrap();
-    let bright = |tex: &[u8]| tex.chunks(4).filter(|p| p[0] > 200 && p[1] > 150).count();
+    // A fleck is the look's copper (226, 138, 66) blended in; the ground never gets past a red of
+    // about 130 (WP11.6e: the flecks are muted, so the old green threshold of 150 no longer fits).
+    let bright = |tex: &[u8]| tex.chunks(4).filter(|p| p[0] > 180 && p[1] > 110).count();
     let empty = bright(&look.level_texture(&r.levels[0]));
     let full = bright(&look.level_texture(&r.levels[3]));
     assert_eq!(empty, 0);
