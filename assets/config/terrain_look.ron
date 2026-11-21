@@ -47,7 +47,7 @@
             (up_to_percent: 0, color: (56, 36, 28), flecks_percent: 0, minimap: (53, 34, 26)),
             (up_to_percent: 33, color: (82, 53, 37), flecks_percent: 30, minimap: (82, 53, 36)),
             (up_to_percent: 66, color: (93, 58, 38), flecks_percent: 65, minimap: (104, 64, 40)),
-            (up_to_percent: 100, color: (98, 59, 38), flecks_percent: 100, minimap: (120, 77, 45)),
+            (up_to_percent: 100, color: (98, 59, 38), flecks_percent: 100, minimap: (130, 76, 44)),
         ],
     ),
     looks: [

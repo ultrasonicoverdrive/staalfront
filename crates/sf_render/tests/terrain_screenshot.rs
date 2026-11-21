@@ -235,14 +235,18 @@ fn check_cell_colours(map: &Map, img: &Rgba8, c: &Camera, seen: &mut [usize; 6])
             let p = img.pixel(px, py);
             let (r, g, b) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
             let ok = match name {
-                "grass" => g > r && g > b,
-                // Light tan packed earth: warm, and its green close to its red.
+                // WP11.6e: dark olive, green level with red (a shaded slope can tip it a few
+                // steps either way) and blue far behind.
+                "grass" => g + 6 >= r && g > b + 25,
+                // Packed dry earth: warm, and its green close to its red.
                 "road" => r > g && g > b && r - b > 30 && g * 10 > r * 8 && r >= 120,
-                "water" => b > r + 30 && b > g,
+                // A dark blue-green (the bright water was `b > r + 30 && b > g`).
+                "water" => b > r + 20 && (b - g).abs() <= 10,
                 "rock" => (r - b).abs() < 30 && r >= 90,
                 "ore" => r > g && g > b && r - b > 30,
-                // Wood: warm, its green well below its red.
-                "bridge" => r > g && g > b && r > 120 && g * 10 < r * 8,
+                // Dark weathered timber: warm, its green well below its red (it was a light
+                // wood with `r > 120`).
+                "bridge" => r > g && g > b && r - b > 20 && r >= 40 && g * 10 < r * 8,
                 _ => unreachable!(),
             };
             assert!(ok, "{name} at cell ({cx},{cz}) looks like {p:?}");
