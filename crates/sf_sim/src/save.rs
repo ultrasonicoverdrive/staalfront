@@ -15,14 +15,16 @@
 //! * Sections, each a tag byte and a `u32` length: `W` the world scalars, `E` the entities (with
 //!   the weapon slots, the engagement memory and the kills, WP13.1c-1), `Q` the command queue, `X`
 //!   the projectiles and `D` the wrecks and the tally (WP13.1c-1), `P` the path service (WP13.1b),
-//!   `F` the flowfields, `M` the formations, in that order.
+//!   `F` the flowfields, `M` the formations, then (WP13.1c-2) `O` the ore, `H` the harvesters,
+//!   docks and stores, `C` the money spent, `U` the factories and `I` the power totals, in that
+//!   order. The construction state (`build_left`) is a column of `E`.
 //!
 //! # Not yet saved
 //!
-//! Buildings (construction), economy, production, power, repair, vision and outcome come in
-//! WP13.1c-2; until then [`World::save`] refuses, with [`SaveError::Unsupported`] naming the
-//! section, any world in which one of them holds something that is not its tick-0 state; the exact
-//! test per section is in `docs/rules/save.md`. A world that saves therefore restores whole.
+//! Repair and sale, vision and the match outcome come in WP13.1c-3; until then [`World::save`]
+//! refuses, with [`SaveError::Unsupported`] naming the section, any world in which one of them
+//! holds something that is not its tick-0 state; the exact test per section is in
+//! `docs/rules/save.md`. A world that saves therefore restores whole.
 //!
 //! # Guards
 //!
@@ -54,7 +56,7 @@ pub const MAGIC: [u8; 4] = *b"SFSV";
 
 /// The layout of the bytes after the magic. Raised whenever that layout changes; an older save is
 /// refused with [`SaveError::Version`] (no migration yet).
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 const SECTION_WORLD: u8 = b'W';
 const SECTION_ENTITIES: u8 = b'E';
@@ -64,9 +66,16 @@ const SECTION_DESTRUCTION: u8 = b'D';
 const SECTION_PATHING: u8 = b'P';
 const SECTION_FIELDS: u8 = b'F';
 const SECTION_FORMATIONS: u8 = b'M';
+const SECTION_ORE: u8 = b'O';
+const SECTION_HARVEST: u8 = b'H';
+const SECTION_MONEY: u8 = b'C';
+const SECTION_PRODUCTION: u8 = b'U';
+const SECTION_POWER: u8 = b'I';
 /// The sections of this format, in file order. `D` comes before `P`: the path service's restore
-/// check of the job's epoch counts the rubble of the last tick (WP13.1c-1).
-const SECTIONS: [u8; 8] = [
+/// check of the job's epoch counts the rubble of the last tick (WP13.1c-1). `O` comes before `H`:
+/// a harvester's claimed cell must be an ore field. The sections of a rule set the world does not
+/// have are empty (the rules digest says which it has).
+const SECTIONS: [u8; 13] = [
     SECTION_WORLD,
     SECTION_ENTITIES,
     SECTION_QUEUE,
@@ -75,6 +84,11 @@ const SECTIONS: [u8; 8] = [
     SECTION_PATHING,
     SECTION_FIELDS,
     SECTION_FORMATIONS,
+    SECTION_ORE,
+    SECTION_HARVEST,
+    SECTION_MONEY,
+    SECTION_PRODUCTION,
+    SECTION_POWER,
 ];
 
 /// What a world holds of the sections WP13.1b saves: for tests that save in the middle of a run
@@ -121,6 +135,56 @@ pub struct SaveContents {
     /// The job in flight is behind the path service's epoch (a structure was destroyed after the
     /// service ran).
     pub job_behind: bool,
+    /// The ore changed since the start (WP13.1c-2).
+    pub ore_changed: bool,
+    /// Harvesters the harvest stage has registered.
+    pub harvesters: u32,
+    /// Harvesters driving to ore or mining.
+    pub harvesting: u32,
+    /// Harvesters driving to a refinery, called, queued or granted.
+    pub returning: u32,
+    /// Harvesters in a bay, being unloaded.
+    pub unloading: u32,
+    /// Harvesters parked or waiting for a refinery.
+    pub harvest_waiting: u32,
+    /// Harvesters with a load.
+    pub carrying: u32,
+    /// Harvesters in a dock queue.
+    pub dock_queued: u32,
+    /// Messages in dock inboxes.
+    pub dock_inbox: u32,
+    /// Dock bays granted and not yet reached.
+    pub bay_reserved: u32,
+    /// Some player has had ore delivered.
+    pub delivered: bool,
+    /// Some player has something in store.
+    pub stored: bool,
+    /// Some player has spent money.
+    pub spent: bool,
+    /// Structures under construction.
+    pub constructing: u32,
+    /// Factory records.
+    pub factories: u32,
+    /// Factories whose front item has progress.
+    pub producing: u32,
+    /// Factories whose queue is at its limit.
+    pub queue_full: u32,
+    /// Factories with a rally point.
+    pub rallies: u32,
+    /// Factories that repeat.
+    pub repeating: u32,
+    /// Factories with a free unit queued.
+    pub free_items: u32,
+    /// Players with less power than they use (a speed below full).
+    pub power_low: u32,
+    /// Players whose defences have no power.
+    pub unpowered: u32,
+    /// Players with power totals.
+    pub power_players: u32,
+    /// The last step's reports of construction, placement and production are not empty
+    /// (completions, stalled builds, refused placements and production commands, units put out):
+    /// derived, not saved.
+    pub economy_reports: bool,
 }
 
 impl World {
@@ -186,7 +250,140 @@ impl World {
                 || !self.arsenal.attacks.is_empty()
                 || !self.arsenal.hurt.is_empty(),
             job_behind: self.pathing.job_behind(),
+            ..self.economy_contents()
         }
+    }
+
+    /// The part of [`SaveContents`] of WP13.1c-2 (the rest at its defaults).
+    fn economy_contents(&self) -> SaveContents {
+        let e = &self.entities;
+        let h = self
+            .harvest
+            .as_deref()
+            .map(|h| h.counts())
+            .unwrap_or_default();
+        let p = self.production.as_deref();
+        let limit = p.map_or(0, |p| usize::from(p.rules.queue_limit));
+        let factories = p.map_or(&[][..], |p| &p.factories[..]);
+        let count = |f: &dyn Fn(&crate::production::Factory) -> bool| {
+            factories.iter().filter(|x| f(x)).count() as u32
+        };
+        let players: Vec<PlayerId> = self
+            .power
+            .as_ref()
+            .map_or_else(Vec::new, |p| p.totals.iter().map(|&(q, _)| q).collect());
+        SaveContents {
+            ore_changed: self.ore.as_ref().is_some_and(|o| o.version() != 0),
+            harvesters: h.harvesters,
+            harvesting: h.harvesting,
+            returning: h.returning,
+            unloading: h.unloading,
+            harvest_waiting: h.waiting,
+            carrying: h.carrying,
+            dock_queued: h.queued,
+            dock_inbox: h.inbox,
+            bay_reserved: h.reserved,
+            delivered: h.delivered,
+            stored: h.stored,
+            spent: self
+                .money
+                .as_ref()
+                .is_some_and(|m| m.spent.iter().any(|&(_, n)| n > 0)),
+            constructing: (0..e.len())
+                .filter(|&i| e.alive[i] && e.build_left[i] > 0)
+                .count() as u32,
+            factories: factories.len() as u32,
+            producing: count(&|f| f.done > 0),
+            queue_full: count(&|f| f.items.len() >= limit),
+            rallies: count(&|f| f.rally.is_some()),
+            repeating: count(&|f| f.repeat),
+            free_items: count(&|f| f.items.iter().any(|i| i.free)),
+            power_low: players
+                .iter()
+                .filter(|&&q| self.power_speed_permille(q) < crate::production::FULL_SPEED_PERMILLE)
+                .count() as u32,
+            unpowered: players
+                .iter()
+                .filter(|&&q| !self.defences_powered(q))
+                .count() as u32,
+            power_players: players.len() as u32,
+            economy_reports: !self.completions.is_empty()
+                || !self.stalled.is_empty()
+                || !self.placement.rejections.is_empty()
+                || p.is_some_and(|p| !p.rejections.is_empty() || !p.produced.is_empty()),
+            ..SaveContents::default()
+        }
+    }
+
+    /// The saved fields of the sections of WP13.1c-2 that hold something other than their default
+    /// in this world, by name: the coverage record (a field no scenario ever saves non-default gets
+    /// a targeted round trip of its own, `docs/rules/save.md`).
+    #[doc(hidden)]
+    pub fn save_coverage(&self) -> Vec<&'static str> {
+        let mut out: Vec<&'static str> = Vec::new();
+        let add = |out: &mut Vec<&'static str>, name: &'static str, on: bool| {
+            if on && !out.contains(&name) {
+                out.push(name);
+            }
+        };
+        if let Some(o) = &self.ore {
+            add(
+                &mut out,
+                "ore.amount",
+                o.total() != o.rules().start as u64 * o.field_count() as u64,
+            );
+            add(&mut out, "ore.version", o.version() != 0);
+        }
+        if let Some(h) = self.harvest.as_deref() {
+            h.coverage(&mut out);
+        }
+        if let Some(m) = &self.money {
+            add(&mut out, "spent", m.spent.iter().any(|&(_, n)| n > 0));
+        }
+        let e = &self.entities;
+        add(
+            &mut out,
+            "build_left",
+            (0..e.len()).any(|i| e.alive[i] && e.build_left[i] > 0),
+        );
+        if let Some(p) = self.production.as_deref() {
+            for f in &p.factories {
+                add(&mut out, "factory", true);
+                add(&mut out, "factory.rally", f.rally.is_some());
+                add(&mut out, "factory.repeat", f.repeat);
+                add(&mut out, "factory.items", !f.items.is_empty());
+                add(
+                    &mut out,
+                    "factory.item.free",
+                    f.items.iter().any(|i| i.free),
+                );
+                add(&mut out, "factory.done", f.done > 0);
+                use crate::production::FactoryStatus as S;
+                let status = match f.status {
+                    S::Idle => "factory.status.idle",
+                    S::Building => "factory.status.building",
+                    S::WaitingForMoney => "factory.status.waiting_for_money",
+                    S::WaitingForExit => "factory.status.waiting_for_exit",
+                    S::MissingPrerequisite(_) => "factory.status.missing_prerequisite",
+                    S::Stopped => "factory.status.stopped",
+                    S::NotStanding => "factory.status.not_standing",
+                };
+                add(&mut out, status, true);
+            }
+        }
+        if let Some(p) = &self.power {
+            add(
+                &mut out,
+                "power.made",
+                p.totals.iter().any(|t| t.1.made > 0),
+            );
+            add(
+                &mut out,
+                "power.used",
+                p.totals.iter().any(|t| t.1.used > 0),
+            );
+        }
+        out
     }
 }
 
@@ -350,6 +547,32 @@ pub(crate) fn get_bools(r: &mut ByteReader<'_>) -> SaveResult<Vec<bool>> {
 
 // ---- primitives of the simulation ---------------------------------------------------------------
 
+/// Per-player totals, ascending by player (the money, store, delivery and power lists): a count,
+/// then each player and number.
+pub(crate) fn put_pairs(w: &mut ByteWriter, v: &[(PlayerId, u64)]) -> Result<(), ByteError> {
+    w.usize(v.len())?;
+    for &(player, n) in v {
+        w.u8(player.0);
+        w.u64(n);
+    }
+    Ok(())
+}
+
+/// Per-player totals; refused unless the players are strictly ascending (every such list is kept
+/// sorted for a binary search, and a player twice would split a total).
+pub(crate) fn get_pairs(r: &mut ByteReader<'_>) -> SaveResult<Vec<(PlayerId, u64)>> {
+    let n = r.count(9)?;
+    let mut v = Vec::with_capacity(n);
+    for _ in 0..n {
+        v.push((PlayerId(r.u8()?), r.u64()?));
+    }
+    ensure(
+        v.windows(2).all(|p| p[0].0 < p[1].0),
+        "player totals out of order",
+    )?;
+    Ok(v)
+}
+
 pub(crate) fn put_fx(w: &mut ByteWriter, v: Fx) {
     w.i64(v.raw());
 }
@@ -401,7 +624,7 @@ pub(crate) fn get_opt_id(r: &mut ByteReader<'_>) -> SaveResult<Option<EntityId>>
     Ok(if r.bool()? { Some(get_id(r)?) } else { None })
 }
 
-fn put_ids(w: &mut ByteWriter, ids: &[EntityId]) -> Result<(), ByteError> {
+pub(crate) fn put_ids(w: &mut ByteWriter, ids: &[EntityId]) -> Result<(), ByteError> {
     w.usize(ids.len())?;
     for &id in ids {
         put_id(w, id);
@@ -409,7 +632,7 @@ fn put_ids(w: &mut ByteWriter, ids: &[EntityId]) -> Result<(), ByteError> {
     Ok(())
 }
 
-fn get_ids(r: &mut ByteReader<'_>) -> SaveResult<Vec<EntityId>> {
+pub(crate) fn get_ids(r: &mut ByteReader<'_>) -> SaveResult<Vec<EntityId>> {
     let n = r.count(8)?;
     (0..n).map(|_| get_id(r)).collect()
 }
@@ -453,7 +676,7 @@ fn get_rng(r: &mut ByteReader<'_>) -> SaveResult<Rng> {
 }
 
 /// The tag of an order in the file. The same numbers as the checksum's (`Order::write_hash`).
-fn put_order(w: &mut ByteWriter, o: Order) {
+pub(crate) fn put_order(w: &mut ByteWriter, o: Order) {
     match o {
         Order::Idle => w.u8(0),
         Order::Move(p) => {
@@ -485,7 +708,7 @@ fn put_order(w: &mut ByteWriter, o: Order) {
     }
 }
 
-fn get_order(r: &mut ByteReader<'_>) -> SaveResult<Order> {
+pub(crate) fn get_order(r: &mut ByteReader<'_>) -> SaveResult<Order> {
     Ok(match r.u8()? {
         0 => Order::Idle,
         1 => Order::Move(get_vec2(r)?),
@@ -501,7 +724,7 @@ fn get_order(r: &mut ByteReader<'_>) -> SaveResult<Order> {
 }
 
 /// The point an order walks to, if it names one.
-fn order_point(o: Order) -> Option<Vec2> {
+pub(crate) fn order_point(o: Order) -> Option<Vec2> {
     match o {
         Order::Move(p) | Order::AttackMove(p) | Order::Guard(GuardTarget::Point(p)) => Some(p),
         _ => None,
@@ -916,9 +1139,6 @@ fn get_member(r: &mut ByteReader<'_>) -> SaveResult<Member> {
 /// that a freshly spawned (or freed) entity does not.
 fn check_unsaved_columns(e: &Entities) -> SaveResult<()> {
     for i in 0..e.len() {
-        if e.build_left[i] != 0 {
-            return Err(SaveError::Unsupported("buildings"));
-        }
         if e.repairing[i] || e.sell_left[i] != 0 {
             return Err(SaveError::Unsupported("repair"));
         }
@@ -1131,9 +1351,9 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         weapon,
         eng,
         kills,
-        // Gated (buildings, WP13.1c-2): zero.
-        build_left: _,
-        // Gated (repair, WP13.1c-2): false and zero.
+        // Saved (WP13.1c-2): the construction ticks left.
+        build_left,
+        // Gated (repair, WP13.1c-3): false and zero.
         repairing: _,
         sell_left: _,
     } = e;
@@ -1172,6 +1392,7 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         put_weapon(w, &weapon[i]);
         put_engage(w, &eng[i]);
         w.u16(kills[i]);
+        w.u32(build_left[i]);
     }
     Ok(())
 }
@@ -1329,6 +1550,20 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         {
             return Err(SaveError::Corrupt("kills without a weapon or destruction"));
         }
+        // Construction (WP13.1c-2): a structure the player built starts at the build ticks of its
+        // building entry (`apply_from`, after `place_structure` gave it a table entry and a cell)
+        // and only counts down (`advance_construction`).
+        e.build_left[i] = r.u32()?;
+        let most = world
+            .buildings
+            .get(e.kind[i])
+            .filter(|_| e.def[i] != NO_DEF && e.cell[i] != NO_CELL)
+            .map_or(0, |b| b.build_ticks);
+        if e.build_left[i] > most {
+            return Err(SaveError::Corrupt(
+                "a construction the construction stage never leaves",
+            ));
+        }
     }
     Ok(())
 }
@@ -1440,19 +1675,9 @@ fn check_unsaved_sections(w: &World) -> SaveResult<()> {
     if w.crowd.has_state() {
         return Err(SaveError::Unsupported("crowd"));
     }
-    if let Some(m) = &w.money {
-        let crate::money::Money {
-            // Rules: in the rules digest.
-            rules: _,
-            spent,
-        } = m;
-        if spent.iter().any(|&(_, s)| s != 0) {
-            return Err(SaveError::Unsupported("economy"));
-        }
-    }
-    if w.ore.as_ref().is_some_and(|o| !o.at_start()) || w.harvest.is_some() {
-        return Err(SaveError::Unsupported("economy"));
-    }
+    // The ore, the harvest state, the money, production and power are saved (WP13.1c-2); their
+    // fields are named in `Ore::save`, `Harvest::save`, `economy::save_money`,
+    // `economy::save_production` and `economy::save_power`.
     if let Some(r) = &w.repair {
         let crate::repair::RepairSell {
             // Rules: in the rules digest.
@@ -1469,12 +1694,6 @@ fn check_unsaved_sections(w: &World) -> SaveResult<()> {
         // The report of the last step: cleared at the start of the next.
         rejections: _,
     } = &w.placement;
-    if w.production.is_some() {
-        return Err(SaveError::Unsupported("production"));
-    }
-    if w.power.is_some() {
-        return Err(SaveError::Unsupported("power"));
-    }
     if w.vision.is_some() {
         return Err(SaveError::Unsupported("vision"));
     }
@@ -1575,22 +1794,43 @@ impl World {
             }
             None => h.write_u8(0),
         }
-        // The optional rule sets that a world which saves may have: their numbers. The ore layout
-        // enters by its fingerprint, which at `version == 0` (the only ore that saves) is the start
-        // amount of every field cell.
+        // The optional rule sets that a world which saves may have: their numbers (WP13.1c-2: the
+        // ore rules and the number of field cells, every harvest number, the harvester kinds, the
+        // storage table and the price, the money, production and power rules), each destructured
+        // without `..` by its `write_rules`. The start amounts follow from the ore rules and the
+        // terrain; the starting credits are state (the stores in section `H`).
         match &self.ore {
             Some(ore) => {
                 h.write_u8(1);
-                for word in ore.fingerprint() {
-                    h.write_u64(word);
-                }
+                ore.write_rules(&mut h);
+            }
+            None => h.write_u8(0),
+        }
+        match self.harvest.as_deref() {
+            Some(hv) => {
+                h.write_u8(1);
+                hv.write_rules(&mut h);
             }
             None => h.write_u8(0),
         }
         match &self.money {
             Some(m) => {
                 h.write_u8(1);
-                h.write_u32(m.rules.credits_per_ore);
+                economy::write_money_rules(m, &mut h);
+            }
+            None => h.write_u8(0),
+        }
+        match self.production.as_deref() {
+            Some(p) => {
+                h.write_u8(1);
+                economy::write_production_rules(p, &mut h);
+            }
+            None => h.write_u8(0),
+        }
+        match &self.power {
+            Some(p) => {
+                h.write_u8(1);
+                economy::write_power_rules(p, &mut h);
             }
             None => h.write_u8(0),
         }
@@ -1605,18 +1845,9 @@ impl World {
             }
             None => h.write_u8(0),
         }
-        // Which of the other optional rule sets the world has: a world with any of them does not
-        // save yet (harvest, production, power, vision, match); their numbers join in WP13.1c.
-        for present in [
-            self.ore.is_some(),
-            self.harvest.is_some(),
-            self.money.is_some(),
-            self.production.is_some(),
-            self.power.is_some(),
-            self.repair.is_some(),
-            self.vision.is_some(),
-            self.outcome.is_some(),
-        ] {
+        // Which of the two other optional rule sets the world has: a world with either does not
+        // save yet (vision, match); their numbers join in WP13.1c-3.
+        for present in [self.vision.is_some(), self.outcome.is_some()] {
             h.write_u8(u8::from(present));
         }
         h.finish()
@@ -1661,15 +1892,18 @@ impl World {
             arsenal,
             // Rules.
             buildings: _,
-            // Gated.
-            ore: _,
-            harvest: _,
-            money: _,
-            // A report of the last tick, not hashed: replaced by every step.
+            // Saved in sections `O`, `H` and `C` (WP13.1c-2); the rules in the rules digest. Fields
+            // named in `Ore::save`, `Harvest::save` and `economy::save_money`.
+            ore,
+            harvest,
+            money,
+            // A report of the last tick, not hashed: `advance_construction` clears it before
+            // anything in the step reads it.
             stalled: _,
-            // Gated.
-            production: _,
-            power: _,
+            // Saved in sections `U` and `I` (WP13.1c-2). Fields named in
+            // `economy::save_production` and `economy::save_power`.
+            production,
+            power,
             // Rules and the reports of the last tick; the state is the entity columns.
             repair: _,
             // Gated.
@@ -1677,7 +1911,8 @@ impl World {
             outcome: _,
             // Rules (who is which faction) and the report of the last tick.
             placement: _,
-            // A report of the last tick.
+            // A report of the last tick: `advance_construction` clears it before anything in the
+            // step reads it (production reads the completions of its own step).
             completions: _,
             // Rules and scratch; the state is the entity column. Fields named in
             // `Targeting::has_state`.
@@ -1715,6 +1950,26 @@ impl World {
         w.section(SECTION_PATHING, |s| pathing.save(s, entities))?;
         w.section(SECTION_FIELDS, |s| pathing.save_fields(s))?;
         w.section(SECTION_FORMATIONS, |s| formations.save(s))?;
+        w.section(SECTION_ORE, |s| match ore {
+            Some(o) => o.save(s),
+            None => Ok(()),
+        })?;
+        w.section(SECTION_HARVEST, |s| match harvest.as_deref() {
+            Some(h) => h.save(s),
+            None => Ok(()),
+        })?;
+        w.section(SECTION_MONEY, |s| match money {
+            Some(m) => economy::save_money(s, m),
+            None => Ok(()),
+        })?;
+        w.section(SECTION_PRODUCTION, |s| match production.as_deref() {
+            Some(p) => economy::save_production(s, p),
+            None => Ok(()),
+        })?;
+        w.section(SECTION_POWER, |s| match power {
+            Some(p) => economy::save_power(s, p),
+            None => Ok(()),
+        })?;
         Ok(w.finish())
     }
 
@@ -1806,6 +2061,35 @@ impl World {
         let mut s = r.section(SECTION_FORMATIONS)?;
         world.formations.restore(&mut s, &world.entities)?;
         s.end()?;
+
+        // WP13.1c-2. Each section is empty for a rule set the world does not have.
+        let mut s = r.section(SECTION_ORE)?;
+        if let Some(o) = &mut world.ore {
+            o.restore(&mut s)?;
+        }
+        s.end()?;
+        let mut s = r.section(SECTION_HARVEST)?;
+        if let Some(mut h) = world.harvest.take() {
+            let result = h.restore(&mut s, &world);
+            world.harvest = Some(h);
+            result?;
+        }
+        s.end()?;
+        let mut s = r.section(SECTION_MONEY)?;
+        if let Some(m) = &mut world.money {
+            economy::restore_money(&mut s, m)?;
+        }
+        s.end()?;
+        let mut s = r.section(SECTION_PRODUCTION)?;
+        if let Some(p) = world.production.as_deref_mut() {
+            economy::restore_production(&mut s, p, map)?;
+        }
+        s.end()?;
+        let mut s = r.section(SECTION_POWER)?;
+        if let Some(p) = &mut world.power {
+            economy::restore_power(&mut s, p)?;
+        }
+        s.end()?;
         r.end()?;
 
         // The free list: distinct free slots, and every free slot not on it retired for good.
@@ -1875,3 +2159,8 @@ mod path_tests;
 
 #[cfg(test)]
 mod combat_tests;
+
+mod economy;
+
+#[cfg(test)]
+mod economy_tests;

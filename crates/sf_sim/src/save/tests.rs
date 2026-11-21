@@ -464,15 +464,15 @@ fn the_header_is_pinned() {
     let w = busy(fresh(), 2);
     let bytes = w.save().unwrap();
     assert_eq!(&bytes[..4], b"SFSV");
-    assert_eq!(&bytes[4..8], &[3, 0, 0, 0]);
+    assert_eq!(&bytes[4..8], &[4, 0, 0, 0]);
     assert_eq!(&bytes[8..16], &w.rules_digest().to_le_bytes());
     assert_eq!(&bytes[16..24], &2u64.to_le_bytes());
-    assert_eq!(&bytes[24..28], &[8, 0, 0, 0]);
+    assert_eq!(&bytes[24..28], &[13, 0, 0, 0]);
     assert_eq!(
         sections(&bytes).iter().map(|s| s.0).collect::<Vec<_>>(),
-        b"WEQXDPFM".to_vec()
+        b"WEQXDPFMOHCUI".to_vec()
     );
-    assert_eq!(FORMAT_VERSION, 3);
+    assert_eq!(FORMAT_VERSION, 4);
 }
 
 #[test]
@@ -968,36 +968,8 @@ type Gate = (&'static str, fn(&mut World));
 /// tick-0 state.
 fn gates() -> Vec<Gate> {
     vec![
-        ("buildings", |w| w.entities.build_left[10] = 1),
         ("repair", |w| w.entities.repairing[10] = true),
         ("repair", |w| w.entities.sell_left[10] = 3),
-        ("economy", |w| {
-            w.harvest = Some(Box::new(crate::harvest::Harvest::new(
-                crate::harvest::tests::RULES,
-                Vec::new(),
-                &w.units,
-                &w.buildings,
-            )));
-        }),
-        ("economy", |w| {
-            w.money = Some(crate::money::Money {
-                rules: crate::money::MoneyRules { credits_per_ore: 5 },
-                spent: vec![(PlayerId(0), 0), (PlayerId(1), 30)],
-            });
-        }),
-        ("production", |w| {
-            w.production = Some(Box::new(crate::production::Production {
-                rules: crate::production::ProductionRules {
-                    queue_limit: 3,
-                    exit_radius: 2,
-                    build_speed: crate::production::BuildSpeed::FULL,
-                },
-                table: Default::default(),
-                factories: Vec::new(),
-                rejections: Vec::new(),
-                produced: Vec::new(),
-            }));
-        }),
         ("vision", |w| {
             w.vision = Some(Box::new(crate::vision::Vision::new(
                 64,
@@ -1025,36 +997,6 @@ fn a_section_that_is_not_saved_yet_refuses_the_save() {
 }
 
 #[test]
-fn a_world_with_optional_rules_refuses_the_save_once_they_hold_state() {
-    use crate::ore::OreRules;
-    use crate::power::PowerRules;
-    let rules = OreRules {
-        start: 100,
-        max: 200,
-        regrow_amount: 1,
-        regrow_period: 10,
-    };
-    let mut w = World::new(WorldConfig::new(3).with_map_size(16, 16))
-        .unwrap()
-        .with_ore(rules)
-        .unwrap();
-    // Ore at its start saves; once an amount changed it is economy state.
-    w.save().unwrap();
-    w.ore.as_mut().unwrap().version_bump_for_test();
-    assert_eq!(w.save(), Err(SaveError::Unsupported("economy")));
-    // Power is refused as soon as the world has the rules (WP13.1c saves the totals).
-    let mut w = World::new(WorldConfig::new(3).with_map_size(16, 16)).unwrap();
-    w.power = Some(crate::power::Power {
-        rules: PowerRules {
-            shortage_floor_permille: 250,
-            defence_cutoff_permille: 500,
-        },
-        totals: Vec::new(),
-    });
-    assert_eq!(w.save(), Err(SaveError::Unsupported("power")));
-}
-
-#[test]
 fn the_crowd_memory_round_trips_with_the_crowd_pass_on() {
     // With the crowd pass on, units bump into each other: their crowd memory is saved whole.
     for ticks in [3, 40, 120] {
@@ -1071,16 +1013,6 @@ fn the_crowd_memory_round_trips_with_the_crowd_pass_on() {
     c.stranded = true;
     let back = World::restore(fresh_with(500, true), &w.save().unwrap()).unwrap();
     assert_eq!(back.entities.crowd[5], w.entities.crowd[5]);
-}
-
-#[test]
-fn money_with_nothing_spent_is_no_economy_state() {
-    let mut w = busy(fresh(), 4);
-    w.money = Some(crate::money::Money {
-        rules: crate::money::MoneyRules { credits_per_ore: 5 },
-        spent: vec![(PlayerId(0), 0)],
-    });
-    w.save().expect("nothing spent saves");
 }
 
 /// The numbers of every optional rule set that a world which saves may have are in the digest.

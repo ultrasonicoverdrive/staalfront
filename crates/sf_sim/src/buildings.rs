@@ -403,29 +403,45 @@ fn digest_of(stats: &[BuildingStats]) -> u64 {
     h.write_bytes(DIGEST_TAG);
     h.write_u64(u64::try_from(stats.len()).unwrap_or(u64::MAX));
     for s in stats {
-        h.write_bytes(&s.kind.0.to_le_bytes());
-        h.write_u8(s.footprint.width);
-        h.write_u8(s.footprint.height);
-        h.write_u8(s.function.number());
-        match s.exit_side {
+        // Destructured without `..` (WP13.1c-2): a new field fails to compile until it is in
+        // one of the two digests, and so in the rules digest of a save.
+        let BuildingStats {
+            kind,
+            footprint,
+            function,
+            exit_side,
+            build_ticks,
+            cost,
+            power,
+            factions,
+            requires,
+            // In the placement digest.
+            build_radius: _,
+        } = s;
+        let Footprint { width, height } = *footprint;
+        h.write_bytes(&kind.0.to_le_bytes());
+        h.write_u8(width);
+        h.write_u8(height);
+        h.write_u8(function.number());
+        match exit_side {
             Some(side) => {
                 h.write_u8(1);
                 h.write_u8(side.number());
             }
             None => h.write_u8(0),
         }
-        h.write_u32(s.build_ticks);
-        match s.cost {
+        h.write_u32(*build_ticks);
+        match cost {
             Some(c) => {
                 h.write_u8(1);
-                h.write_u32(c);
+                h.write_u32(*c);
             }
             None => h.write_u8(0),
         }
-        h.write_bytes(&s.power.to_le_bytes());
-        h.write_u8(s.factions);
-        h.write_u64(u64::try_from(s.requires.len()).unwrap_or(u64::MAX));
-        for r in &s.requires {
+        h.write_bytes(&power.to_le_bytes());
+        h.write_u8(*factions);
+        h.write_u64(u64::try_from(requires.len()).unwrap_or(u64::MAX));
+        for r in requires {
             h.write_bytes(&r.0.to_le_bytes());
         }
     }

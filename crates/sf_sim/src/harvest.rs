@@ -1814,3 +1814,5 @@ fn write_option_id(h: &mut Fnv1a64, id: Option<EntityId>) {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+mod save;

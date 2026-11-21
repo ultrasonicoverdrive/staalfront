@@ -242,13 +242,23 @@ impl ProductionTable {
         h.write_bytes(DIGEST_TAG);
         h.write_u64(builds.len() as u64);
         for b in &builds {
-            h.write_bytes(&b.kind.0.to_le_bytes());
-            h.write_u8(b.factory.number());
-            h.write_u32(b.cost);
-            h.write_u32(b.build_ticks);
-            h.write_u8(b.factions);
-            h.write_u64(b.requires.len() as u64);
-            for r in &b.requires {
+            // Destructured without `..` (WP13.1c-2): a new field fails to compile until it is in
+            // the digest, and so in the rules digest of a save.
+            let UnitBuild {
+                kind,
+                factory,
+                cost,
+                build_ticks,
+                factions,
+                requires,
+            } = b;
+            h.write_bytes(&kind.0.to_le_bytes());
+            h.write_u8(factory.number());
+            h.write_u32(*cost);
+            h.write_u32(*build_ticks);
+            h.write_u8(*factions);
+            h.write_u64(requires.len() as u64);
+            for r in requires {
                 h.write_bytes(&r.0.to_le_bytes());
             }
         }
@@ -308,6 +318,19 @@ impl ProductionTable {
     /// A hash of every entry.
     pub fn digest(&self) -> u64 {
         self.digest
+    }
+
+    /// The digest for the rules digest of a save (WP13.1c-2): the stored one, which `new` takes
+    /// over every field of every entry and pair. Destructured without `..`: a new field of the
+    /// table fails to compile until it is covered.
+    pub(crate) fn rules_digest(&self) -> u64 {
+        let ProductionTable {
+            // In the digest (`new`).
+            builds: _,
+            comes_with: _,
+            digest,
+        } = self;
+        *digest
     }
 }
 
