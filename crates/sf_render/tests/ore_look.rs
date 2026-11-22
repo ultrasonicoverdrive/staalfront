@@ -33,9 +33,9 @@ fn the_shipped_levels_are_pinned() {
     assert_eq!(
         got,
         vec![
-            (0, [56, 36, 28], 0, [53, 34, 26]),
-            (33, [82, 53, 37], 30, [82, 53, 36]),
-            (66, [93, 58, 38], 65, [104, 64, 40]),
+            (0, [102, 60, 68], 0, [102, 60, 68]),
+            (33, [110, 52, 52], 30, [116, 56, 56]),
+            (66, [112, 58, 46], 65, [124, 66, 50]),
             (100, [98, 59, 38], 100, [130, 76, 44]),
         ]
     );
@@ -68,7 +68,7 @@ fn the_top_levels_hold_a_full_cell() {
 }
 
 /// Each level's minimap colour is near the mean of its texture (as for the types), and the
-/// levels get lighter and more gold as the cell fills.
+/// levels get lighter and redder as the cell fills (more copper flecks).
 #[test]
 fn level_textures_agree_with_their_minimap_colours_and_rise() {
     let looks = looks();

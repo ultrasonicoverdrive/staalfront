@@ -178,7 +178,7 @@ fn every_type_is_drawn_in_its_own_look() {
     );
     assert!(
         lum(road) > lum(rock) && road[0] > road[2] + 40.0,
-        "the road is light tan packed earth, apart from the grey rock"
+        "the road is warm tan packed earth, apart from the grey rock"
     );
     // Every pair reads apart.
     let all = [

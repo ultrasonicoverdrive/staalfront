@@ -130,15 +130,21 @@ Since WP7.1 an ore cell is drawn by how much ore it holds (four fill levels of t
   luminance (was 100 more in the channel sum), the bridge a dark timber darker than the ore
   (was a light wood with red over 160). The 50-apart rule did hold with the muted colours:
   the closest pairs are grass and ore, and grass and bridge, at 51 to 53 (grass 81, 84, 27 against
-  ore 130, 76, 44 and against bridge 70, 34, 26). The minimap shades the relief lightly over the
+  ore 130, 76, 44 and against bridge 70, 34, 26). Since fix round 0 of WP11.6e it holds for the
+  four ore fill levels too, each against every other type, on the minimap (at least 50) and as
+  texture mean (more than 25): the closest are every level against the grass, 51.9 to 53.4. For
+  that the empty and the low levels moved off the bridge's dark red-brown: empty (102, 60, 68), a
+  dusty rose-brown, then (116, 56, 56), (124, 66, 50) and the full ore (130, 76, 44). The minimap shades the relief lightly over the
   colour (at most 18 % either way).
 
 * **Readability against units** (WP11.6e, `crates/sf_render/tests/terrain_readability.rs`):
-  the shipped Meridian and Veyran unit models (25 models, all three levels of detail, so the
-  zoom 0.30 and 0.12 views) as the engine renders their visible body (loaded by the engine's
+  every Meridian and Veyran unit model named in `unit_defs.ron` (27, read from the file; neutral
+  and Network models are left out), all three levels of detail, each seen at the camera pitch of the
+  zoom 0.30 and 0.12 views (`camera.ron`) over eight headings, as the engine renders the faces the
+  camera sees (weighted by their area projected toward the eye) (loaded by the engine's
   own glb loader, lit with `Lighting::default`) against every terrain texture as the terrain
   shader renders it (lit as level ground) and every ore fill level: the mean body colour is at
-  least 12 apart (CIE dE76), no more than half the body area lies within 12 of the terrain
+  least 12 apart (CIE dE76; 12 is chosen, about five just-noticeable differences, not fitted), no more than half the body area lies within 12 of the terrain
   mean, the 5th-percentile texel is at least 8 away, a team stripe (all eight player colours)
   at least 30, and no Meridian or Veyran paint is within 12 of a ground colour. The numbers
   are in the PR and `docs/art-style.md`.

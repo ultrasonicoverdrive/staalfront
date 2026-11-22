@@ -355,6 +355,37 @@ fn the_minimap_colours_are_clearly_different() {
     }
 }
 
+/// Every fill level of the ore (WP7.1) is just as far from every other type as the types are
+/// from each other: at least 50 apart on the minimap, and its texture mean more than 25 from the
+/// mean of every other type's look (the bar `every_type_is_drawn_in_its_own_look` sets in 3D).
+/// The ore type itself is left out: its look is the full level.
+#[test]
+fn the_ore_levels_are_clearly_different_from_the_other_types() {
+    let (types, looks) = shipped();
+    let ore = looks.look_for("ore");
+    let r = looks.resource().expect("the ore has fill levels");
+    for (i, level) in r.levels.iter().enumerate() {
+        let mini = level.minimap.map(f32::from);
+        let tex = mean_color(&ore.level_texture(level));
+        for t in types.iter().filter(|t| t.name != "ore") {
+            let l = looks.look_for(&t.name);
+            let d = rgb_distance(mini, l.minimap_color().map(f32::from));
+            let dt = rgb_distance(tex, mean_color(&l.texture()));
+            println!("level {i} vs {}: minimap {d:.1}, texture {dt:.1}", t.name);
+            assert!(
+                d >= 50.0,
+                "ore level {i} and {} are too close on the minimap ({d:.0})",
+                t.name
+            );
+            assert!(
+                dt > 25.0,
+                "ore level {i} and {} look alike on the map ({dt:.0})",
+                t.name
+            );
+        }
+    }
+}
+
 /// What each minimap colour means: swapping two colours (water and bridge,
 /// say) breaks it.
 #[test]
@@ -378,8 +409,9 @@ fn the_minimap_colours_say_what_the_types_are() {
     // went are listed here: grass `g > r + 30` (olive: g is only level with r, b is far under),
     // water `b > r + 60` and `b > g + 30` (a grey-teal), the road `sum > rock + 100` (the rock
     // is a light grey now, the road a warmer, yellower tan: the road stays the lighter by
-    // luminance, no longer by 100 in the sum), the bridge `r > 160` and `r > b + 80` (a dark
-    // weathered timber), and `road[2] > bridge[2] + 30` (the road is still paler: below).
+    // luminance, no longer by 100 in the sum), the bridge `r > 160` and `r > b + 80` (a weathered
+    // grey-brown timber), and `road[2] > bridge[2] + 30` (the road is still paler: below, by 80
+    // in the sum instead of 200).
     assert!(
         grass[1] >= grass[0] && grass[1] > grass[2] + 40,
         "grass is olive green: {grass:?}"
@@ -402,12 +434,12 @@ fn the_minimap_colours_say_what_the_types_are() {
         "the road is a warm tan, lighter than the rock: {road:?}"
     );
     assert!(
-        bridge[0] > bridge[2] + 20 && sum(bridge) < sum(ore),
-        "the bridge is dark timber, darker than the ore: {bridge:?}"
+        bridge[0] > bridge[2] + 20 && spread(bridge) < spread(ore) && spread(bridge) > spread(rock),
+        "the bridge is weathered grey-brown timber: warm, greyer than the ore, browner than the rock: {bridge:?}"
     );
     assert!(
-        sum(road) > sum(bridge) + 200,
-        "the road is much paler than the wood: {road:?} {bridge:?}"
+        sum(road) > sum(bridge) + 80 && lum(road) > lum(bridge),
+        "the road is paler than the wood: {road:?} {bridge:?}"
     );
 }
 

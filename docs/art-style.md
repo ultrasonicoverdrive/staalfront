@@ -347,17 +347,22 @@ band is a pale grey-green foam (linear (0.34, 0.42, 0.40) at 0.30; it was (0.80,
   attempt so that the Meridian sand and olive (mean body colours 65-106) stand apart from it, and the bridge
   is a dark timber because every mid-brown was either a Meridian colour or too close to the minimap
   colours of ore and grass (the 50-apart rule). The ore ground equals the decor nuggets of 11.6d and the
-  fill levels rise from a dark red-brown (56, 36, 28) empty cell, chosen so a Meridian harvester (mean body
-  (65, 60, 42)) is still 13.8 away from a bare cell.
-* **Readability** (`crates/sf_render/tests/terrain_readability.rs`): 25 Meridian and Veyran unit models,
-  three levels of detail each (so the views at zoom 0.30 and 0.12), visible body = non-team triangles that
-  look up, lit with `Lighting::default`, against each terrain texture as rendered and each ore fill
-  level, dE76. Thresholds: mean body colour at least 12 from the terrain mean, at most half of the body area
+  fill levels rise from a dusty rose-brown (102, 60, 68) empty cell (fix round 0: the old dark red-brown
+  (56, 36, 28) was 17 from the bridge on the minimap) through (110, 52, 52) and (112, 58, 46) to the full ore,
+  each at least 50 from every other type on the minimap. A grey-brown bridge was tried and dropped: every
+  candidate collided (see the PR body), so the bridge stays the dark timber (70, 34, 26).
+* **Readability** (`crates/sf_render/tests/terrain_readability.rs`): every Meridian and Veyran unit model of
+  `unit_defs.ron` (27), three levels of detail each, seen at the camera pitch of the views at zoom 0.30 and
+  0.12 (`camera.ron`) over eight headings: the faces the camera sees, weighted by their projected area, lit
+  with `Lighting::default`, against each terrain texture as rendered and each ore fill
+  level, dE76. Thresholds: mean body colour at least 12 from the terrain mean (a chosen value, about five
+  just-noticeable differences, not fitted to the minima), at most half of the body area
   within 12 of it, 5th-percentile texel at least 8, team stripes (eight player colours) at least 30,
-  Meridian and Veyran paints at least 12 from every ground colour. Measured: smallest mean margin per
-  terrain grass 13.7 (the Meridian engineer's far level), road 23.7, water 14.2, rock 16.0, ore 21.9, bridge
-  18.7, ore levels 13.8 / 12.5 / 16.3 / 21.9; largest close share 0.47 (a bare ore cell under the Meridian
-  light transport's far level), 0.31 on rock, 0 on grass, road, water and bridge; smallest 5th-percentile
+  Meridian and Veyran paints at least 12 from every ground colour. Measured (fix round 0): smallest mean
+  margin per terrain grass 15.0, road 32.3, water 15.2, rock 19.8, ore 24.5, bridge 16.7, ore levels
+  19.4 / 24.6 / 24.3 / 24.5; largest close share 0.32 on rock, 0.10 on ore and bridge, 0.01 or less on the
+  other terrains. The 5th-percentile and stripe margins below are from the first measurement (all faces
+  looking up); the tests still hold them. Smallest 5th-percentile
   texel margin 10.2; smallest team stripe margin 47.4 (red on ore); closest paint to a ground colour 12.6
   (the Veyran light paint on rock). The olive of Meridian does not disappear on the olive grass: no
   face of any model is within 12 of the grass mean in any level (0 % close), the closest unit

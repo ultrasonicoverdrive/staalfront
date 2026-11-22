@@ -44,13 +44,15 @@
     // the share of bright flecks fall with the fill; an empty cell is bare ground. The type
     // needs a look with the Flecks pattern. Level 0 is the empty cell (up_to_percent 0), the
     // last level ends at 100. Only a world with ore rules shows the levels; a map drawn
-    // without ore state keeps the plain look of the type.
+    // without ore state keeps the plain look of the type. Every level is at least 50 (RGB) from
+    // every other type on the minimap (WP11.6e fix round 0), so the empty cell is a dusty rose-brown
+    // and not the dark red-brown of the bridge.
     resource: (
         terrain: "ore",
         levels: [
-            (up_to_percent: 0, color: (56, 36, 28), flecks_percent: 0, minimap: (53, 34, 26)),
-            (up_to_percent: 33, color: (82, 53, 37), flecks_percent: 30, minimap: (82, 53, 36)),
-            (up_to_percent: 66, color: (93, 58, 38), flecks_percent: 65, minimap: (104, 64, 40)),
+            (up_to_percent: 0, color: (102, 60, 68), flecks_percent: 0, minimap: (102, 60, 68)),
+            (up_to_percent: 33, color: (110, 52, 52), flecks_percent: 30, minimap: (116, 56, 56)),
+            (up_to_percent: 66, color: (112, 58, 46), flecks_percent: 65, minimap: (124, 66, 50)),
             (up_to_percent: 100, color: (98, 59, 38), flecks_percent: 100, minimap: (130, 76, 44)),
         ],
     ),

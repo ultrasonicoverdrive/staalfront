@@ -2,8 +2,9 @@
 //!
 //! The unit side is the shipped glb models loaded by the engine's own loader (`glb::load_glb_file`:
 //! the baked vertex colour times the material colour, in linear light), the visible body (every
-//! non-team triangle that looks up, area-weighted, every level of detail: zoom 0.30 and 0.12 show
-//! different levels) lit with the engine's default light (`scene::Lighting::default`, the same
+//! non-team triangle the game camera sees, weighted by its area as projected toward the camera, at
+//! the camera pitch of the zoom 0.30 and 0.12 views from `camera.ron`, over eight unit headings,
+//! every level of detail) lit with the engine's default light (`scene::Lighting::default`, the same
 //! `ambient + light * max(n.l, 0)` as `scene.wgsl`). The terrain side is the shipped texture of
 //! each look (`TerrainLook::texture`, every ore level as well) lit as level ground the way
 //! `terrain.wgsl` does. Colours are compared as CIE L*a*b* distance (dE76) of the colours that
@@ -25,10 +26,10 @@ use sf_render::glb::{self, AxisConvention, LoadedModel};
 use sf_render::scene::Lighting;
 use sf_render::terrain_look::TerrainLooks;
 
-/// Mean body colour against mean terrain colour (dE76 of the rendered colours): 12 is where two
-/// flat patches stop reading as two shades of one colour and read as two colours (the just-noticeable
-/// difference is about 2.3; the 11.6p test holds the two factions apart by 20 and the neutral models
-/// by 12). The numbers measured on the shipped data are in the PR body and docs/art-style.md.
+/// Mean body colour against mean terrain colour (dE76 of the rendered colours). 12 is a chosen
+/// value, not a measured one: about five just-noticeable differences (dE 2.3), so two flat patches
+/// read as two colours rather than two shades of one. It was set before the palette was tuned and is
+/// not fitted to the measured minima (those are in the PR body and docs/art-style.md).
 const MIN_MEAN_DE: f64 = 12.0;
 /// A body triangle this close to the terrain mean counts as "close" (the same 12).
 const CLOSE_DE: f64 = 12.0;
@@ -48,39 +49,56 @@ fn assets() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets")
 }
 
-fn load(dir: &str, file: &str) -> LoadedModel {
-    glb::load_glb_file(&assets().join(dir).join(file), &AxisConvention::ENGINE)
-        .unwrap_or_else(|e| panic!("{dir}/{file}: {e}"))
+fn load(path: &str) -> LoadedModel {
+    glb::load_glb_file(&assets().join(path), &AxisConvention::ENGINE)
+        .unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-/// Meridian and Veyran units that stand on the ground (set v5 vehicles and vessels, set v3 infantry).
-const UNITS: [(&str, &str); 25] = [
-    ("set_v5", "meridian_amphibious_transport.glb"),
-    ("set_v5", "meridian_harvester.glb"),
-    ("set_v5", "meridian_heavy_tank.glb"),
-    ("set_v5", "meridian_light_tank.glb"),
-    ("set_v5", "meridian_light_transport.glb"),
-    ("set_v5", "meridian_repair_truck.glb"),
-    ("set_v5", "meridian_siege_artillery.glb"),
-    ("set_v5", "veyran_gunboat.glb"),
-    ("set_v5", "veyran_harvester.glb"),
-    ("set_v5", "veyran_heavy_gun_team.glb"),
-    ("set_v5", "veyran_heavy_tank.glb"),
-    ("set_v5", "veyran_light_tank.glb"),
-    ("set_v5", "veyran_repair_truck.glb"),
-    ("set_v5", "veyran_siege_artillery.glb"),
-    ("set_v5", "veyran_transport_truck.glb"),
-    ("set_v3", "meridian_engineer.glb"),
-    ("set_v3", "meridian_rifleman.glb"),
-    ("set_v3", "meridian_rocket_trooper.glb"),
-    ("set_v3", "meridian_scout.glb"),
-    ("set_v3", "meridian_sniper.glb"),
-    ("set_v3", "veyran_combat_engineer.glb"),
-    ("set_v3", "veyran_demolition_team.glb"),
-    ("set_v3", "veyran_engineer.glb"),
-    ("set_v3", "veyran_medic.glb"),
-    ("set_v3", "veyran_rifleman.glb"),
-];
+/// Every Meridian and Veyran unit model of `unit_defs.ron` (infantry, vehicles and vessels), read
+/// from the file so a new unit is measured without touching this test. Structures stand still on
+/// their own footprint and are left out; so are the neutral and Network models (not a player
+/// faction: the brief of WP11.6e leaves them out, see `no_terrain_colour_is_a_unit_paint`).
+fn units() -> Vec<String> {
+    let text = std::fs::read_to_string(assets().join("config/unit_defs.ron")).unwrap();
+    let mut out: Vec<String> = Vec::new();
+    for record in text.split("kind:").skip(1) {
+        let Some(cat) = record.split("category:").nth(1) else {
+            continue;
+        };
+        let cat = cat.trim_start();
+        if !["Infantry", "Vehicle", "Vessel"]
+            .iter()
+            .any(|c| cat.starts_with(c))
+        {
+            continue;
+        }
+        for g in record.split("Glb(\"").skip(1) {
+            let path = g.split('"').next().unwrap();
+            let file = path.rsplit('/').next().unwrap();
+            if (file.starts_with("meridian_") || file.starts_with("veyran_"))
+                && !out.iter().any(|p| p == path)
+            {
+                out.push(path.to_owned());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The camera pitches of the two views the test stands for (zoom 0.30 and 0.12), from `camera.ron`.
+fn pitches() -> [f64; 2] {
+    let cfg = sf_render::zoom::CameraSettings::embedded()
+        .camera_config(sf_render::glam::DVec2::new(256.0, 256.0));
+    let mut cam = sf_render::Camera::new(cfg, 1920, 1080);
+    [0.30, 0.12].map(|z| {
+        cam.set_zoom(z);
+        cam.pitch()
+    })
+}
+
+/// Unit headings the body is averaged over (a unit turns; the light and the camera do not).
+const HEADINGS: usize = 8;
 
 fn lin_to_srgb(l: f64) -> f64 {
     let l = l.clamp(0.0, 1.0);
@@ -151,8 +169,11 @@ struct Face {
     area: f64,
 }
 
-/// The visible body of one level of a model: non-team triangles that look up, lit as rendered.
-fn body(model: &LoadedModel, level: usize) -> Vec<Face> {
+/// The visible body of one level of a model seen at `pitch`: every non-team triangle, turned to
+/// each of `HEADINGS` headings, lit as rendered, weighted by its area projected toward the eye
+/// (back faces weigh 0 and are dropped). The eye looks down at `pitch` from +z, as `Camera` does.
+fn body(model: &LoadedModel, level: usize, pitch: f64) -> Vec<Face> {
+    let eye = [0.0, pitch.sin(), pitch.cos()];
     let mut out = Vec::new();
     for part in &model.levels[level].parts {
         let m = &part.mesh;
@@ -182,17 +203,22 @@ fn body(model: &LoadedModel, level: usize) -> Vec<Face> {
                 continue;
             }
             // The part frames of a tank only turn about Y: the up axis of a part is the world's.
-            let n = v[0].normal.map(f64::from);
-            if n[1] < 0.3 {
-                continue;
-            }
+            let n0 = v[0].normal.map(f64::from);
             let lin: [f64; 3] = std::array::from_fn(|k| {
                 f64::from(v[0].color[k] + v[1].color[k] + v[2].color[k]) / 3.0
             });
-            out.push(Face {
-                colour: shown(lin, n),
-                area: 0.5 * len,
-            });
+            for h in 0..HEADINGS {
+                let (s, c) = (std::f64::consts::TAU * h as f64 / HEADINGS as f64).sin_cos();
+                let n = [c * n0[0] + s * n0[2], n0[1], -s * n0[0] + c * n0[2]];
+                let facing = n[0] * eye[0] + n[1] * eye[1] + n[2] * eye[2];
+                if facing <= 0.0 {
+                    continue;
+                }
+                out.push(Face {
+                    colour: shown(lin, n),
+                    area: 0.5 * len * facing,
+                });
+            }
         }
     }
     out
@@ -249,21 +275,30 @@ fn every_unit_reads_against_every_terrain_as_rendered() {
             "grass", "road", "water", "rock", "ore", "bridge", "ore0", "ore1", "ore2", "ore3"
         ]
     );
+    let units = units();
+    // 25 measured before the list came from the file, plus the Veyran rocket trooper and scout.
+    assert_eq!(units.len(), 27, "{units:?}");
+    let mut worst: std::collections::BTreeMap<String, (f64, f64)> = Default::default();
     let mut checked = 0;
-    for (dir, file) in UNITS {
-        let model = load(dir, file);
+    for file in &units {
+        let model = load(file);
         assert_eq!(model.levels.len(), 3, "{file}: three levels of detail");
-        for level in 0..model.levels.len() {
-            let faces = body(&model, level);
-            assert!(!faces.is_empty(), "{file} L{level}: no visible body");
+        for (level, pitch) in (0..model.levels.len()).flat_map(|l| pitches().map(|p| (l, p))) {
+            let faces = body(&model, level, pitch);
+            assert!(
+                !faces.is_empty(),
+                "{file} L{level} pitch {pitch:.2}: no visible body"
+            );
             let total: f64 = faces.iter().map(|f| f.area).sum();
             let mean = mean_of(&faces);
             for (name, px) in &terrains {
                 let tm = mean_px(px);
                 let d = de(mean, tm);
+                let w = worst.entry(name.clone()).or_insert((f64::MAX, 0.0_f64));
+                w.0 = w.0.min(d);
                 assert!(
                     d >= MIN_MEAN_DE,
-                    "{file} L{level} on {name}: mean body {:?} is only dE {d:.1} from the terrain {:?}",
+                    "{file} L{level} pitch {pitch:.2} on {name}: mean body {:?} is only dE {d:.1} from the terrain {:?}",
                     mean.map(|c| (c * 255.0).round()),
                     tm.map(|c| (c * 255.0).round())
                 );
@@ -273,16 +308,20 @@ fn every_unit_reads_against_every_terrain_as_rendered() {
                     .map(|f| f.area)
                     .sum::<f64>()
                     / total;
+                w.1 = w.1.max(close);
                 assert!(
                     close <= MAX_CLOSE_SHARE,
-                    "{file} L{level} on {name}: {:.0} % of the body is within dE {CLOSE_DE} of the terrain",
+                    "{file} L{level} pitch {pitch:.2} on {name}: {:.0} % of the body is within dE {CLOSE_DE} of the terrain",
                     close * 100.0
                 );
                 checked += 1;
             }
         }
     }
-    assert_eq!(checked, 25 * 3 * 10);
+    for (name, (d, close)) in &worst {
+        println!("{name}: smallest mean dE {d:.1}, largest close share {close:.2}");
+    }
+    assert_eq!(checked, units.len() * 3 * 2 * 10);
 }
 
 /// The pixel-level worst case too: no unit's mean body colour lies inside the spread of the
@@ -291,17 +330,17 @@ fn every_unit_reads_against_every_terrain_as_rendered() {
 #[test]
 fn no_unit_hides_in_the_texture_noise() {
     let terrains = terrains();
-    for (dir, file) in UNITS {
-        let model = load(dir, file);
-        for level in 0..model.levels.len() {
-            let mean = mean_of(&body(&model, level));
+    for file in units() {
+        let model = load(&file);
+        for (level, pitch) in (0..model.levels.len()).flat_map(|l| pitches().map(|p| (l, p))) {
+            let mean = mean_of(&body(&model, level, pitch));
             for (name, px) in &terrains {
                 let mut d: Vec<f64> = px.iter().map(|p| de(mean, *p)).collect();
                 d.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 let p5 = d[d.len() / 20];
                 assert!(
                     p5 >= MIN_TEXEL_DE,
-                    "{file} L{level} on {name}: 5th percentile texel dE {p5:.1}"
+                    "{file} L{level} pitch {pitch:.2} on {name}: 5th percentile texel dE {p5:.1}"
                 );
             }
         }
