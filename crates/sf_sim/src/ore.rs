@@ -158,33 +158,119 @@ impl Ore {
             .sum()
     }
 
-    /// Whether no amount ever changed: the ore is as the world was given it (WP13.1a saves a
-    /// world only then). Destructured without `..`: a new field fails to compile until it is
-    /// placed here.
-    pub(crate) fn at_start(&self) -> bool {
+    /// The rules and the layout for the rules digest (WP13.1c-2): the four numbers and the number
+    /// of field cells (which cells they are comes from the terrain, in the digest by its own).
+    /// Destructured without `..`: a new rule fails to compile until it is hashed.
+    pub(crate) fn write_rules(&self, h: &mut sf_math::hash::Fnv1a64) {
         let Ore {
-            // Rules and the layout, in the rules digest by the fingerprint.
+            rules,
+            // The map size and the layout: from the configuration and the terrain.
+            width: _,
+            height: _,
+            fields,
+            // State (section `O` of the save).
+            amount: _,
+            sum: _,
+            version: _,
+        } = self;
+        let OreRules {
+            start,
+            max,
+            regrow_amount,
+            regrow_period,
+        } = *rules;
+        h.write_u32(u32::from(start));
+        h.write_u32(u32::from(max));
+        h.write_u32(u32::from(regrow_amount));
+        h.write_u32(regrow_period);
+        h.write_u64(fields.len() as u64);
+    }
+
+    /// Section `O` of the save (WP13.1c-2): the amount of every field cell in field order, then
+    /// the version. The running sum is derived (recomputed on restore).
+    pub(crate) fn save(&self, w: &mut sf_math::bytes::ByteWriter) -> crate::save::SaveResult<()> {
+        let Ore {
+            // Rules and layout: in the rules digest (`write_rules`).
             rules: _,
             width: _,
             height: _,
-            fields: _,
-            // At `version == 0` these are the start amounts, which the fingerprint covers.
-            amount: _,
+            fields,
+            amount,
+            // Derived: recomputed from the amounts.
             sum: _,
             version,
         } = self;
-        *version == 0
+        w.usize(fields.len())?;
+        for &i in fields.iter() {
+            w.u16(amount[i as usize]);
+        }
+        w.u64(*version);
+        Ok(())
+    }
+
+    /// Reads section `O` into this fresh ore. Refused: another number of field cells, an amount
+    /// above the maximum (the start is at most the maximum, regrowth stops there and a take only
+    /// lowers it). The version takes any value (it wraps).
+    pub(crate) fn restore(
+        &mut self,
+        r: &mut sf_math::bytes::ByteReader<'_>,
+    ) -> crate::save::SaveResult<()> {
+        use crate::save::ensure;
+        let n = r.count(2)?;
+        ensure(n == self.fields.len(), "another number of ore cells")?;
+        for k in 0..n {
+            let a = r.u16()?;
+            ensure(
+                a <= self.rules.max,
+                "more ore in a cell than the rules allow",
+            )?;
+            let i = self.fields[k] as usize;
+            self.amount[i] = a;
+        }
+        // Any version: `set` adds one wrapping.
+        self.version = r.u64()?;
+        self.sum = self.recompute_sum();
+        Ok(())
+    }
+
+    /// Sets an amount without the rules (save tests).
+    #[cfg(test)]
+    pub(crate) fn set_amount_for_test(&mut self, cell: Cell, amount: u16) {
+        let i = self.index(cell).unwrap();
+        self.set(i, amount);
+    }
+
+    /// Sets the version (save tests).
+    #[cfg(test)]
+    pub(crate) fn set_version_for_test(&mut self, version: u64) {
+        self.version = version;
+    }
+
+    /// Changes one ore rule (save tests): 0 `start`, 1 `max`, 2 `regrow_amount`, 3 `regrow_period`,
+    /// 4 the number of field cells.
+    #[cfg(test)]
+    pub(crate) fn rules_edit_for_test(&mut self, which: u8) {
+        match which {
+            0 => self.rules.start += 1,
+            1 => self.rules.max += 1,
+            2 => self.rules.regrow_amount += 1,
+            3 => self.rules.regrow_period += 1,
+            _ => {
+                let mut f = self.fields.to_vec();
+                f.push(u32::MAX);
+                self.fields = f.into_boxed_slice();
+            }
+        }
+    }
+
+    /// Whether `index` (row-major) is a field cell.
+    pub(crate) fn is_field_index(&self, index: u32) -> bool {
+        self.fields.binary_search(&index).is_ok()
     }
 
     /// Counts the changes of any amount (a take, a growth). Equal versions mean equal amounts.
     pub fn version(&self) -> u64 {
         self.version
-    }
-
-    /// Counts a change without making one (save tests).
-    #[cfg(test)]
-    pub(crate) fn version_bump_for_test(&mut self) {
-        self.version += 1;
     }
 
     /// Takes up to `want` from `cell`; returns what it gave (zero outside a field and on
@@ -209,7 +295,9 @@ impl Ore {
             .wrapping_sub(term(i as u32, old))
             .wrapping_add(term(i as u32, new));
         self.amount[i] = new;
-        self.version += 1;
+        // Wrapping (WP13.1c-2): a restored version at its maximum steps on; only equality is ever
+        // asked of it, and below the maximum the numbers are the same.
+        self.version = self.version.wrapping_add(1);
     }
 
     /// The regrowth of tick `tick`: the cells whose turn it is gain

@@ -9,8 +9,8 @@
 //! world and in the restored world, and asserts that every claim had its saves.
 //!
 //! The runner is `common/saves.rs`. The combat scenarios are in `save_combat.rs` (WP13.1c-1); the
-//! others hold building, economy, power, vision or match state (WP13.1c-2),
-//! `probe_which_scenarios_save` lists them.
+//! economy, building, production and power scenarios in `save_economy.rs` (WP13.1c-2), which
+//! also lists the ones that still refuse (`probe_which_scenarios_still_refuse`).
 
 mod common;
 
@@ -18,9 +18,6 @@ use common::saves::{
     BUILDING, EVERY, FIELDS, FORMATION, JOB, OVERLAY, ROUTES, TURNING, check, expected,
     run_through_saves_until,
 };
-use common::scenario_path;
-use sf_headless::scenario::Scenario;
-use sf_sim::save::SaveError;
 
 #[test]
 fn bridge_200_continues_through_saves() {
@@ -82,42 +79,4 @@ fn the_other_movement_scenarios_continue_through_saves() {
     ] {
         check(name, EVERY, &[]);
     }
-}
-
-/// The other CI scenarios without an AI hold state of a section WP13.1c-2 saves by the first save
-/// tick: their save is refused, naming the section (this list shrinks as those sections save). The
-/// combat scenarios that save now are in `save_combat.rs`.
-#[test]
-fn probe_which_scenarios_save() {
-    let mut wrong = Vec::new();
-    for (name, section) in [
-        ("placement", "buildings"),
-        ("construction", "buildings"),
-        ("ore_256", "economy"),
-        ("harvest", "economy"),
-        ("storage", "economy"),
-        ("money", "economy"),
-        ("production", "economy"),
-        ("production_repeat", "economy"),
-        ("match", "economy"),
-        ("power", "economy"),
-        ("defences", "power"),
-        ("repair_sell", "economy"),
-        ("vision", "vision"),
-        ("vision_targeting", "vision"),
-        ("silo", "economy"),
-    ] {
-        let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
-        let mut world = Box::new(scenario.build_world().unwrap());
-        let mut arrivals = scenario.arrivals();
-        for _ in 0..EVERY {
-            arrivals.schedule_due(&mut world).unwrap();
-            world.step();
-        }
-        let got = world.save().err();
-        if got != Some(SaveError::Unsupported(section)) {
-            wrong.push(format!("{name}: {got:?}"));
-        }
-    }
-    assert!(wrong.is_empty(), "{wrong:?}");
 }
