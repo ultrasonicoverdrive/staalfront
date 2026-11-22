@@ -1846,7 +1846,7 @@ impl World {
             None => h.write_u8(0),
         }
         // Which of the two other optional rule sets the world has: a world with either does not
-        // save yet (vision, match); their numbers join in WP13.1c-3.
+        // save yet (vision, match); their numbers join in WP13.1c-3 (next).
         for present in [self.vision.is_some(), self.outcome.is_some()] {
             h.write_u8(u8::from(present));
         }
@@ -2062,7 +2062,7 @@ impl World {
         world.formations.restore(&mut s, &world.entities)?;
         s.end()?;
 
-        // WP13.1c-2. Each section is empty for a rule set the world does not have.
+        // WP13.1c-2: each section is empty for a rule set the world does not have.
         let mut s = r.section(SECTION_ORE)?;
         if let Some(o) = &mut world.ore {
             o.restore(&mut s)?;

@@ -457,7 +457,7 @@ fn cases() -> Vec<Case> {
             };
         }),
         ("more ore in a cell than the rules allow", "ore", |w, at| {
-            // The bound is the maximum of the rules, 80.
+            // The bound is the maximum of the rules (80)
             w.ore
                 .as_mut()
                 .unwrap()
