@@ -246,10 +246,21 @@ impl Ore {
         self.version = version;
     }
 
-    /// Changes the regrowth amount (save tests: another rule).
+    /// Changes one ore rule (save tests): 0 `start`, 1 `max`, 2 `regrow_amount`, 3 `regrow_period`,
+    /// 4 the number of field cells.
     #[cfg(test)]
-    pub(crate) fn set_regrow_for_test(&mut self, amount: u16) {
-        self.rules.regrow_amount = amount;
+    pub(crate) fn rules_edit_for_test(&mut self, which: u8) {
+        match which {
+            0 => self.rules.start += 1,
+            1 => self.rules.max += 1,
+            2 => self.rules.regrow_amount += 1,
+            3 => self.rules.regrow_period += 1,
+            _ => {
+                let mut f = self.fields.to_vec();
+                f.push(u32::MAX);
+                self.fields = f.into_boxed_slice();
+            }
+        }
     }
 
     /// Whether `index` (row-major) is a field cell.

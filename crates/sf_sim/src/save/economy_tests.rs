@@ -744,12 +744,7 @@ fn other_economy_numbers_are_other_rules() {
         World::restore(fresh_with(3, 300), &bytes),
         Err(SaveError::Rules)
     );
-    let changes: [fn(&mut World); 9] = [
-        |w| w.ore.as_mut().unwrap().set_regrow_for_test(2),
-        |w| hv(w).rules_edit_for_test(0),
-        |w| hv(w).rules_edit_for_test(1),
-        |w| hv(w).rules_edit_for_test(2),
-        |w| hv(w).rules_edit_for_test(3),
+    let changes: [fn(&mut World); 4] = [
         |w| w.money.as_mut().unwrap().rules.credits_per_ore = 3,
         |w| w.power.as_mut().unwrap().rules.defence_cutoff_permille = 999,
         |w| w.production.as_deref_mut().unwrap().rules.build_speed = BuildSpeed { num: 2, den: 2 },
@@ -764,6 +759,60 @@ fn other_economy_numbers_are_other_rules() {
             "change {k}"
         );
     }
+}
+
+/// Every number in the economy part of the rules digest, changed one at a time, gives another
+/// digest: each ore rule and the number of field cells, all 26 harvest numbers, the harvester
+/// kinds, a storage kind and capacity, the price, the money rule, every production rule and the
+/// production table, both power rules.
+#[test]
+fn every_economy_rule_is_in_the_digest() {
+    let base = fresh().rules_digest();
+    let mut edits: Vec<(String, World)> = Vec::new();
+    let mut edit = |name: String, f: &dyn Fn(&mut World)| {
+        let mut w = fresh();
+        f(&mut w);
+        edits.push((name, w));
+    };
+    for k in 0..5 {
+        edit(format!("ore {k}"), &|w| {
+            w.ore.as_mut().unwrap().rules_edit_for_test(k)
+        });
+    }
+    for k in 0..crate::harvest::Harvest::RULE_EDITS {
+        edit(format!("harvest {k}"), &|w| hv(w).rules_edit_for_test(k));
+    }
+    edit("credits_per_ore".into(), &|w| {
+        w.money.as_mut().unwrap().rules.credits_per_ore += 1
+    });
+    edit("queue_limit".into(), &|w| {
+        w.production.as_deref_mut().unwrap().rules.queue_limit += 1
+    });
+    edit("exit_radius".into(), &|w| {
+        w.production.as_deref_mut().unwrap().rules.exit_radius += 1
+    });
+    edit("build_speed.num".into(), &|w| {
+        w.production.as_deref_mut().unwrap().rules.build_speed.num += 1
+    });
+    edit("build_speed.den".into(), &|w| {
+        w.production.as_deref_mut().unwrap().rules.build_speed.den += 1
+    });
+    edit("shortage_floor_permille".into(), &|w| {
+        w.power.as_mut().unwrap().rules.shortage_floor_permille += 1
+    });
+    edit("defence_cutoff_permille".into(), &|w| {
+        w.power.as_mut().unwrap().rules.defence_cutoff_permille -= 1
+    });
+    assert_eq!(edits.len(), 5 + 30 + 7);
+    for (name, w) in &edits {
+        assert_ne!(w.rules_digest(), base, "{name}");
+    }
+    // The production table: another `comes_with` pair.
+    assert_ne!(
+        fresh_rules(3, 250, true).rules_digest(),
+        base,
+        "production table"
+    );
 }
 
 /// The ore version wraps (WP13.1c-2: it was `+= 1`, which a restored `u64::MAX` overflowed on the

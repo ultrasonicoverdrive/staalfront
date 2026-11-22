@@ -3933,7 +3933,10 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
 * Eleven more CI scenarios now save and continue to their pins with a save every 97 ticks
   (`tools/sf_headless/tests/save_economy.rs`), and after every tick in release. `match`,
   `repair_sell`, `vision` and `vision_targeting` still refuse.
-* No pin moved; no change in the simulation's behaviour (the digest refactors of `BuildingTable`
-  and `ProductionTable` destructure their entries and hash the same bytes).
+* No pin moved. One change in the simulation's behaviour: the ore version wraps (`Ore::set`, was
+  `+= 1`, which a restored `u64::MAX` overflowed); no scenario comes near it. The digest refactors
+  of `BuildingTable` and `ProductionTable` destructure their entries and hash the same bytes.
+* `silo` sells a structure: its save is refused as `repair` after ticks 4401 to 4460 (WP13.1c-3);
+  the probes skip exactly those ticks and save again after the sale.
 * Gaps: the restore checks listed as "not checked, on purpose" in save.md (for 13.1h); the reports
   of the last tick (completions, stalled, refusals, units put out) start empty after a load (13.1e).

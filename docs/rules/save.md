@@ -525,6 +525,12 @@ restored world. A host that shows "structure completed", "unit ready", "build st
 refusal of the last tick before the load does not show it again after the load. Nothing in the
 simulation reads them across a tick.
 
+**Host side, the ore caches (for WP13.1e):** the ore `version` says "equal versions mean equal
+amounts" only within one run. After a load in a running host the restored version can equal the one
+the host cached (`SimSnapshot.ore_version` in `crates/sf_game/src/sim_snapshot.rs`, `OreView.version`
+in `ore_view.rs`) while the amounts differ. On a load the host must reset both: `OreView::forget`,
+and the snapshot's cached ore version.
+
 **Restore checks** (each the value the writer can leave, with the writer; each with a case in
 `every_economy_bound_restores_and_one_past_it_is_refused`, the value at the bound restoring and
 stepping 30 ticks, one past refused with the message):
@@ -625,12 +631,16 @@ spent; a factory, a unit half built, a rally point, a repeating factory; power t
 short of power, defences without power; and the combat state of `power` and `defences`).
 `every_tick_<name>` (eleven tests, `#[ignore]`, release: `cargo test --release -p sf_headless
 --test save_economy -- --ignored every_tick`) saves, restores and resaves after every tick of each to
-its pin; `silo` only to tick 4400, because from tick 4401 it sells a structure and the save is
-refused as `repair` (WP13.1c-3; found by the first run of the probe). On the container (4 cores,
+its pin; in `silo` the save is refused as `repair` after ticks 4401 to 4460, while it sells a
+structure (WP13.1c-3; found by the first run of the probe): the probe skips exactly those ticks,
+asserts that error and no other, and saves again from tick 4461 on (the silo gone, the capacity
+shrunk). `silo_continues_through_saves` saves besides after ticks 4400, 4401, 4460 and 4461 and
+asserts that 4401 and 4460 are refused as `repair` and the run reaches its pin. On the container (4 cores,
 shared with other builds, load 3 to 7) the eleven took 65 minutes side by side: a save and restore
 costs tens of milliseconds on these maps (the fresh world is cloned and the path graphs rebuilt), so
 `harvest` alone took 38 minutes, `money` 45; the rerun of `silo` to tick 4400 passed in 17 minutes; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
-does the first 300 ticks of `harvest` and `production_repeat` in every build, and in sf_sim
+does the first 200 ticks of `harvest` and `production_repeat` in every build, with the claims
+they reach by then, and in sf_sim
 `the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
 all of it (a dock queue, a full queue mid-item, a structure half built, player 0 short of power)
 and compares by `PartialEq` and checksum. `probe_which_scenarios_still_refuse` pins the rest:

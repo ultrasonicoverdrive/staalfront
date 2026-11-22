@@ -620,14 +620,74 @@ impl Harvest {
         }
     }
 
-    /// Changes one rule (save tests): 0 a harvest number, 1 the harvester kinds, 2 a storage
-    /// capacity, 3 the price of a unit of ore.
+    /// The number of rules [`Harvest::rules_edit_for_test`] can change.
+    pub(crate) const RULE_EDITS: u8 = 30;
+
+    /// Changes one rule (save tests): 0 to 25 the harvest numbers (25 is `max_tries`), 26 the
+    /// harvester kinds, 27 a storage kind, 28 a storage capacity, 29 the price of a unit of ore.
     pub(crate) fn rules_edit_for_test(&mut self, which: u8) {
+        let HarvestRules {
+            capacity,
+            mine_amount,
+            mine_period,
+            unload_amount,
+            unload_period,
+            search_radius,
+            retry_period,
+            call_range,
+            grant_timeout,
+            call_timeout,
+            park_distance,
+            park_spread,
+            park_near_tenths,
+            mine_start_tenths,
+            mine_reach_tenths,
+            mine_lose_tenths,
+            dock_reach_tenths,
+            travel_cost,
+            queue_cost,
+            switch_margin,
+            recheck_period,
+            queue_gap,
+            queue_start,
+            queue_step,
+            queue_rows,
+            max_tries,
+        } = &mut self.rules;
+        let numbers = [
+            capacity,
+            mine_amount,
+            mine_period,
+            unload_amount,
+            unload_period,
+            search_radius,
+            retry_period,
+            call_range,
+            grant_timeout,
+            call_timeout,
+            park_distance,
+            park_spread,
+            park_near_tenths,
+            mine_start_tenths,
+            mine_reach_tenths,
+            mine_lose_tenths,
+            dock_reach_tenths,
+            travel_cost,
+            queue_cost,
+            switch_margin,
+            recheck_period,
+            queue_gap,
+            queue_start,
+            queue_step,
+            queue_rows,
+        ];
         match which {
-            0 => self.rules.queue_rows += 1,
-            1 => self.kinds.push(Kind(999)),
-            2 => self.storage.as_mut().unwrap().table[0].1 += 1,
-            _ => self.storage.as_mut().unwrap().price += 1,
+            25 => *max_tries += 1,
+            26 => self.kinds.push(Kind(999)),
+            27 => self.storage.as_mut().unwrap().table[0].0 = Kind(998),
+            28 => self.storage.as_mut().unwrap().table[0].1 += 1,
+            29 => self.storage.as_mut().unwrap().price += 1,
+            k => *numbers.into_iter().nth(usize::from(k)).unwrap() += 1,
         }
     }
 

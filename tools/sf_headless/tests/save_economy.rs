@@ -223,13 +223,23 @@ every_tick_tests! {
     every_tick_silo => "silo",
 }
 
-/// The short every-tick case for every build: the first 200 ticks of `harvest` (harvesters mining,
-/// driving back, queued and unloading) and of `production_repeat`, then on to the pin.
+/// The short every-tick case for every build: the first 200 ticks of `harvest` and of
+/// `production_repeat`, then on to the pin, with the claims each reaches by tick 200 (ore taken,
+/// harvesters driving to ore or mining on a route; a factory with a rally point repeating a unit
+/// half built, money spent). The trips back, the docks and the inbox come later: the every-97 runs
+/// and `every_tick_<name>` assert those.
 #[test]
 fn the_first_ticks_of_harvest_and_production_restore_after_every_tick() {
-    for name in ["harvest", "production_repeat"] {
+    let early: [(&str, &[Claim]); 2] = [
+        ("harvest", &[ORE_CHANGED, HARVESTING, ROUTES]),
+        (
+            "production_repeat",
+            &[FACTORY, PRODUCING, RALLY, REPEATING, SPENT],
+        ),
+    ];
+    for (name, claims) in early {
         let last =
-            run_through_saves_until(name, 1, 200, &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
+            run_through_saves_until(name, 1, 200, claims).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(last, expected(name), "{name}");
     }
 }
