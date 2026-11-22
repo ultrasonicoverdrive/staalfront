@@ -36,7 +36,7 @@ const CLOSE_DE: f64 = 12.0;
 /// part of it near olive grass, never most of it.
 const MAX_CLOSE_SHARE: f64 = 0.5;
 /// The 5th-percentile texel of the terrain texture against the mean body colour.
-const MIN_TEXEL_DE: f64 = 6.0;
+const MIN_TEXEL_DE: f64 = 8.0;
 /// A team stripe against the terrain mean: the stripes are saturated and bright, the terrain muted.
 const MIN_STRIPE_DE: f64 = 30.0;
 /// A unit paint (as a top face renders it) against a ground colour (as rendered).

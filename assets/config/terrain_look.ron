@@ -7,18 +7,22 @@
 // brief); there are no third-party textures. A type without an entry is still
 // drawn: its colour is derived from its name.
 //
-// The picture is chosen to read from 45 to 80 degrees and to stay apart from
-// the unit colours of the factions (sand, olive and weathered blue; slate,
-// charcoal and muted crimson, content/world.md): fresh yellow-green grass,
-// a light tan road of packed earth, saturated blue water, mid grey rock, dark gold ore and a
-// light wooden bridge.
+// The look is the realistic, muted one of style G (WP11.6e, decision Tijmen 15-11-2026, docs/art-style.md
+// section 11): the same family as the muted model palette, chosen to read from 45 to 80 degrees and to stay
+// apart from the unit colours of the factions (sand, olive and weathered blue; slate, charcoal and muted
+// crimson, content/world.md). Dark olive grass (the stored colour is about 1.06 times what reaches the screen,
+// a flat top face renders at about 0.94 of it), a road of packed dry earth, dark grey-teal water, warm light
+// grey rock, a copper-brown ore (its ground matches the ore field nuggets of the decor, (98, 59, 38)) with
+// muted copper flecks, and a dark weathered timber bridge. Nothing here is bright: the readability of both
+// factions on every type is measured by crates/sf_render/tests/terrain_readability.rs, and the shipped values
+// are pinned by `the_shipped_terrain_colours_are_pinned` (sf_render::terrain_look) and tests/ore_look.rs.
 //
 // The minimap (WP2.3) draws every cell in one flat colour of its type, taken
 // from here: `minimap: (r, g, b)` if a look names one, otherwise `color`. Only
 // a look whose texture averages far from its base colour needs it (ore, with
 // its bright flecks). Tests keep each minimap colour near the mean of its
 // texture, at least 50 apart from every other type, and saying what the type
-// is (water blue, ore warm, rock grey, ...).
+// is (water blue-green, ore warm, rock grey, ...; restated for the muted colours in WP11.6e, see docs/rules/terrain.md).
 (
     // Where two types meet (see docs/rules/terrain.md, "How it is drawn").
     edge: (
@@ -58,7 +62,7 @@
             pattern: Noise,
         ),
         (
-            // Packed earth: light tan, clearly apart from the grey rock.
+            // Packed dry earth: tan, warmer and yellower than the grey rock.
             terrain: "road",
             color: (180, 146, 92),
             contrast: 0.12,
@@ -85,7 +89,7 @@
             color: (98, 59, 38),
             contrast: 0.18,
             pattern: Flecks(color: (226, 138, 66)),
-            // The mean of the texture: the flecks make ore read gold-brown.
+            // Near the mean of the texture: the flecks make ore read copper-brown.
             minimap: (130, 76, 44),
         ),
         (

@@ -3884,3 +3884,29 @@ Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the m
   restore check at and past its bound). No pin moved; no change in `sf_sim`.
 * Gap: the generation of a remembered entity id is not checked against its slot (needs an `sf_sim`
   accessor). The world is not saved alongside in these tests; WP13.1e joins both.
+
+### WP11.6e notes: muted terrain palette (21-11-2026)
+
+* **What.** `assets/config/terrain_look.ron` only (plus tests, docs and pictures): the terrain takes the muted look of
+  style G. Stored and rendered colours, old and new: `docs/art-style.md` section 11. Grass is the dark olive of the
+  approved shot (rendered mean (76, 79, 25) between `#4F511B` and `#484E17`); road packed dry earth; water dark
+  grey-teal; rock warm light grey; ore copper-brown (ground = the 11.6d nuggets, (98, 59, 38)); bridge dark timber;
+  shore band muted. Ore levels, flecks and minimap colours moved with it.
+* **Readability** (the main risk, Meridian olive on olive grass): `crates/sf_render/tests/terrain_readability.rs`
+  on the shipped models and textures, rendered as lit; smallest mean margin 12.5 (a full-ore level 1 under the
+  Meridian light transport), 13.7 on the grass; numbers per terrain in `docs/art-style.md` section 11. The grass
+  did not have to move away from the reference.
+* **Rules restated, not kept.** The wording rules of the minimap and of `terrain_types_screenshot.rs`,
+  `terrain_screenshot.rs` and `sf_ui/tests/ui_screenshot.rs` (grass green by 30, water blue by 60, road light, bridge
+  light wood) cannot hold with muted colours and are restated in those tests and in `docs/rules/terrain.md`; the
+  50-apart and within-40-of-the-mean minimap rules hold unchanged (closest pairs 51-53 apart).
+* **Re-pinned.** `ore_look.rs` levels; five terrain goldens in `crates/sf_render/tests/golden/`
+  (`glb_testpack_close_320`, `instancing_10k_320`, `terrain_lod_far_320`, `terrain_lod_far_margin_320`,
+  `terrain_types_far_320`), cause measured: with the old `terrain_look.ron` back in place all of them pass
+  against the old PNGs. `an_empty_cell_has_no_flecks` counts flecks by a new colour threshold.
+* **Not changed, with reasons.** `cell_overlay.ron` (a debug view: its translucent type tints at 35 % stay saturated
+  on purpose so they show against the muted ground; the tests only list the types), `fog_look.ron` (shroud and
+  fog tint are darkness, the ghost colour (88, 96, 112) is not a terrain colour; not re-measured against
+  the new ground), `match_look.ron` (UI colours). The minimap needs no file: it reads `terrain_look.ron`.
+* **Gaps.** Neutral models (the supply truck) are not in the readability rule; the supply truck's paint is 6 from
+  the rock, as it was from the old rock. The pictures are lavapipe renders of scratch match files, not committed.

@@ -319,3 +319,50 @@ generated (`tools/sf_model_gen/src/buildings.rs`, `objects.rs`, `stages.rs`; `se
   and rebar inside the set v4 heap's size, decor budget.
 - **Far levels keep the height**: antennas, crane masts, stakes and posts stay in every level;
   an outer octagon stays eight-sided at LOD2 where it sets the bounds (the automated gun).
+
+## 11. Terrain (WP11.6e, 21-11-2026)
+
+The terrain has the same muted, realistic look as the models (decision Tijmen 15-11-2026, 11.6p). It is
+data only (`assets/config/terrain_look.ron`), no shader or model change; `docs/rules/terrain.md` has the
+rules and the tests. The two reference greens of the approved shot, `#4F511B` (79, 81, 27) and `#484E17`
+(72, 78, 23), are used as numbers only; the stored grass colour is chosen so that what reaches the screen
+lies between them.
+
+| Type | Stored (old) | Stored (new) | Rendered mean (old) | Rendered mean (new) |
+|---|---|---|---|---|
+| grass | (82, 138, 54) | (81, 84, 27), contrast 0.14 | (77, 131, 51) | (76, 79, 25) |
+| road | (206, 184, 132) | (180, 146, 92) | (195, 175, 125) | (171, 139, 87) |
+| water | (40, 108, 164) | (48, 92, 90) | (36, 99, 151) | (44, 85, 83) |
+| rock | (132, 128, 124) | (146, 142, 136), contrast 0.30 | (122, 118, 114) | (135, 132, 126) |
+| ore ground (full cell) | (98, 66, 34) | (98, 59, 38), flecks (226, 138, 66) | (130, 95, 37) | (126, 76, 43) |
+| bridge | (202, 142, 76) | (70, 34, 26) | (167, 117, 62) | (57, 28, 21) |
+
+"Rendered mean" is the mean texel of the texture lit as level ground by the engine's default light (what
+`terrain_readability.rs` measures; the old column is the same measurement on the file of main). The shore
+band is a pale grey-green foam (linear (0.34, 0.42, 0.40) at 0.30; it was (0.80, 0.93, 0.96) at 0.40).
+
+* **Why these colours.** Grass is the reference olive. Water is a dark grey-teal rather than blue because
+  the Veyran hulls are cool grey-blue: on a first, greyer blue-green water a Veyran transport truck sat at dE 8
+  from the water and 90 % of the gunboat's body lay within 12 of it; on the shipped teal the smallest margin is 14.2. The rock is lighter than the first muted
+  attempt so that the Meridian sand and olive (mean body colours 65-106) stand apart from it, and the bridge
+  is a dark timber because every mid-brown was either a Meridian colour or too close to the minimap
+  colours of ore and grass (the 50-apart rule). The ore ground equals the decor nuggets of 11.6d and the
+  fill levels rise from a dark red-brown (56, 36, 28) empty cell, chosen so a Meridian harvester (mean body
+  (65, 60, 42)) is still 13.8 away from a bare cell.
+* **Readability** (`crates/sf_render/tests/terrain_readability.rs`): 25 Meridian and Veyran unit models,
+  three levels of detail each (so the views at zoom 0.30 and 0.12), visible body = non-team triangles that
+  look up, lit with `Lighting::default`, against each terrain texture as rendered and each ore fill
+  level, dE76. Thresholds: mean body colour at least 12 from the terrain mean, at most half of the body area
+  within 12 of it, 5th-percentile texel at least 8, team stripes (eight player colours) at least 30,
+  Meridian and Veyran paints at least 12 from every ground colour. Measured: smallest mean margin per
+  terrain grass 13.7 (the Meridian engineer's far level), road 23.7, water 14.2, rock 16.0, ore 21.9, bridge
+  18.7, ore levels 13.8 / 12.5 / 16.3 / 21.9; largest close share 0.47 (a bare ore cell under the Meridian
+  light transport's far level), 0.31 on rock, 0 on grass, road, water and bridge; smallest 5th-percentile
+  texel margin 10.2; smallest team stripe margin 47.4 (red on ore); closest paint to a ground colour 12.6
+  (the Veyran light paint on rock). The olive of Meridian does not disappear on the olive grass: no
+  face of any model is within 12 of the grass mean in any level (0 % close), the closest unit
+  margin is the Meridian engineer's far-level blob at 13.7. Selection and health tones against every
+  terrain: at least 42.7 (`the_selection_tones_and_the_health_bar_read_against_every_terrain`).
+* **Known gaps.** The neutral supply truck's grey-green paint is about 6 from the new rock (it was 6 from
+  the old rock too), so it is not part of the rule. Fogged ground and the fog ghost colour (`fog_look.ron`)
+  were not re-measured.
