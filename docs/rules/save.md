@@ -638,7 +638,7 @@ shrunk). `silo_continues_through_saves` saves besides after ticks 4400, 4401, 44
 asserts that 4401 and 4460 are refused as `repair` and the run reaches its pin. On the container (4 cores,
 shared with other builds, load 3 to 7) the eleven took 65 minutes side by side: a save and restore
 costs tens of milliseconds on these maps (the fresh world is cloned and the path graphs rebuilt), so
-`harvest` alone took 38 minutes, `money` 45; the rerun of `silo` to tick 4400 passed in 17 minutes; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
+`harvest` alone took 38 minutes, `money` 45; the run of `silo` through the sale (refused exactly after ticks 4401 to 4460, saving again from 4461) passed in 23 minutes; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
 does the first 200 ticks of `harvest` and `production_repeat` in every build, with the claims
 they reach by then, and in sf_sim
 `the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
