@@ -202,23 +202,31 @@ pub(crate) fn restore_production(
         };
         let repeat = r.bool()?;
         let m = r.count(3)?;
-        // `queue_unit` and the repeat refuse a full queue; the free unit of a finished structure
-        // goes into the empty queue of a structure that could take no order before (`limit >= 1`).
-        ensure(m <= limit, "a queue longer than its limit")?;
+        // `queue_unit` and the repeat refuse a full queue. The free unit of a finished structure
+        // is pushed without that check (`advance_production`), behind whatever a `QueueUnit` of
+        // the same tick already put in (a `comes_with` structure that is a factory takes orders
+        // from the tick it finishes): one free item over the limit, at any place in the queue.
+        ensure(
+            m <= limit.saturating_add(1),
+            "a queue longer than its limit",
+        )?;
         let mut items = Vec::with_capacity(m);
-        for k in 0..m {
+        for _ in 0..m {
             let kind = Kind(r.u16()?);
             let free = r.bool()?;
             // A paid item is a unit of the table (`queue_unit`); a free one the unit of a
-            // `comes_with` pair, put into an empty queue, so it is always first.
+            // `comes_with` pair, pushed once, when its structure finishes.
             let known = if free {
-                k == 0 && p.table.comes_with_all().iter().any(|&(_, u)| u == kind)
+                p.table.comes_with_all().iter().any(|&(_, u)| u == kind)
             } else {
                 p.table.get(kind).is_some()
             };
             ensure(known, "a queue item the production stage never holds")?;
             items.push(QueueItem { kind, free });
         }
+        let frees = items.iter().filter(|i| i.free).count();
+        ensure(frees <= 1, "two free units in one queue")?;
+        ensure(m <= limit + frees, "a queue longer than its limit")?;
         let done = r.u32()?;
         // Progress belongs to a paid front item and stops at its build time; it is zero on an
         // empty queue and on a free unit (both reset it or never move it).

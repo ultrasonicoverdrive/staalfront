@@ -93,6 +93,12 @@ pub(super) const HARVEST: crate::harvest::HarvestRules = crate::harvest::tests::
 /// The fresh world: tables and rules, nothing placed. `queue_limit` and `floor` vary the rules for
 /// the digest cases.
 fn fresh_with(queue_limit: u8, floor: u32) -> World {
+    fresh_rules(queue_limit, floor, false)
+}
+
+/// The rules of [`fresh_with`]; with `factory_comes` the factory also comes with a harvester
+/// (a `comes_with` structure that is a factory, which `with_production` allows).
+fn fresh_rules(queue_limit: u8, floor: u32, factory_comes: bool) -> World {
     let defs = vec![
         TerrainDef {
             id: TerrainId(0),
@@ -147,7 +153,11 @@ fn fresh_with(queue_limit: u8, floor: u32) -> World {
             factions: 3,
             requires: Vec::new(),
         }],
-        vec![(REFINERY, HARVESTER)],
+        if factory_comes {
+            vec![(REFINERY, HARVESTER), (FACTORY, HARVESTER)]
+        } else {
+            vec![(REFINERY, HARVESTER)]
+        },
     )
     .unwrap();
     World::with_terrain(WorldConfig::new(11).with_map_size(64, 48), terrain)
@@ -368,6 +378,68 @@ fn the_economy_world_restores_after_every_tick() {
     assert_eq!(seen, [true; 9], "{seen:?}");
 }
 
+/// A factory that comes with a unit and takes a full queue in the tick it finishes: the sim puts
+/// the free unit behind the paid ones, one over `queue_limit` (`advance_production` pushes it
+/// without the limit check). Built through `World::step`; it saves, restores and goes on equal.
+#[test]
+fn a_free_unit_behind_a_full_queue_restores() {
+    let fresh = || fresh_rules(3, 250, true);
+    let mut w = fresh();
+    for c in [
+        Command::PlaceStructure {
+            kind: ANCHOR,
+            cell: cell(4, 4),
+            owner: P0,
+        },
+        Command::PlaceStructure {
+            kind: PLANT,
+            cell: cell(4, 10),
+            owner: P0,
+        },
+    ] {
+        send(&mut w, 0, P0, c);
+    }
+    send(
+        &mut w,
+        1,
+        P0,
+        Command::BuildStructure {
+            kind: FACTORY,
+            cell: cell(10, 4),
+        },
+    );
+    w.step();
+    w.step();
+    // Slots: 0 anchor, 1 plant, 2 the factory under construction.
+    assert_eq!(w.entities.kind[2], FACTORY);
+    let factory = EntityId::new(2, 0);
+    let mut seen = false;
+    for _ in 0..200 {
+        // Three orders every tick: refused while the factory is not standing, accepted in the
+        // tick it finishes (the commands run after `advance_construction`).
+        let t = w.tick.0;
+        for _ in 0..3 {
+            send(&mut w, t, P0, Command::QueueUnit { factory, kind: MAN });
+        }
+        w.step();
+        let p = w.production.as_deref().unwrap();
+        if let Some(f) = p.factories.iter().find(|f| f.id == factory)
+            && f.items.len() == 4
+        {
+            assert!(f.items[3].free && f.items[..3].iter().all(|i| !i.free));
+            seen = true;
+            break;
+        }
+    }
+    assert!(seen, "the free unit never went behind a full queue");
+    let mut straight = w.clone();
+    let mut back = World::restore(fresh(), &w.save().unwrap()).unwrap();
+    for t in 0..200 {
+        assert_eq!(back.step().checksum, straight.step().checksum, "tick {t}");
+        assert_eq!(back.save().unwrap(), straight.save().unwrap(), "tick {t}");
+    }
+}
+
 type Case = (&'static str, &'static str, fn(&mut World, bool));
 
 fn hv(w: &mut World) -> &mut crate::harvest::Harvest {
@@ -494,22 +566,36 @@ fn cases() -> Vec<Case> {
             let n = if at { 3 } else { 4 };
             f.items.resize(n, item);
         }),
+        ("two free units in one queue", "free_count", |w, at| {
+            // A free unit behind a paid one is reachable (a factory that came with a unit and
+            // took a `QueueUnit` in the tick it finished); two free units are not.
+            let f = &mut w.production.as_deref_mut().unwrap().factories[0];
+            f.items.truncate(1);
+            f.done = 0;
+            let free = crate::production::QueueItem {
+                kind: HARVESTER,
+                free: true,
+            };
+            f.items.push(free);
+            if !at {
+                f.items.push(free);
+            }
+        }),
         (
-            "a queue item the production stage never holds",
-            "free_first",
+            "a queue longer than its limit",
+            "queue_limit_free",
             |w, at| {
+                // The free unit may go one over the limit; paid items may not.
                 let f = &mut w.production.as_deref_mut().unwrap().factories[0];
                 f.items.truncate(1);
                 f.done = 0;
-                let free = crate::production::QueueItem {
+                let item = f.items[0];
+                let n = if at { 3 } else { 4 };
+                f.items.resize(n, item);
+                f.items.push(crate::production::QueueItem {
                     kind: HARVESTER,
                     free: true,
-                };
-                if at {
-                    f.items[0] = free;
-                } else {
-                    f.items.push(free);
-                }
+                });
             },
         ),
         (

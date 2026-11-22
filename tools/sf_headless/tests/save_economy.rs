@@ -7,8 +7,8 @@
 //! scenario names the states it claims to carry across; the run saves besides at ticks where a
 //! claim holds and asserts it there, in the world and the restored one.
 //!
-//! `every_economy_scenario_restores_after_every_tick` saves, restores and resaves after every tick
-//! of each (a save the game writes must always restore). `the_coverage_record_is_pinned` keeps
+//! `every_tick_<name>` (one per scenario, `#[ignore]`, release) saves, restores and resaves after
+//! every tick of each (a save the game writes must always restore). `the_coverage_record_is_pinned` keeps
 //! which saved fields some scenario saves non-default; the others have a round trip of their own in
 //! `crates/sf_sim/src/save/economy_tests.rs`.
 
@@ -139,24 +139,64 @@ fn defences_continues_through_saves() {
     check("defences", EVERY, claims_of("defences"));
 }
 
+/// `silo` sells a structure: from then until the sale is over the save is refused as `repair`
+/// (repair and sale are saved in WP13.1c-3). The save at a tick inside that window is refused with
+/// exactly that and nothing else; the saves before and after it go on to the pin.
 #[test]
 fn silo_continues_through_saves() {
-    check("silo", EVERY, claims_of("silo"));
+    let mut gated = Gated {
+        allowed: Some(SaveError::Unsupported("repair")),
+        extra: vec![SILO_SALE.0 - 1, SILO_SALE.0, SILO_SALE.1, SILO_SALE.1 + 1],
+        refused: Vec::new(),
+    };
+    let last = run_through_saves_gated(
+        "silo",
+        EVERY,
+        u64::MAX,
+        claims_of("silo"),
+        &mut BTreeSet::new(),
+        &mut gated,
+    )
+    .unwrap_or_else(|e| panic!("silo: {e}"));
+    assert_eq!(last, expected("silo"));
+    assert_eq!(gated.refused, [SILO_SALE.0, SILO_SALE.1], "silo");
 }
+
+/// The first and the last tick after which the save of `silo` is refused as `repair` (the sale),
+/// measured by `every_tick_silo`.
+const SILO_SALE: (u64, u64) = (4401, 4460);
 
 /// A save after every tick of `name` to the end and its pin: every save restores and every resave
 /// is the save. One test per scenario so the harness runs them side by side; slow (tens of ms a
 /// save), so `#[ignore]`d: `cargo test --release -p sf_headless --test save_economy -- --ignored
-/// every_tick` (`docs/rules/save.md` gives the time).
+/// every_tick` (`docs/rules/save.md` gives the time). In `silo` the ticks of the sale are refused
+/// as `repair` (WP13.1c-3) and only those: the saves go on after it.
 fn every_tick(name: &str) {
-    // `silo` sells a structure from tick 4401 on: repair and sale are saved in WP13.1c-3, so its
-    // saves stop at 4400 (the run goes on to the pin).
-    let until = if name == "silo" { 4400 } else { u64::MAX };
+    let mut gated = Gated::default();
+    if name == "silo" {
+        gated.allowed = Some(SaveError::Unsupported("repair"));
+    }
     let start = std::time::Instant::now();
-    let last = run_through_saves_until(name, 1, until, claims_of(name))
-        .unwrap_or_else(|e| panic!("{name}: {e}"));
+    let last = run_through_saves_gated(
+        name,
+        1,
+        u64::MAX,
+        claims_of(name),
+        &mut BTreeSet::new(),
+        &mut gated,
+    )
+    .unwrap_or_else(|e| panic!("{name}: {e}"));
     assert_eq!(last, expected(name), "{name}");
-    eprintln!("{name}: every tick in {:?}", start.elapsed());
+    if name == "silo" {
+        let want: Vec<u64> = (SILO_SALE.0..=SILO_SALE.1).collect();
+        assert_eq!(gated.refused, want, "silo: the ticks refused as repair");
+    }
+    eprintln!(
+        "{name}: every tick in {:?}, refused {:?}..{:?}",
+        start.elapsed(),
+        gated.refused.first(),
+        gated.refused.last()
+    );
 }
 
 macro_rules! every_tick_tests {

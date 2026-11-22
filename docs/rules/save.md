@@ -566,11 +566,13 @@ stepping 30 ticks, one past refused with the message):
   `apply_from` sets the scaled `build_ticks` right after `place_structure`, `advance_construction`
   counts down).
 * Production: factories not ascending by slot (`get_or_insert`); a rally cell off the map
-  (`set_rally`); more items than `queue_limit` (`queue_unit` and the repeat refuse a full queue; the
-  free unit of a finished structure goes into the queue of a structure that could take no order
-  before it was finished, so it is alone, and `queue_limit >= 1`); a paid item whose kind is not in
-  the table, a free item that is not the unit of a `comes_with` pair or not first ("a queue item the
-  production stage never holds"); `done` above `build_ticks * 1000` of a paid front item, or non-zero
+  (`set_rally`); more items than `queue_limit`, plus one if one of them is free (`queue_unit` and the
+  repeat refuse a full queue; the free unit of a finished structure is pushed without that check,
+  behind whatever a `QueueUnit` of the same tick put in, since a `comes_with` structure that is a
+  factory takes orders from the tick it finishes; so it can stand one over the limit and at any
+  place in the queue); two free items in one queue ("two free units in one queue": a structure
+  finishes once); a paid item whose kind is not in the table, a free item that is not the unit of a
+  `comes_with` pair ("a queue item the production stage never holds"); `done` above `build_ticks * 1000` of a paid front item, or non-zero
   on an empty queue or a free front item ("progress the production stage never leaves":
   `advance_production` clamps at the total, and every change of the front item resets it); an
   unknown status.

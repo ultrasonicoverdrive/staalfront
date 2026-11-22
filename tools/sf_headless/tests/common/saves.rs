@@ -101,6 +101,31 @@ pub fn run_through_saves_covered(
     claims: &[Claim],
     covered: &mut BTreeSet<&'static str>,
 ) -> Result<u64, SaveError> {
+    let mut gated = Gated::default();
+    run_through_saves_gated(name, every, until, claims, covered, &mut gated)
+}
+
+/// The saves [`run_through_saves_gated`] may meet refused: `allowed` is the one refusal that skips
+/// a save tick instead of failing the run; the run saves besides after each tick of `extra`. The
+/// ticks whose save was refused with `allowed` end up in `refused`.
+#[derive(Default)]
+#[allow(dead_code)]
+pub struct Gated {
+    pub allowed: Option<SaveError>,
+    pub extra: Vec<u64>,
+    pub refused: Vec<u64>,
+}
+
+/// [`run_through_saves_covered`] with the gates of `gated`: a save refused with exactly
+/// `gated.allowed` is noted and the run goes on with the world it has; any other refusal fails it.
+pub fn run_through_saves_gated(
+    name: &str,
+    every: u64,
+    until: u64,
+    claims: &[Claim],
+    covered: &mut BTreeSet<&'static str>,
+    gated: &mut Gated,
+) -> Result<u64, SaveError> {
     let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
     assert!(scenario.ais.is_empty(), "{name}: no AI here (WP13.1d)");
     let options = RunOptions::for_scenario(&scenario);
@@ -123,10 +148,17 @@ pub fn run_through_saves_covered(
                 due.push(k);
             }
         }
-        if done > until || (done % every != 0 && due.is_empty()) {
+        if done > until || (done % every != 0 && due.is_empty() && !gated.extra.contains(&done)) {
             continue;
         }
-        let bytes = world.save()?;
+        let bytes = match world.save() {
+            Ok(bytes) => bytes,
+            Err(e) if gated.allowed.as_ref() == Some(&e) => {
+                gated.refused.push(done);
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         covered.extend(world.save_coverage());
         let back: World = World::restore((*fresh).clone(), &bytes)
             .unwrap_or_else(|e| panic!("{name}: restore after tick {done}: {e}"));
