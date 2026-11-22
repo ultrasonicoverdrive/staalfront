@@ -95,34 +95,59 @@ are not involved.
   `every_shipped_type_has_a_look_and_every_look_a_type` fails until somebody has chosen
   its colours. There are no third-party textures: every look is a 128 x 128 tileable
   texture generated in code (one repeat per 4 m, so it is aligned to the cells).
-* **The colours are invented** to read from 45 to 80 degrees and to stay apart from the
-  unit colours of the factions (sand, olive, weathered blue; slate, charcoal, muted
-  crimson, `content/world.md`): fresh yellow-green grass, a light tan road of packed
-  earth (clearly apart from the grey rock), saturated blue
-  water, mid grey rock, dark gold ore with bright flecks and a light wooden
-  bridge with planks.
+* **The colours are invented** (WP11.6e, 21-11-2026: the muted look of style G, `docs/art-style.md`
+  section 11) to read from 45 to 80 degrees and to stay apart from the unit colours of the
+  factions (sand, olive, weathered blue; slate, charcoal, muted crimson, `content/world.md`):
+  dark olive grass, a packed-dry-earth road, a dark grey-teal water, warm light grey rock, a
+  copper-brown ore with muted copper flecks and a dark weathered timber bridge with planks.
+  The old look (fresh yellow-green grass, light tan road, saturated blue water, dark gold ore,
+  light wooden bridge) is gone; the colours are in `terrain_look.ron` and pinned by
+  `the_shipped_terrain_colours_are_pinned`.
 
 | type | look | style |
 |---|---|---|
-| grass | yellow-green patches | |
-| road | packed earth: light tan, low contrast | |
-| water | blue with thin light wave crests | flat, liquid |
-| rock | mid grey with dark cracks | |
-| ore | dark ochre with gold flecks | |
-| bridge | light wood, 8 planks per 4 m with dark gaps | flat |
+| grass | dark olive patches, low contrast | |
+| road | packed dry earth: tan, low contrast | |
+| water | dark grey-teal with thin light wave crests | flat, liquid |
+| rock | warm light grey with dark cracks | |
+| ore | dark copper-brown with muted copper flecks | |
+| bridge | dark weathered timber, 8 planks per 4 m with dark gaps | flat |
 
 Since WP7.1 an ore cell is drawn by how much ore it holds (four fill levels of the look, `terrain_look.ron` `resource`; `economy.md`): the table above is the full cell.
 
 * **The minimap** (WP2.3) draws every cell in one flat colour of its type, taken from the
   same look: `minimap: (r, g, b)` if the entry names one, otherwise its base `color`. The
   look is the one source of a type's colour; the gameplay table `terrain_types.ron` has
-  none. Only ore names a minimap colour (138, 100, 39): its base is the dark ground under
-  the gold flecks, the minimap colour is the mean of the texture. Tests in
+  none. Only ore names a minimap colour (130, 76, 44): its base is the dark ground under
+  the copper flecks, the minimap colour is near the mean of the texture. Tests in
   `sf_render::terrain_look` hold that every minimap colour lies within 40 (RGB distance)
   of the mean of its look's texture, that every pair is at least 50 apart, and that each
-  says what its type is (grass green, water blue, rock a mid grey of low saturation, ore
-  warm and darker than the road, road light tan, bridge light wood). The minimap shades
-  the relief lightly over the colour (at most 18 % either way).
+  says what its type is. **Restated in WP11.6e** because muted colours cannot keep the old
+  margins (the old rules in brackets): grass is olive green (green level with red, blue 40
+  under; was green 30 over both), water a blue-green (blue 25 over red and level with the green;
+  was blue 60 over red and 30 over green), rock a mid grey of low saturation (unchanged), ore
+  warm and darker than the road (unchanged), the road a warm tan lighter than the rock by
+  luminance (was 100 more in the channel sum), the bridge a dark timber darker than the ore
+  (was a light wood with red over 160). The 50-apart rule did hold with the muted colours:
+  the closest pairs are grass and ore, and grass and bridge, at 51 to 53 (grass 81, 84, 27 against
+  ore 130, 76, 44 and against bridge 70, 34, 26). Since fix round 0 of WP11.6e it holds for the
+  four ore fill levels too, each against every other type, on the minimap (at least 50) and as
+  texture mean (more than 25): the closest are every level against the grass, 51.9 to 53.4. For
+  that the empty and the low levels moved off the bridge's dark red-brown: empty (102, 60, 68), a
+  dusty rose-brown, then (116, 56, 56), (124, 66, 50) and the full ore (130, 76, 44). The minimap shades the relief lightly over the
+  colour (at most 18 % either way).
+
+* **Readability against units** (WP11.6e, `crates/sf_render/tests/terrain_readability.rs`):
+  every Meridian and Veyran unit model named in `unit_defs.ron` (27, read from the file; neutral
+  and Network models are left out), all three levels of detail, each seen at the camera pitch of the
+  zoom 0.30 and 0.12 views (`camera.ron`) over eight headings, as the engine renders the faces the
+  camera sees (weighted by their area projected toward the eye) (loaded by the engine's
+  own glb loader, lit with `Lighting::default`) against every terrain texture as the terrain
+  shader renders it (lit as level ground) and every ore fill level: the mean body colour is at
+  least 12 apart (CIE dE76; 12 is chosen, about five just-noticeable differences, not fitted), no more than half the body area lies within 12 of the terrain
+  mean, the 5th-percentile texel is at least 8 away, a team stripe (all eight player colours)
+  at least 30, and no Meridian or Veyran paint is within 12 of a ground colour. The numbers
+  are in the PR and `docs/art-style.md`.
 
 * **Soft borders.** The terrain shader reads one index texel per gameplay cell (the
   texture array layer and the style bits) and blends the four nearest cell centres.

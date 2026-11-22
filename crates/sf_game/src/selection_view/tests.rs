@@ -459,3 +459,91 @@ fn the_ring_grows_with_the_drawn_scale_of_the_model() {
         "{one} px at 1, {two} px at 2"
     );
 }
+
+/// WP11.6e: the selection ring tones and the health bar fills read against every terrain of the
+/// muted look. The terrain colour is its texture mean lit as level ground by the engine's default
+/// light (as `terrain.wgsl` does); the ring and the bar are UI colours drawn as they are.
+#[test]
+fn the_selection_tones_and_the_health_bar_read_against_every_terrain() {
+    use sf_render::scene::Lighting;
+    use sf_render::terrain_look::TerrainLooks;
+    fn lin(s: f32) -> f32 {
+        if s <= 0.04045 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    }
+    fn srgb(l: f32) -> f32 {
+        let l = l.clamp(0.0, 1.0);
+        if l <= 0.003_130_8 {
+            12.92 * l
+        } else {
+            1.055 * l.powf(1.0 / 2.4) - 0.055
+        }
+    }
+    fn lab(c: [f32; 3]) -> [f32; 3] {
+        let [r, g, b] = c.map(lin);
+        let (x, y, z) = (
+            (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047,
+            0.2126 * r + 0.7152 * g + 0.0722 * b,
+            (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883,
+        );
+        let f = |t: f32| {
+            if t > 0.008856 {
+                t.cbrt()
+            } else {
+                7.787 * t + 16.0 / 116.0
+            }
+        };
+        [
+            116.0 * f(y) - 16.0,
+            500.0 * (f(x) - f(y)),
+            200.0 * (f(y) - f(z)),
+        ]
+    }
+    let de = |a: [f32; 3], b: [f32; 3]| {
+        let (a, b) = (lab(a), lab(b));
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    };
+    // Level ground: the normal is up, so the light's share is its Y component towards the light.
+    let l = Lighting::default();
+    let facing = (-l.direction).normalize().y.max(0.0);
+    let lit = [
+        l.ambient.x + l.color.x * facing,
+        l.ambient.y + l.color.y * facing,
+        l.ambient.z + l.color.z * facing,
+    ];
+    let looks = TerrainLooks::embedded();
+    let tones = [
+        ("own ring", OWN),
+        ("enemy ring", ENEMY),
+        ("neutral ring", NEUTRAL_TONE),
+        ("health high", health_color(1.0)),
+        ("health mid", health_color(0.5)),
+        ("health low", health_color(0.1)),
+    ];
+    let mut least = f32::MAX;
+    for name in ["grass", "road", "water", "rock", "ore", "bridge"] {
+        let tex = looks.look_for(name).texture();
+        let n = (tex.len() / 4) as f32;
+        let mut mean = [0.0_f32; 3];
+        for p in tex.chunks(4) {
+            for k in 0..3 {
+                mean[k] += lin(f32::from(p[k]) / 255.0) / n;
+            }
+        }
+        let ground = [0, 1, 2].map(|k| srgb(mean[k] * lit[k]));
+        for (what, c) in tones {
+            let tone = [c.0, c.1, c.2].map(|v| f32::from(v) / 255.0);
+            let d = de(tone, ground);
+            least = least.min(d);
+            assert!(d >= MIN_TONE_DE, "{what} {c:?} on {name}: dE {d:.1}");
+        }
+    }
+    println!("least dE of a selection or health tone on any terrain: {least:.1}");
+}
+
+/// A ring or bar tone against the rendered terrain mean (the rings are thin lines on top of the
+/// terrain, so they need far more than the 12 that two flat patches need).
+const MIN_TONE_DE: f32 = 30.0;
