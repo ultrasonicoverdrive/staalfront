@@ -361,12 +361,7 @@ band is a pale grey-green foam (linear (0.34, 0.42, 0.40) at 0.30; it was (0.80,
   Meridian and Veyran paints at least 12 from every ground colour. Measured (fix round 0): smallest mean
   margin per terrain grass 15.0, road 32.3, water 15.2, rock 19.8, ore 24.5, bridge 16.7, ore levels
   19.4 / 24.6 / 24.3 / 24.5; largest close share 0.32 on rock, 0.10 on ore and bridge, 0.01 or less on the
-  other terrains. The 5th-percentile and stripe margins below are from the first measurement (all faces
-  looking up); the tests still hold them. Smallest 5th-percentile
-  texel margin 10.2; smallest team stripe margin 47.4 (red on ore); closest paint to a ground colour 12.6
-  (the Veyran light paint on rock). The olive of Meridian does not disappear on the olive grass: no
-  face of any model is within 12 of the grass mean in any level (0 % close), the closest unit
-  margin is the Meridian engineer's far-level blob at 13.7. Selection and health tones against every
+  other terrains. Re-measured in fix round 1 on the same faces: smallest 5th-percentile texel margin 13.1 (Meridian light tank L2 on rock); smallest team stripe margin 36.6 (the colour-blind pink (204, 121, 167) on the empty ore cell); closest paint to a ground colour 12.6 (the Veyran light paint on rock). The ore fill levels render as (97, 57, 64), (107, 51, 49), (118, 63, 45) and (126, 76, 43). The olive of Meridian does not disappear on the olive grass: no model has body area within 12 of the grass mean (0 % close); the closest unit margin on grass is 15.0. Selection and health tones against every
   terrain: at least 42.7 (`the_selection_tones_and_the_health_bar_read_against_every_terrain`).
 * **Known gaps.** The neutral supply truck's grey-green paint is about 6 from the new rock (it was 6 from
   the old rock too), so it is not part of the rule. Fogged ground and the fog ghost colour (`fog_look.ron`)

@@ -3930,8 +3930,8 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   grey-teal; rock warm light grey; ore copper-brown (ground = the 11.6d nuggets, (98, 59, 38)); bridge dark timber;
   shore band muted. Ore levels, flecks and minimap colours moved with it.
 * **Readability** (the main risk, Meridian olive on olive grass): `crates/sf_render/tests/terrain_readability.rs`
-  on the shipped models and textures, rendered as lit; smallest mean margin 12.5 (a full-ore level 1 under the
-  Meridian light transport), 13.7 on the grass; numbers per terrain in `docs/art-style.md` section 11. The grass
+  on the shipped models and textures, rendered as lit at the camera pitch; smallest mean margin 15.0 (grass),
+  ore levels 19.4 or more (fix round 1 re-measure); numbers per terrain in `docs/art-style.md` section 11. The grass
   did not have to move away from the reference.
 * **Rules restated, not kept.** The wording rules of the minimap and of `terrain_types_screenshot.rs`,
   `terrain_screenshot.rs` and `sf_ui/tests/ui_screenshot.rs` (grass green by 30, water blue by 60, road light, bridge
@@ -3946,4 +3946,5 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   fog tint are darkness, the ghost colour (88, 96, 112) is not a terrain colour; not re-measured against
   the new ground), `match_look.ron` (UI colours). The minimap needs no file: it reads `terrain_look.ron`.
 * **Gaps.** Neutral models (the supply truck) are not in the readability rule; the supply truck's paint is 6 from
-  the rock, as it was from the old rock. The pictures are lavapipe renders of scratch match files, not committed.
+  the rock, as it was from the old rock. The pictures are lavapipe renders of scratch match files, not committed. Fix round 1: the after pictures were made again on the new ore levels, plus
+  `after_ore_depleted_zoom_*` (tick 2000, harvested cells).
