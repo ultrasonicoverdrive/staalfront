@@ -111,6 +111,9 @@ the world it is still in, the last being 1).
 
 Recorded with the death (`Death::killer`, `Death::assists`), counted per player (`World::tally_of`: kills,
 assists, losses) and per unit (`World::kills_of`), all of it **state**, hashed.
+The tally counters saturate at `u32::MAX` (WP13.1c-1; were `+= 1`): a debug build would panic and a
+release build wrap to 0 on one more death, so the builds would differ. Unreachable in play; below
+the maximum nothing changes (`docs/rules/save.md`).
 
 The rule, which does not read `Shot::hp_after`, `Impact::hp_after` or the order of the shots (the WP5.1 and
 WP5.4 follow-ups: that order follows the slots and would give the kill to whoever has the lowest slot):

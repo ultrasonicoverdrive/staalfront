@@ -2,13 +2,12 @@
 //! worlds by `PartialEq`, reach the gated columns and build worlds the public API cannot.
 
 use sf_math::bytes::ByteWriter;
-use sf_math::{Facing, Fx, Vec2};
+use sf_math::{Fx, Vec2};
 
 use super::*;
 use crate::crowd::CollisionConfig;
 use crate::orders::{GuardTarget, Order};
 use crate::path::ReplanConfig;
-use crate::projectiles::{Projectile, Target};
 use crate::terrain::Cell;
 use crate::units::{Footprint, UnitStats, UnitTable};
 use crate::world::{World, WorldConfig};
@@ -326,7 +325,7 @@ fn busy(mut w: World, ticks: u64) -> World {
 
 /// The world with what a restore does not bring back put equal on both sides: the reports of the
 /// last tick, the stats, the interpolation columns and the checksum history.
-fn settled(mut w: World) -> World {
+pub(super) fn settled(mut w: World) -> World {
     let e = &mut w.entities;
     e.prev_facing.clone_from(&e.facing);
     e.prev_turret.clone_from(&e.turret);
@@ -336,6 +335,7 @@ fn settled(mut w: World) -> World {
     w.arsenal.shots.clear();
     w.arsenal.impacts.clear();
     w.arsenal.attacks.clear();
+    w.arsenal.hurt.clear();
     w.destruction.deaths.clear();
     w.pathing.clear_stats();
     w.crowd.stats = Default::default();
@@ -464,15 +464,15 @@ fn the_header_is_pinned() {
     let w = busy(fresh(), 2);
     let bytes = w.save().unwrap();
     assert_eq!(&bytes[..4], b"SFSV");
-    assert_eq!(&bytes[4..8], &[2, 0, 0, 0]);
+    assert_eq!(&bytes[4..8], &[3, 0, 0, 0]);
     assert_eq!(&bytes[8..16], &w.rules_digest().to_le_bytes());
     assert_eq!(&bytes[16..24], &2u64.to_le_bytes());
-    assert_eq!(&bytes[24..28], &[6, 0, 0, 0]);
+    assert_eq!(&bytes[24..28], &[8, 0, 0, 0]);
     assert_eq!(
         sections(&bytes).iter().map(|s| s.0).collect::<Vec<_>>(),
-        b"WEQPFM".to_vec()
+        b"WEQXDPFM".to_vec()
     );
-    assert_eq!(FORMAT_VERSION, 2);
+    assert_eq!(FORMAT_VERSION, 3);
 }
 
 #[test]
@@ -485,6 +485,9 @@ fn a_wrong_header_is_refused() {
     let mut bad = bytes.clone();
     bad[4] = 1;
     assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Version(1)));
+    // The version before WP13.1c-1 (no combat sections).
+    bad[4] = 2;
+    assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Version(2)));
     let mut bad = bytes.clone();
     bad[9] ^= 0x40;
     assert_eq!(World::restore(fresh(), &bad), Err(SaveError::Rules));
@@ -681,7 +684,8 @@ fn corruptions() -> Vec<Corruption> {
             no_edit,
         ),
         (
-            "a current order the simulation never holds",
+            // A pursuit without an engagement (WP13.1c-1: a pursuit is current only with one).
+            "an engagement the targeting stage never leaves",
             |w| w.entities.order[5] = Order::Pursue(EntityId::new(2, 0)),
             no_edit,
         ),
@@ -964,18 +968,9 @@ type Gate = (&'static str, fn(&mut World));
 /// tick-0 state.
 fn gates() -> Vec<Gate> {
     vec![
-        ("weapons", |w| w.entities.weapon[5][0].wait = 1),
-        ("weapons", |w| {
-            w.arsenal.attacks.push((5, EntityId::new(6, 0)));
-        }),
-        ("targeting", |w| w.entities.eng[5].cool = 1),
         ("buildings", |w| w.entities.build_left[10] = 1),
         ("repair", |w| w.entities.repairing[10] = true),
         ("repair", |w| w.entities.sell_left[10] = 3),
-        ("destruction", |w| w.entities.kills[5] = 1),
-        ("destruction", |w| {
-            w.destruction.tally.push((PlayerId(0), Default::default()));
-        }),
         ("economy", |w| {
             w.harvest = Some(Box::new(crate::harvest::Harvest::new(
                 crate::harvest::tests::RULES,
@@ -1014,22 +1009,6 @@ fn gates() -> Vec<Gate> {
         ("outcome", |w| {
             let rules = crate::outcome::MatchRules::new(&[PlayerId(0), PlayerId(1)]).unwrap();
             w.outcome = Some(Box::new(crate::outcome::Outcome::new(rules)));
-        }),
-        ("projectiles", |w| {
-            w.arsenal.projectiles.insert(Projectile {
-                weapon: 0,
-                owner: EntityId::new(5, 0),
-                player: PlayerId(0),
-                target: Target::Point,
-                aim: p(1, 1),
-                pos: p(2, 2),
-                prev_pos: p(2, 2),
-                height: Fx::ZERO,
-                prev_height: Fx::ZERO,
-                heading: Facing::PLUS_X,
-                span: Fx::ONE,
-                fuse: 9,
-            });
         }),
     ]
 }

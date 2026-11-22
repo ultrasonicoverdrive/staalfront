@@ -213,3 +213,79 @@ fn a_new_entity_in_a_used_slot_starts_ready() {
     spawn(&mut w);
     assert!(at_rest(&w.entities.weapon[i]));
 }
+
+/// A table with armor whose every hashed field can be changed on its own (fix round 0 of
+/// WP13.1c-1): two weapons, one loadout, a two-by-one armor grid.
+fn digest_table(
+    change_weapon: impl FnOnce(&mut WeaponStats),
+    change_loadout: impl FnOnce(&mut Loadout),
+    percent: u16,
+) -> WeaponTable {
+    // The changed weapon is not in the loadout, so a new `kind` needs no other change.
+    let w = stats();
+    let mut other = stats();
+    other.kind = 9;
+    other.projectile = ProjectileKind::Straight;
+    other.projectile_speed_per_tick = Fx::ONE;
+    other.splash_radius = Fx::from_int(2);
+    change_weapon(&mut other);
+    let mut l = Loadout {
+        unit: GUNNER,
+        weapons: vec![GUN],
+    };
+    change_loadout(&mut l);
+    let armor = ArmorTable::new(
+        vec![0, 1],
+        vec![1],
+        vec![(0, 1, percent), (1, 1, 50)],
+        vec![(GUNNER, 1)],
+    )
+    .unwrap();
+    WeaponTable::new(vec![w, other], vec![l])
+        .unwrap()
+        .with_armor(armor)
+        .unwrap()
+}
+
+#[test]
+fn every_weapon_loadout_and_armor_field_is_in_the_rules_digest() {
+    let base = digest_table(|_| {}, |_| {}, 100);
+    // The rules digest of a save is the stored digest; the armor table's own work-out must agree.
+    assert_eq!(base.rules_digest(), base.digest());
+    let armor = base.armor().unwrap();
+    assert_eq!(armor.rules_digest(), armor.digest());
+    type Change = fn(&mut WeaponStats);
+    let weapon: [(&str, Change); 17] = [
+        ("kind", |w| w.kind = 10),
+        ("range", |w| w.range = Fx::from_int(5)),
+        ("min_range", |w| w.min_range = Fx::ONE),
+        ("reload_ticks", |w| w.reload_ticks = 21),
+        ("burst", |w| w.burst = 2),
+        ("burst_delay_ticks", |w| w.burst_delay_ticks = 5),
+        ("damage", |w| w.damage = 6),
+        ("damage_type", |w| w.damage_type = 1),
+        ("projectile", |w| w.projectile = ProjectileKind::Arc),
+        ("projectile_speed_per_tick", |w| {
+            w.projectile_speed_per_tick = Fx::from_int(2)
+        }),
+        ("flight_height", |w| w.flight_height = Fx::ONE),
+        ("guide_turn_per_tick", |w| w.guide_turn_per_tick = 1),
+        ("splash_radius", |w| w.splash_radius = Fx::from_int(3)),
+        ("splash_inner", |w| w.splash_inner = Fx::ONE),
+        ("friendly_fire", |w| w.friendly_fire = false),
+        ("mount", |w| w.mount = Mount::Turret),
+        ("fire_arc", |w| w.fire_arc = 7),
+    ];
+    for (name, change) in weapon {
+        let t = digest_table(change, |_| {}, 100);
+        assert_ne!(t.rules_digest(), base.rules_digest(), "weapon {name}");
+    }
+    let t = digest_table(|_| {}, |l| l.unit = Kind(2), 100);
+    assert_ne!(t.rules_digest(), base.rules_digest(), "loadout unit");
+    let t = digest_table(|_| {}, |l| l.weapons = vec![9], 100);
+    assert_ne!(t.rules_digest(), base.rules_digest(), "loadout weapons");
+    let t = digest_table(|_| {}, |_| {}, 90);
+    assert_ne!(t.rules_digest(), base.rules_digest(), "armor percent");
+    let a = t.armor().unwrap();
+    assert_eq!(a.rules_digest(), a.digest());
+}

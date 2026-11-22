@@ -1,10 +1,14 @@
 # Saving and restoring the world
 
-WP13.1a, extended by WP13.1b (pathing, flowfields, formations, turning). The code is
-`crates/sf_sim/src/save.rs` (format, sections, gates), the `save`/`restore` functions next to each
-struct of `crates/sf_sim/src/path/` and `formation.rs`, and `crates/sf_math/src/bytes.rs` (the byte
-writer and reader). Tests: `crates/sf_sim/src/save/tests.rs`, `crates/sf_sim/src/save/path_tests.rs`,
-`tools/sf_headless/tests/save_paths.rs` and the tests in `bytes.rs`.
+WP13.1a, extended by WP13.1b (pathing, flowfields, formations, turning) and WP13.1c-1 (weapons,
+projectiles, targeting, destruction). The code is `crates/sf_sim/src/save.rs` (format, sections,
+gates, the weapon and engagement columns), the `save`/`restore` functions next to each struct of
+`crates/sf_sim/src/path/`, `formation.rs`, `projectiles.rs` and `destruction.rs`, and
+`crates/sf_math/src/bytes.rs` (the byte writer and reader). Tests:
+`crates/sf_sim/src/save/tests.rs`, `crates/sf_sim/src/save/path_tests.rs`,
+`crates/sf_sim/src/save/combat_tests.rs`, `tools/sf_headless/tests/save_paths.rs`,
+`tools/sf_headless/tests/save_combat.rs` (both run by `tools/sf_headless/tests/common/saves.rs`)
+and the tests in `bytes.rs`.
 
 ## What a save is
 
@@ -36,10 +40,10 @@ Header:
 | Bytes | Field |
 |---|---|
 | 4 | magic `SFSV` |
-| 4 | `format_version`, `u32`, now **2** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`) |
+| 4 | `format_version`, `u32`, now **3** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`; 2 was WP13.1b, without `X`, `D` and the combat columns of `E`) |
 | 8 | `rules_digest`, `u64` (`World::rules_digest`) |
 | 8 | `tick`, `u64`: the number of the next tick to run |
-| 4 | the number of sections, `u32`, now 6 |
+| 4 | the number of sections, `u32`, now 8 |
 
 Then the sections, each a tag byte and a `u32` length, in this order:
 
@@ -52,10 +56,22 @@ Then the sections, each a tag byte and a `u32` length, in this order:
   (`def`), hit points, order, the queued orders (count + orders), `guard_walking`, turret facing,
   turret target (flag + id), the whole crowd memory (every field of `CrowdState`), the turn carry
   (`u16`, thousandths of a step) and the formation memory (every field of `Member`; member modes 0
-  none, 1 lead, 2 direct, 3 flow, 4 wait). A free slot
+  none, 1 lead, 2 direct, 3 flow, 4 wait); then (WP13.1c-1) the four weapon slots (each the reload
+  count `wait`, `u32`, and the shots left of a burst `burst_left`, `u8`), the engagement memory
+  (every field of `Engage`: the order to resume as a flag and an order, `chase`, `anchor`, `held`,
+  `rest`, `aim`, `reach`, `cool`) and the kills (`u16`). A free slot
   holds the neutral values `Entities::clear` writes, so only its generation is written.
 * `Q` command queue: every pending command with its `(tick, player, sequence)` key, then every
   player's next sequence number.
+* `X` projectiles (WP13.1c-1): the store whole: the generation of every slot (count, then each),
+  every slot (a flag, then for a live one every field of `Projectile`: weapon, owner, player,
+  target (0 a point, 1 an entity and its id), aim, position, the position and height of the tick
+  before (not hashed, saved so that a restored store is equal by `PartialEq`), height, heading,
+  span, fuse), then the free list in stack order. `live` is counted.
+* `D` destruction (WP13.1c-1): every wreck in its order (kind 0 vehicle, 1 rubble; unit kind,
+  owner, position, facing, size, footprint as a flag and two `u8`, anchor as a flag and two `u32`,
+  born, expires), then the tally (count, then player, kills, assists, losses). Before `P`: the
+  epoch rule of the path service counts the rubble of the last tick.
 * `P` path service (WP13.1b): `epoch`, the sector epochs, `next_ticket`, `next_slot`, `scan`, the
   planner's memory (`Work`: the local search arrays and heap, the abstract search, the start and
   goal links, the leg's cells, the portal path, the raw route being smoothed), the job in flight
@@ -85,16 +101,27 @@ terrain (whether it has a layer and its digest), the unit-table digests (stats, 
 movement table, the weapon table, the building table and its placement digest, who is which faction,
 every collision and formation setting (each struct destructured without `..`, so a new setting is a
 compile error until it is hashed), the path budget, the flowfield threshold and the replan settings,
-the targeting and destruction settings (or that there are none), and the numbers of every optional
+the targeting and destruction settings (or that there are none; both `write_hash` destructure their
+settings without `..`, WP13.1c-1), and the numbers of every optional
 rule set a world that saves may have: the ore (its rules and the start amount of every field cell,
 through the ore fingerprint, which at `version == 0` is the start), the money rules
 (`credits_per_ore`) and the repair and sale rules (all four numbers). Of the other optional rule
 sets (harvest, production, power, vision, match) only whether the world has them is hashed: a world
-with any of them does not save yet, and their numbers join in WP13.1c; the AI profile digests are
-checked by each AI part on its own (WP13.1d, "The AI" below). A different digest on restore is `SaveError::Rules`
+with any of them does not save yet, and their numbers join in WP13.1c-2; the AI profile digests are
+checked by each AI part on its own (WP13.1d, "The AI" below). The weapon table enters through `WeaponTable::rules_digest`, which destructures the
+table without `..` and returns its stored digest (nothing is recomputed on save or restore); that
+digest is made by `digest_of` when the table is built, which destructures every weapon and loadout
+and hashes the armor table's stored digest (the bytes are the ones the checksum always hashed, so no
+pin moves). The armor table's `rules_digest` destructures its fields and works the digest out again,
+but only a `debug_assert_eq!` against the stored digest uses it. The test
+`every_weapon_loadout_and_armor_field_is_in_the_rules_digest` changes each weapon, loadout and armor
+field on its own and asserts the digest changes, and asserts the armor work-out equals the stored
+digest (so dropping a field fails it in a release build too). A different digest on restore is `SaveError::Rules`
 (`other_assets_or_settings_are_refused`: other hit points in the unit table, another collision
 setting, another seed; `other_ore_money_or_repair_numbers_are_other_rules`: another ore start
-amount, another `credits_per_ore`, another sale time).
+amount, another `credits_per_ore`, another sale time; `other_combat_rules_are_refused`: another
+weapon damage or fire arc, another scan cooldown or pursuit reset, another wreck time or wreck
+size, a world without targeting or without destruction).
 
 ## Errors
 
@@ -112,8 +139,8 @@ refuses, as `Corrupt`:
   points than the kind has (zero for an entity without a table entry), a table structure without an
   anchor cell or a table entry that is not a structure with one, an entity that cannot move (a
   structure, an object) with a behaviour other than idle or an order, an unknown behaviour, order or
-  command tag, a current order `Scatter` (`begin` turns it into a move) or `Pursue` (current only
-  with an engagement, which a save never holds), a queue longer than its ring, a random stream with
+  command tag, a current order `Scatter` (`begin` turns it into a move), a `Pursue` without an
+  engagement (see *Restore checks of WP13.1c-1*), a queue longer than its ring, a random stream with
   an even increment;
 * a free list with a slot that is live, out of range or listed twice, and a free slot that is not
   on the list without being retired (generation `u32::MAX`);
@@ -159,35 +186,52 @@ refuses, as `Corrupt`:
   (`tests/golden.rs` and every `assets/scenarios/*.expected` are unchanged).
 * The reports of the last tick (shots, impacts, attacks, deaths, completions, stalled builds,
   placement and repair refusals) and the stats of the path, crowd and formation passes start empty;
-  they are replaced by the next step and are not hashed.
+  they are replaced by the next step and are not hashed. For the four of the weapon stage
+  (WP13.1c-1): `weapons::update_all` clears `shots`, `impacts`, `attacks` and `hurt` before it does
+  anything else, and nothing in a step reads them before that call (the targeting stage before the
+  weapons reads the entities; the return fire after it reads the `attacks` the same call filled;
+  `reap` reads the `hurt` of the same call and empties it, so `hurt` is empty between ticks
+  anyway). `reap` clears `deaths` first. Only the host reads them between ticks (the presentation,
+  `sf_game/src/fx_events.rs`). Shown: `the_battle_restores_after_every_tick` and the CI scenarios
+  of `save_combat.rs` restore with the reports empty and go on with the same checksums, with saves
+  at ticks where the reports are not empty (claim "reports of the weapon stage").
 
 `def` is saved although it looks derived: a legacy `Spawn` or `Place` entity has `NO_DEF` whatever
 its kind, so the kind alone does not say which.
 
 ## Not saved yet: the gates
 
-Sections of WP13.1c (weapons, projectiles,
-targeting, destruction, buildings, economy, production, power, repair, vision, outcome) are not in
+Sections of WP13.1c-2 (buildings, economy, production, power, repair, vision, outcome) are not in
 the file. `World::save` refuses with `SaveError::Unsupported(section)` every world in which one of
 them holds anything that is not its tick-0 state, so a half-saved world can never load silently.
 The exact test per section (checked in this order, the first one that fails names the section):
 
 | Section | `save` refuses when |
 |---|---|
-| `projectiles` | the projectile store is not equal to a never-used store (`Projectiles::default()`) |
-| `weapons` | a slot is reloading or in a burst, or the last tick left shots, impacts, attacks or damage records (`hurt`) |
-| `destruction` | a wreck, a tally or a death report exists, or a unit has kills |
 | `economy` | the ore changed since the start (`version != 0`), the world has harvest rules, or money was spent |
-| `production`, `power`, `vision`, `outcome` | the world has those rules at all (even at tick 0: their state starts moving in the first step; WP13.1c lifts this) |
-| `targeting` | a unit remembers an engagement (`Engage` not at rest) |
+| `production`, `power`, `vision`, `outcome` | the world has those rules at all (even at tick 0: their state starts moving in the first step; WP13.1c-2 lifts this) |
 | `buildings` | a structure is under construction (`build_left != 0`) |
 | `repair` | a structure is repairing or being sold |
 
-The subsystem gates come first; then, slot by slot, the column gates (the last three rows, and the
-weapon and kills columns of the rows above). The pathing, flowfield, formation and turning gates of
-WP13.1a are gone (WP13.1b saves those sections). Only their state is gated, not the
-presence of the targeting, destruction, building and repair rules; a world with a weapon table is
-not tested here yet (WP13.1c).
+The subsystem gates come first; then, slot by slot, the column gates (the last two rows). The
+pathing, flowfield, formation and turning gates of WP13.1a are gone (WP13.1b saves those sections),
+and so are the projectile, weapon, destruction and targeting gates (WP13.1c-1 saves them; a world
+with a weapon table, targeting and destruction saves, `save_combat.rs`). Only the state of the
+building and repair columns is gated, not the presence of the building and repair rules.
+
+| Part | WP13.1c-1 |
+|---|---|
+| weapon slots (`wait`, `burst_left`) | saved, `E` |
+| shots, impacts, attacks, `hurt` of the last tick | derived (reports, see above) |
+| turret facing and turret target | saved, `E` (since WP13.1a); `prev_turret` derived |
+| weapon table, `by_def`, `armor_of_def`, `widest` | rules (digest) and derived from them |
+| splash index, targeting scratch | scratch (compare equal whatever they hold) |
+| projectiles (generations, rows, free list) | saved, `X`; `live` counted |
+| engagement memory (`Engage`) | saved, `E` |
+| wrecks, tally | saved, `D` |
+| deaths of the last tick | derived (report) |
+| kills | saved, `E` |
+| targeting and destruction settings | rules (digest) |
 
 Not checked on restore, on purpose: an owner against a player count (a world without match or
 placement rules has no player count; nothing outside the gated sections indexes by owner), and a
@@ -247,13 +291,37 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   ticket) and `Active` routes that are not complete (made by a job, with its ticket); flowfield
   routes are complete. A saved `next_ticket` of 0 stays valid: it is the state before the first
   request.
-* **Epoch**: only `refresh_sectors` moves the service's epoch, called from the command loop (before
-  the service, which then replans a job of the old epoch at once: the budget is at least 512 and the
-  fields take at most half, so the job always runs) or from a destruction after it (whose tick saves
-  nothing: `Unsupported("destruction")`). So a saved job is of the service's epoch, and its memory
-  was made on the graph the restore rebuilds. **For WP13.1c**: once a save can follow a map change
-  after the service, a job one epoch behind must be allowed (a bound K on the distance), and then
-  the memory checks below must be skipped for it, as it replans without reading its memory.
+* **Epoch** (rewritten in WP13.1c-1): only `refresh_sectors` moves the service's epoch, by one per
+  call. It is called from the command loop (before the service, which then replans a job of the old
+  epoch at once: the budget is at least 512 and the fields take at most half, so the job always
+  runs, and `Job::run` answers `Replan` to another epoch before it reads anything) or, after the
+  service, from the death stage: `World::reap` despawns every structure the weapons took to zero,
+  and `World::despawn` refreshes the cells of each one once (`refresh_cells`). Nothing else after
+  the service changes the map. So a job saved after tick T is behind the service by exactly the
+  number of structures destroyed in T, and each of them left rubble born on T (a structure always
+  leaves rubble, `reap`; only a placement in the commands of a later tick clears rubble). The
+  restore counts that rubble (`Destruction::rubble_born(tick - 1)`, which is why section `D` comes
+  before `P`) and refuses a job whose distance to the service's epoch (`epoch - job epoch`,
+  wrapping) is anything else: "a job of another epoch than the path service". The bound K is the
+  rubble count; the reachable distance is exactly K, not a range. A job behind the service is
+  replanned by the next service without reading its memory, and its memory was made on a graph the
+  restore does not rebuild (the map before the destruction), so **the memory checks below
+  (`Job::search_fits`, `Job::memory_fits`) are skipped for it** (`Pathing::check_in_flight`); the
+  checks of `Job::restore` (sizes, stages, ticket) still apply. A command before the next service
+  can only move the epoch further on, never back to the job's, so such a job never reads its memory.
+  Shown by `a_job_behind_the_service_restores_and_replans` (the battle of `combat_tests.rs` saved on
+  a tick a structure fell while a route was planned; restored, it runs 120 ticks with the same
+  checksums as the original; the service's epoch one more, or the rubble of that tick taken away,
+  is refused), by `a_job_two_epochs_behind_restores_and_runs_on` (two structures and more fall on
+  that tick, so the job is K >= 2 epochs behind; it restores with K and runs on equal, and one
+  rubble of the tick forgotten is refused) and by `the_battle_restores_after_every_tick`, which
+  saves after every tick and holds a job behind the service at two save ticks.
+  **Why the skip stays without a test that needs it** (fix round 0 of WP13.1c-1): no case was found
+  in which a lagging job's memory fails the rebuilt graph (with the skip removed every test still
+  passes, also with every structure of the battle falling on that tick). It is kept because nothing
+  ties the old memory to the new graph: a structure that falls opens cells, and the portals of the
+  sectors it stood in are made again, so a portal the memory names may not exist on the rebuilt
+  graph; judging that memory could refuse a save the game wrote, and the job never reads it.
 * **Search memory** (the local, abstract and corridor searches, the field builder): arrays of
   another size than the map gives, a heap element out of range, in twice or out of heap order, a
   local parent outside the window or a parent chain that goes round, a local heap element never
@@ -300,8 +368,9 @@ Refused as `Corrupt` (each with a case in `every_impossible_path_or_formation_st
   Wanted or Active). After the service an arrival (`orders`), a formation (`forget_way`) or a
   stuck replan may reset or re-ticket the route while the job stays; the next service drops that
   job unread (`Job::run`), so its save is valid (`a_job_whose_route_was_reset_restores`). The
-  stage rules, the epoch rule and the portal checks apply to every job; the portal checks rest on
-  the epoch rule (see *Epoch* above, for WP13.1c).
+  stage rules and the epoch rule apply to every job, the portal checks to every job of the
+  service's epoch; they rest on the epoch rule (see *Epoch* above: a job behind the service skips
+  them).
 * **Formations**: the serial counter at 0, a formation numbered 0 or twice, `turn_wait` at or above
   the longest turn period (40), `patience` above the setting, `loose` above 20 (`LOOSE_TICKS`),
   members not strictly ascending or not slots, a leader that is not a member, a slot whose `form`
@@ -328,6 +397,80 @@ Single-bit flips of real saves are tried in `no_flip_in_the_path_sections_panics
 of the first 48 bytes of `P`, `F`, `M`, then one bit in every 509th byte; each restored world steps
 four ticks) and none panics; that is a sample, not a proof for every byte string.
 
+## Restore checks of WP13.1c-1
+
+Refused as `Corrupt`; each bound is what the stage that writes the value leaves at the end of a
+tick (the writers are named), and each check has a case in `every_impossible_combat_state_is_corrupt`.
+
+* **Weapon slots** ("a weapon slot the weapon stage never leaves"; `weapons::update_all` is the
+  only writer besides `Entities::fill`/`clear`, which write rest). A slot the entity's table entry
+  has no weapon for (no table entry, an unarmed kind, a slot past the loadout) is at rest. A slot
+  with weapon `w`: `burst_left < w.burst` (a shot takes one off at once: `remaining = left - 1`);
+  inside a burst (`burst_left > 0`) `wait <= w.burst_delay_ticks`, else `wait <= w.tail_ticks()`
+  (the last value set, counted down from the next tick on; a dropped burst sets the tail).
+* **Engagement memory** ("an engagement the targeting stage never leaves"; writers: `targeting.rs`
+  `engage`, `end_engagement`, `update`, `scan`, `return_fire`, `check`, `fall`, and `Engage::forget`
+  from `orders::begin`/`clear`). Without the targeting stage for the entity (no targeting settings,
+  no weapon table, an unarmed kind, no table entry, an object) the memory is at rest and the order is
+  no `Pursue`. Otherwise `cool <= scan_cooldown` (set to it, counted down), `anchor` and `aim` on the
+  map. A mobile unit: its order is a `Pursue` exactly when it has an order to resume (`engage` sets
+  both, every other order change `forget`s); the order to resume is one a unit scans from (idle,
+  hold, guard, attack-move) with its point on the map; when engaged `reach` is the range of one of
+  its weapons (`best_against` gives `w.range`), `held` is set and `rest` is 0 (only a unit that is
+  not pursuing counts rest; `engage` and `return_fire` set it to 0); when not engaged `chase` is off
+  and `aim` and `reach` are zero (`forget`). `rest < pursuit_reset` (at the setting it starts again
+  from 0 and drops `held`), and without `held` `rest` is 0 and the anchor zero. A structure (a
+  defence): no order to resume, no chase, not held, `rest` 0, anchor zero, `reach` zero or the range
+  of one of its weapons.
+* **Kills** ("kills without a weapon or destruction"; "more kills than the tally"). Kills only on an
+  armed entity of a world with destruction; per player the kills of the live entities add up to at
+  most the player's tally of kills (each kill counts in both, `reap`; a death or a new entity in the
+  slot clears the entity's count). A tally at `u32::MAX` is not compared (it saturates). The check
+  assumes **an entity never changes owner**: its kills are summed under its owner now, which is the
+  player whose tally counted them. Nothing in the simulation changes an owner today; a rule that
+  does (capture) must move or clear the kills with it, or this check refuses a real save.
+* **Projectiles** ("a projectile the weapon stage never leaves in flight", `projectiles::reachable`;
+  writers `launch`, `fly` and the `fly_*` functions, `Projectiles::insert`/`remove`). The weapon is
+  in the table and launches one (not instant); a point target only for a guided one (it gives its
+  entity up); the aim on the map (where a target stood); `1 <= fuse <=` the fuse it was launched with
+  (`fuse_for(w, span)`; at zero it goes off); the span of a falling shell zero, of the others at most
+  width + height; the height (and the height of the tick before) zero for a straight or guided one,
+  between zero and the flight height for an arc, above zero and at most the flight height for a
+  falling one; a falling shell (and its place of the tick before) on its aim point; a straight or
+  arcing one within the map grown by `STEP_SLACK` (a 256th of a cell: `with_length` rounds each
+  component of a step, so a shell can stand a few raw units past the edge; not measured, the error
+  does not add up as each step starts from where the last ended); a guided one within the map grown
+  by `speed × (launched fuse - fuse)`, the most it can have flown. The store: generations and rows of
+  one length ("projectile slots of two lengths"), the free list with no live slot, no slot out of
+  range or twice ("the projectile free list"), every free slot on it unless retired at `u32::MAX`
+  ("a free projectile slot is missing from the free list"), an unknown target tag.
+* **Wrecks** ("a wreck the death stage never leaves", `destruction::wreck_reachable`; writers
+  `reap`, `clear_under`). Only in a world with destruction; born before the saved tick, `expires`
+  not before it (`reap` drops it on its `expires` tick), `expires = born + wreck_ticks` (vehicle) or
+  `+ rubble_ticks` (rubble); a kind of the unit table: a vehicle wreck of a mobile kind at least
+  `wreck_min_size` across, of that kind's size, without footprint and anchor; rubble of a structure
+  kind, size zero, facing zero, its footprint the kind's, an anchor with the footprint on the map;
+  the position on the map. In key order, equal keys allowed ("the wrecks are out of order");
+  an unknown kind tag.
+* **Tally** ("a tally out of order, all zero or without destruction"): only with destruction,
+  players strictly ascending, no tally of all zero (`tally_of` adds one only to count something).
+* **Epoch**: see *Epoch* above.
+
+Saturating now (WP13.1c-1, a behaviour change in sf_sim, R7): the tally counters (`kills`,
+`assists`, `losses`, were `+= 1`). Reason: with `+= 1` a restored tally at `u32::MAX` panics in a
+debug build and wraps to 0 in a release build, so the two builds would differ; a saturated counter
+is the same in both. A real game never gets there (four billion deaths). Below
+their maximum the numbers are the same, so no checksum moves (`a_tally_at_its_most_saturates_on_one_more_death`
+pins it, in a release build too); a restored tally at `u32::MAX`
+steps on (`combat_state_at_its_bounds_restores_and_steps`, which also restores every new bound at
+its value: a burst at its delay, a reload at its tail, a cooldown at the setting, `rest` one below
+`pursuit_reset`, kills at `u16::MAX`, an arc at its peak with its launch fuse, a guided missile as
+far off the map as it could fly, and steps 80 ticks). Not checked, on purpose: the projectile and
+engagement ids (looked up, a stale one finds nothing), a projectile's owner, player and heading, a
+wreck's owner, a turret target (since WP13.1a). Single-bit flips of a real save:
+`no_flip_in_the_combat_sections_panics` (every bit of the first 64 bytes of `X` and `D`, one bit in
+every 97th byte of `E`; each restored world steps four ticks). A sample, not a proof.
+
 ## The CI scenarios through saves
 
 `tools/sf_headless/tests/save_paths.rs` runs `bridge_200`, `replan`, `formation_move`, `crowd_jam`,
@@ -342,7 +485,27 @@ carries, routes; `replan` routes, fields, formations and a stuck unit's request 
 `crowd_jam` routes, fields and formations; `turning` turn carries. Each claimed state is asserted at
 each of its save ticks, in the world and in the restored one (`save_contents` equal). `formation_move`
 and `crowd_jam` also run with a save after every one of their first 400 ticks.
-`probe_which_scenarios_save` pins which section refuses each of the other non-AI CI scenarios.
+`probe_which_scenarios_save` pins which section refuses each of the other non-AI CI scenarios
+(after WP13.1c-1: `buildings` for placement and construction, `power` for defences, `vision` for
+vision and vision_targeting, `economy` for the rest).
+
+`tools/sf_headless/tests/save_combat.rs` (WP13.1c-1) does the same for the combat scenarios
+`weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry` and `destruction`, with the
+claims: weapons_reload a reload, a burst, a projectile, reports; projectiles and armour_splash a
+projectile, a reload, reports (armour_splash fires no burst at a save tick); tanks_vs_infantry an
+engaged unit, engagement memory, a reload, a projectile, wrecks, a tally, kills, reports (its units
+walk no routes); destruction a reload, a projectile, wrecks, a tally, kills, reports, routes. The
+reports are asserted in the saved world only (they are derived and start empty). The restored
+world's `SaveContents` equals the original's apart from the reports.
+`every_combat_scenario_restores_after_every_tick` saves, restores and resaves after **every** tick
+of all five to their pins (the every-tick probe: a save the game writes must always restore). It is
+`#[ignore]`d because the workspace tests run in debug; in release on the container it takes about
+30 s for the whole file (`cargo test --release -p sf_headless --test save_combat -- --include-ignored`).
+In `sf_sim` itself `the_battle_restores_after_every_tick` does the same in every build, over the
+battle of `combat_tests.rs` (a 64x48 walled map with the smallest path budget, every projectile
+kind, a burst weapon, units choosing targets, a defence tower, HQs shot down while 18 walkers keep
+the path service busy), comparing each restored world by `PartialEq` and every checksum with an
+uninterrupted run.
 
 ## Guards against a forgotten field
 
@@ -351,8 +514,12 @@ and `crowd_jam` also run with a save after every one of their first 400 ticks.
   the entity columns, `CommandQueue::parts`, `Pathing::save`, `Fields::save`, `Field::save`,
   `Work::save`, `Job::save`, `Route::save`, `Local::save`, `AbstractSearch::save`, `Corridor::save`,
   `Scratch::save`, `IndexedHeap::save`, `Formations::save`, `put_member`,
-  `Arsenal::unsaved_section`, `Ore::at_start`, `Crowd::has_state`, `Targeting::has_state`,
-  `check_unsaved_sections` (destruction, money, repair, placement), `check_crowd`, `put_crowd`,
+  `Arsenal::save_parts`, `Projectiles::save`, `Destruction::save` (and each `Wreck` and `Tally`),
+  `put_weapon` (`SlotState`), `put_engage` and `Combat::engage_fits` (`Engage`),
+  `TargetingConfig::write_hash`, `DestructionConfig::write_hash`, `WeaponTable::rules_digest`,
+  the weapon digest (`WeaponStats`, `Loadout`), `ArmorTable::rules_digest`,
+  `Ore::at_start`, `Crowd::has_state`, `Targeting::has_state`,
+  `check_unsaved_sections` (money, repair, placement), `check_crowd`, `put_crowd`,
   `rules_digest` (the collision, formation and replan settings) and `Turning::write_hash` (in the
   movement digest) for theirs. A field added to any of them is
   a compile error until it is handled here (shown in the PR of WP13.1a: a field `pub(crate) probe:
