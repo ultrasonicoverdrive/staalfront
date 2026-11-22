@@ -319,3 +319,69 @@ generated (`tools/sf_model_gen/src/buildings.rs`, `objects.rs`, `stages.rs`; `se
   and rebar inside the set v4 heap's size, decor budget.
 - **Far levels keep the height**: antennas, crane masts, stakes and posts stay in every level;
   an outer octagon stays eight-sided at LOD2 where it sets the bounds (the automated gun).
+
+## 12. Decor and wrecks (WP11.6d)
+
+Fourteen neutral files (`tools/sf_model_gen/src/decor.rs`): the four wrecks (`neutral_wreck_light_vehicle`,
+`_medium_vehicle`, `_heavy_vehicle`, `_vessel`), two rocks, a fence, a cliff edge, the four ore field
+stages and the broadleaf tree with its fallen twin. No player colour (third slot `paint3`); the decor
+budget (1500 / 500 / 150), the usual LOD, ground and checker rules.
+
+- **Kept from set v3 (Tijmen):** the pine, the fallen and burnt pine, and the burnt broadleaf
+  (`neutral_tree_pine*`, `neutral_tree_broadleaf_burnt`). The pines are dark green and already pass
+  `sf_asset_check`; the burnt trees are black. They are not in set v5 and not wired yet (trees wait for
+  the map WPs). **Replaced in set v5:** the standing and the fallen broadleaf (the set v3 crown is a
+  bright light green), both rocks (olive moss on grey, and both sink 0.3-0.85 m below the ground, which
+  the checker fails), the four wrecks (fail `lod-structure`: LOD2 lacks the `debris` and `scorch`
+  nodes), the fence, the cliff edge and the ore stages (red-brown with white tips). The ore field role
+  of `unit_defs.ron` now shows `neutral_ore_field_stage_04`.
+- **Set v4 stays as it is:** `neutral_tree_1..4_standing/_burnt/_fallen`, `neutral_rock_1/_2`,
+  `neutral_fence`, `neutral_cliff_edge` and the v4 ore fields are untouched files of the `set_v4` pack
+  (the rocks, fence and cliff are 8 to 60 triangle boxes; nothing refers to the four v4 tree families).
+  Set v5 has no tree families 1 to 4; one broadleaf pair is enough until the map WPs say otherwise.
+- **Footprints:** the rocks stay inside the two set v3 rocks (5.04 x 4.17 m and 2.09 x 1.58 m), the
+  fence and cliff edge inside the set v4 files (4.00 x 0.15 and 4.00 x 2.00 m), the ore stages inside the
+  set v4 field (3.1 x 3.0 m), the wrecks inside the vehicle they stand for. Trees are not roles and have
+  no earlier size: the bounds are self-chosen, 2 x 2 cells at most, and pinned at what the recipe draws
+  (standing 5.0 x 4.0 m, fallen 7.1 x 2.4 m).
+- **Palette:** rocks, fence, cliff, ore and wrecks use the `neutral` entry (grey-green stone, rust
+  `accent`, `paint3` light). The broadleaf needs foliage, so there is one new entry, `flora`: foliage
+  `#566246`, sunlit `#687456`, shaded `#3c4630`, bark `#3e342a`, soil `#2e2c28`, dry leaves `#76603a` (no
+  channel of a foliage slot above 120, the green at most 16 over the red:
+  `the_flora_palette_has_the_pinned_values`). The six slots keep their order.
+- **Ore colour:** nuggets are the `accent` slot (122, 74, 48), top and sides, at tone `ORE_TONE` 800 (so
+  about (98, 59, 38) before light), on soil of `rubber` at tone 760: a darker, warmer mineral than the
+  grey tops of the first version, which read near white at 80 degrees. It stays apart from the olive
+  terrain of WP11.6e (brown against green) and from the grey rocks.
+- **Rule: blobs** (`decor::blob`). A rock-like solid is a loft of rings whose radius is jittered by a
+  fixed hash of the *absolute angle*, except at the four compass points, which keep the full radius.
+  The 16-, 8- and 4-sided levels therefore share their extent exactly
+  (`a_blob_keeps_its_extent_in_every_level`), so rocks, nuggets, crowns and the cliff's talus keep
+  their size in the far levels. The base is at `Y = 0`.
+- **Rule: a wreck is burnt.** Every slot of a wreck has a tone ceiling: paints (and the light paint)
+  `SOOT` 200 per mille, rust patches `RUST` 650, steel `BURNT_STEEL` 420 (debris and char strips `CHAR`
+  380), rubber and the dark pits `PIT` 560 (a lower tone crushes the baked corner to black,
+  `no_baked_vertex_crushes_to_black`). The baked colour is held too: no corner of any wreck is brighter
+  than 0.10 in linear luminance (measured 0.061 to 0.072; unburnt paint alone is 0.26). A wreck stays
+  inside the vehicle it stands for (light tank 5.11 x 2.90 m, amphibious transport 6.33 x 3.26 m, heavy
+  tank 7.25 x 3.80 m, gunboat 18.0 x 5.0 m) and has real damage: one track short, a turret thrown to
+  one side, the engine deck burnt through with a frame round the pit, rust-brown patches on the deck and
+  the sides, charred strips along the deck edges, bent plates and chunks. Test:
+  `every_triangle_of_a_wreck_is_burnt`.
+- **Nodes of a wreck:** `hull` (with geometry) -> `turret` -> `barrel` and the empty anchors
+  `fx_smoke_0` and `fx_fire_0` under the hull (not under the turret), in every level. The anchors are
+  **required by `sf_asset_check`** for a wreck (the four set v4 wrecks were left out of set v5 for
+  lacking them). The engine does not read them for wrecks yet: `crates/sf_game/src/fx.rs`
+  (`DrawnAnchors::anchor`) returns nothing for a wreck slot and the wreck smoke starts at the wreck's
+  position; the anchors are kept for a later fx WP. No muzzle. The boat wreck is a vessel for the
+  checker: the waterline `Y = 0` lies inside the hull (keel at -0.4 m); its hull is a loft with a square
+  stern and a bow that narrows to a point. Decor (rocks, fence, cliff, ore, trees) is one `body` node
+  without anchors.
+- **The ore field stages** grow in width and in nuggets (`ORE_NUGGETS` 4, 6, 9, 13) from stage 1 to 4
+  (`the_ore_field_stages_grow` pins the counts as literals).
+- **The fallen broadleaf** lies along its trunk: the root plate at one end, four lumps of foliage
+  along the trunk toward the tip, the trunk running through them.
+- **Contact sheet** `docs/screenshots/wp11.6d/contact_sheet_decor.png` (no labels: the tool draws no
+  text): two models a row, each as blue 45 degrees, blue 80, red 45, red 80, in file-name order: cliff
+  edge and fence; ore stage 1 and 2; ore stage 3 and 4; rock large and small; broadleaf and fallen
+  broadleaf; wreck heavy and light vehicle; wreck medium vehicle and vessel.
