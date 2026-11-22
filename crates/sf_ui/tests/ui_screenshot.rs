@@ -422,9 +422,11 @@ fn minimap_draws_every_cell_where_it_is() {
                     );
                 }
                 if ids[(cz * cw + cx) as usize] == water {
+                    // WP11.6e: the muted water is a blue-green (48, 92, 90), so the old
+                    // `b > r + 60` became `b > r + 25` (see terrain_look/tests.rs).
                     assert!(
-                        shown[2] > shown[0] + 60,
-                        "{w}x{h}: water is blue: {shown:?}"
+                        shown[2] > shown[0] + 25 && shown[2].abs_diff(shown[1]) <= 8,
+                        "{w}x{h}: water is a blue-green: {shown:?}"
                     );
                     checked_water = true;
                 }

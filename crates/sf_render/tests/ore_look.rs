@@ -33,10 +33,10 @@ fn the_shipped_levels_are_pinned() {
     assert_eq!(
         got,
         vec![
-            (0, [84, 64, 44], 0, [84, 64, 44]),
-            (33, [90, 63, 38], 30, [104, 76, 40]),
-            (66, [94, 65, 36], 65, [122, 88, 40]),
-            (100, [98, 66, 34], 100, [138, 100, 39]),
+            (0, [102, 60, 68], 0, [102, 60, 68]),
+            (33, [110, 52, 52], 30, [116, 56, 56]),
+            (66, [112, 58, 46], 65, [124, 66, 50]),
+            (100, [98, 59, 38], 100, [130, 76, 44]),
         ]
     );
 }
@@ -68,7 +68,7 @@ fn the_top_levels_hold_a_full_cell() {
 }
 
 /// Each level's minimap colour is near the mean of its texture (as for the types), and the
-/// levels get lighter and more gold as the cell fills.
+/// levels get lighter and redder as the cell fills (more copper flecks).
 #[test]
 fn level_textures_agree_with_their_minimap_colours_and_rise() {
     let looks = looks();
@@ -108,7 +108,9 @@ fn an_empty_cell_has_no_flecks() {
     let looks = looks();
     let look = looks.look_for("ore");
     let r = looks.resource().unwrap();
-    let bright = |tex: &[u8]| tex.chunks(4).filter(|p| p[0] > 200 && p[1] > 150).count();
+    // A fleck is the look's copper (226, 138, 66) blended in; the ground never gets past a red of
+    // about 130 (WP11.6e: the flecks are muted, so the old green threshold of 150 no longer fits).
+    let bright = |tex: &[u8]| tex.chunks(4).filter(|p| p[0] > 180 && p[1] > 110).count();
     let empty = bright(&look.level_texture(&r.levels[0]));
     let full = bright(&look.level_texture(&r.levels[3]));
     assert_eq!(empty, 0);

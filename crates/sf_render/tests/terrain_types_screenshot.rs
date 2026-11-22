@@ -161,15 +161,24 @@ fn every_type_is_drawn_in_its_own_look() {
     println!(
         "grass {grass:?} road {road:?} water {water:?} rock {rock:?} ore {ore:?} bridge {bridge:?}"
     );
-    assert!(grass[1] > grass[0] && grass[1] > grass[2], "grass is green");
-    assert!(water[2] > water[0] + 40.0, "water is blue");
+    // WP11.6e: the muted look. Grass is dark olive (green level with red at the least, blue far
+    // behind) and water a dark blue-green: the bright water's `b > r + 40` became `b > r + 25`
+    // with a green as strong as the blue.
+    assert!(
+        grass[1] >= grass[0] && grass[1] > grass[2] + 40.0,
+        "grass is olive green"
+    );
+    assert!(
+        water[2] > water[0] + 25.0 && (water[2] - water[1]).abs() <= 8.0,
+        "water is a blue-green"
+    );
     assert!(
         ore[0] > ore[2] + 25.0 && bridge[0] > bridge[2] + 25.0,
         "ore and wood are warm"
     );
     assert!(
         lum(road) > lum(rock) && road[0] > road[2] + 40.0,
-        "the road is light tan packed earth, apart from the grey rock"
+        "the road is warm tan packed earth, apart from the grey rock"
     );
     // Every pair reads apart.
     let all = [
