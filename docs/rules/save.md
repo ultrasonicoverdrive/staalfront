@@ -621,8 +621,13 @@ construction or placement; ore taken; harvesters to ore or mining, on their way,
 load, in a dock queue, a message in a dock inbox, a bay granted, ore delivered, stores, money
 spent; a factory, a unit half built, a rally point, a repeating factory; power totals, a player
 short of power, defences without power; and the combat state of `power` and `defences`).
-`every_economy_scenario_restores_after_every_tick` (`#[ignore]`, release) saves, restores and
-resaves after every tick of all eleven to their pins; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
+`every_tick_<name>` (eleven tests, `#[ignore]`, release: `cargo test --release -p sf_headless
+--test save_economy -- --ignored every_tick`) saves, restores and resaves after every tick of each to
+its pin; `silo` only to tick 4400, because from tick 4401 it sells a structure and the save is
+refused as `repair` (WP13.1c-3; found by the first run of the probe). On the container (4 cores,
+shared with other builds, load 3 to 7) the eleven took 65 minutes side by side: a save and restore
+costs tens of milliseconds on these maps (the fresh world is cloned and the path graphs rebuilt), so
+`harvest` alone took 38 minutes, `money` 45; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
 does the first 300 ticks of `harvest` and `production_repeat` in every build, and in sf_sim
 `the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
 all of it (a dock queue, a full queue mid-item, a structure half built, player 0 short of power)

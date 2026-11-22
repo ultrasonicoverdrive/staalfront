@@ -149,9 +149,12 @@ fn silo_continues_through_saves() {
 /// save), so `#[ignore]`d: `cargo test --release -p sf_headless --test save_economy -- --ignored
 /// every_tick` (`docs/rules/save.md` gives the time).
 fn every_tick(name: &str) {
+    // `silo` sells a structure from tick 4401 on: repair and sale are saved in WP13.1c-3, so its
+    // saves stop at 4400 (the run goes on to the pin).
+    let until = if name == "silo" { 4400 } else { u64::MAX };
     let start = std::time::Instant::now();
-    let last =
-        run_through_saves(name, 1, claims_of(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let last = run_through_saves_until(name, 1, until, claims_of(name))
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
     assert_eq!(last, expected(name), "{name}");
     eprintln!("{name}: every tick in {:?}", start.elapsed());
 }
