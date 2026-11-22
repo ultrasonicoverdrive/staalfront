@@ -531,8 +531,11 @@ stepping 30 ticks, one past refused with the message):
 
 * Ore: another number of field cells ("another number of ore cells", a byte edit in
   `another_number_of_ore_cells_is_refused`); an amount above `max` ("more ore in a cell than the
-  rules allow": `start <= max`, `regrow` stops at `max`, `take` only lowers); `version` at
-  `u64::MAX` ("the ore version cannot advance": `set` adds one; the same rule as the tick).
+  rules allow": `start <= max`, `regrow` stops at `max`, `take` only lowers). The `version` takes any
+  value: it now wraps (`Ore::set`, was `+= 1`; a behaviour change in sf_sim with the reason that a
+  restored `u64::MAX` overflowed on the next change, panicking in a debug build; below the maximum the
+  numbers are the same and the version is not hashed, so no pin moves;
+  `an_ore_version_at_its_maximum_restores_and_wraps`).
 * Harvesters: more records than entity slots (`sync` grows them to the slot count, which never
   shrinks; a record past it would not be unbound by `sync` and `run_dock` would index the entities
   past their end); `load > capacity` (`decide` takes at most the room left); `wait` above

@@ -277,7 +277,7 @@ fn after(n: u64) -> World {
 fn the_economy_world_holds_what_it_claims() {
     let mut w = economy();
     let mut seen = SaveContents::default();
-    let mut max = |a: &mut u32, b: u32| *a = (*a).max(b);
+    let max = |a: &mut u32, b: u32| *a = (*a).max(b);
     for _ in 0..600 {
         w.step();
         let c = w.save_contents();
@@ -462,12 +462,6 @@ fn cases() -> Vec<Case> {
                 .as_mut()
                 .unwrap()
                 .set_amount_for_test(cell(25, 19), 80 + u16::from(!at));
-        }),
-        ("the ore version cannot advance", "ore_version", |w, at| {
-            w.ore
-                .as_mut()
-                .unwrap()
-                .set_version_for_test(u64::MAX - u64::from(at));
         }),
         (
             "a construction the construction stage never leaves",
@@ -684,4 +678,18 @@ fn other_economy_numbers_are_other_rules() {
             "change {k}"
         );
     }
+}
+
+/// The ore version wraps (WP13.1c-2: it was `+= 1`, which a restored `u64::MAX` overflowed on the
+/// next change); a world saved with the version at its maximum restores and steps on.
+#[test]
+fn an_ore_version_at_its_maximum_restores_and_wraps() {
+    let mut w = after(30);
+    w.ore.as_mut().unwrap().set_version_for_test(u64::MAX);
+    let mut back = World::restore(fresh(), &w.save().unwrap()).unwrap();
+    assert_eq!(back.ore.as_ref().unwrap().version(), u64::MAX);
+    for _ in 0..30 {
+        back.step();
+    }
+    assert!(back.ore.as_ref().unwrap().version() < 1000);
 }

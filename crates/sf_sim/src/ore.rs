@@ -210,7 +210,7 @@ impl Ore {
 
     /// Reads section `O` into this fresh ore. Refused: another number of field cells, an amount
     /// above the maximum (the start is at most the maximum, regrowth stops there and a take only
-    /// lowers it), a version that cannot advance (`set` adds one).
+    /// lowers it). The version takes any value (it wraps).
     pub(crate) fn restore(
         &mut self,
         r: &mut sf_math::bytes::ByteReader<'_>,
@@ -227,8 +227,8 @@ impl Ore {
             let i = self.fields[k] as usize;
             self.amount[i] = a;
         }
+        // Any version: `set` adds one wrapping.
         self.version = r.u64()?;
-        ensure(self.version != u64::MAX, "the ore version cannot advance")?;
         self.sum = self.recompute_sum();
         Ok(())
     }
@@ -284,7 +284,9 @@ impl Ore {
             .wrapping_sub(term(i as u32, old))
             .wrapping_add(term(i as u32, new));
         self.amount[i] = new;
-        self.version += 1;
+        // Wrapping (WP13.1c-2): a restored version at its maximum steps on; only equality is ever
+        // asked of it, and below the maximum the numbers are the same.
+        self.version = self.version.wrapping_add(1);
     }
 
     /// The regrowth of tick `tick`: the cells whose turn it is gain
