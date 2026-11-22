@@ -3909,3 +3909,19 @@ Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the m
   restore check at and past its bound). No pin moved; no change in `sf_sim`.
 * Gap: the generation of a remembered entity id is not checked against its slot (needs an `sf_sim`
   accessor). The world is not saved alongside in these tests; WP13.1e joins both.
+
+### WP13.1c-2 notes: saving the economy, construction, production and power (21-11-2026)
+
+* New sections `O` (ore), `H` (harvesters, docks, delivered, stores, capacity), `C` (money spent),
+  `U` (factories), `I` (power totals) and the `build_left` column of `E`; format version 4. The
+  gates `economy`, `production`, `power` and `buildings` are gone; repair, vision and outcome stay
+  gated (WP13.1c-3). The rules digest hashes the numbers of the ore, harvest (with storage),
+  money, production and power rules instead of only their presence. Details, the derived/saved
+  table, every restore bound with its writer, the coverage record: `docs/rules/save.md`.
+* Eleven more CI scenarios now save and continue to their pins with a save every 97 ticks
+  (`tools/sf_headless/tests/save_economy.rs`), and after every tick in release. `match`,
+  `repair_sell`, `vision` and `vision_targeting` still refuse.
+* No pin moved; no change in the simulation's behaviour (the digest refactors of `BuildingTable`
+  and `ProductionTable` destructure their entries and hash the same bytes).
+* Gaps: the restore checks listed as "not checked, on purpose" in save.md (for 13.1h); the reports
+  of the last tick (completions, stalled, refusals, units put out) start empty after a load (13.1e).

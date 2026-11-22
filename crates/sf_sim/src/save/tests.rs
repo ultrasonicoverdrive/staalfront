@@ -332,6 +332,10 @@ pub(super) fn settled(mut w: World) -> World {
     w.stalled.clear();
     w.completions.clear();
     w.placement.rejections.clear();
+    if let Some(p) = w.production.as_deref_mut() {
+        p.rejections.clear();
+        p.produced.clear();
+    }
     w.arsenal.shots.clear();
     w.arsenal.impacts.clear();
     w.arsenal.attacks.clear();

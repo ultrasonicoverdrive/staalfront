@@ -1,13 +1,15 @@
 # Saving and restoring the world
 
-WP13.1a, extended by WP13.1b (pathing, flowfields, formations, turning) and WP13.1c-1 (weapons,
-projectiles, targeting, destruction). The code is `crates/sf_sim/src/save.rs` (format, sections,
+WP13.1a, extended by WP13.1b (pathing, flowfields, formations, turning), WP13.1c-1 (weapons,
+projectiles, targeting, destruction) and WP13.1c-2 (ore, harvesters, stores and money, construction,
+production, power). The code is `crates/sf_sim/src/save.rs` (format, sections,
 gates, the weapon and engagement columns), the `save`/`restore` functions next to each struct of
 `crates/sf_sim/src/path/`, `formation.rs`, `projectiles.rs` and `destruction.rs`, and
 `crates/sf_math/src/bytes.rs` (the byte writer and reader). Tests:
 `crates/sf_sim/src/save/tests.rs`, `crates/sf_sim/src/save/path_tests.rs`,
-`crates/sf_sim/src/save/combat_tests.rs`, `tools/sf_headless/tests/save_paths.rs`,
-`tools/sf_headless/tests/save_combat.rs` (both run by `tools/sf_headless/tests/common/saves.rs`)
+`crates/sf_sim/src/save/combat_tests.rs`, `crates/sf_sim/src/save/economy_tests.rs`,
+`tools/sf_headless/tests/save_paths.rs`, `tools/sf_headless/tests/save_combat.rs`,
+`tools/sf_headless/tests/save_economy.rs` (all run by `tools/sf_headless/tests/common/saves.rs`)
 and the tests in `bytes.rs`.
 
 ## What a save is
@@ -40,10 +42,10 @@ Header:
 | Bytes | Field |
 |---|---|
 | 4 | magic `SFSV` |
-| 4 | `format_version`, `u32`, now **3** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`; 2 was WP13.1b, without `X`, `D` and the combat columns of `E`) |
+| 4 | `format_version`, `u32`, now **4** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`; 2 was WP13.1b, without `X`, `D` and the combat columns of `E`; 3 was WP13.1c-1, without `O`, `H`, `C`, `U`, `I` and `build_left`) |
 | 8 | `rules_digest`, `u64` (`World::rules_digest`) |
 | 8 | `tick`, `u64`: the number of the next tick to run |
-| 4 | the number of sections, `u32`, now 8 |
+| 4 | the number of sections, `u32`, now 13 |
 
 Then the sections, each a tag byte and a `u32` length, in this order:
 
@@ -59,7 +61,8 @@ Then the sections, each a tag byte and a `u32` length, in this order:
   none, 1 lead, 2 direct, 3 flow, 4 wait); then (WP13.1c-1) the four weapon slots (each the reload
   count `wait`, `u32`, and the shots left of a burst `burst_left`, `u8`), the engagement memory
   (every field of `Engage`: the order to resume as a flag and an order, `chase`, `anchor`, `held`,
-  `rest`, `aim`, `reach`, `cool`) and the kills (`u16`). A free slot
+  `rest`, `aim`, `reach`, `cool`) and the kills (`u16`); then (WP13.1c-2) the construction ticks
+  left (`build_left`, `u32`). A free slot
   holds the neutral values `Entities::clear` writes, so only its generation is written.
 * `Q` command queue: every pending command with its `(tick, player, sequence)` key, then every
   player's next sequence number.
@@ -86,6 +89,24 @@ Then the sections, each a tag byte and a `u32` length, in this order:
   sees the arrays only through the running digest.
 * `M` formations: `next_serial`, then every formation (every field).
 
+The sections of WP13.1c-2 follow, each empty in a world without that rule set (the rules digest says
+which rule sets the fresh world has, so the reader knows):
+
+* `O` ore: the number of field cells, the amount of each (`u16`, in field order), the `version`
+  (`u64`). The running sum is derived (recomputed).
+* `H` harvest: the record count, then per slot a bound flag and for a bound harvester `generation`,
+  `load`, the phase (the checksum's tag, 0 search ... 10 manual), `wait`, `cell`, `focus`, `bad`,
+  `dock` (flag + id), `own` (an order), `tries`, `spot` and the mail (count + replies; always empty,
+  see below); then every dock of the last sync (id, owner, point, exit cell as two `i64`, side 0..3,
+  bay: 0 free, 1 reserved + who + `left`, 2 unloading + who + `wait`; the queue as ids; the inbox as
+  sender and message 0 request, 1 arrived, 2 cancel); then the ore delivered per player and, with
+  storage rules, the store and the capacity per player (each a count and `(player, u64)` pairs).
+* `C` money: what each player spent (pairs).
+* `U` production: every factory record (id, rally as flag + cell, `repeat`, the items as kind and
+  free flag, `done`, the status 0 idle, 1 building, 2 waiting for money, 3 waiting for exit, 4
+  missing prerequisite + kind, 5 stopped, 6 not standing).
+* `I` power: the totals of the last recount (player, made, used).
+
 Order tags are the checksum's (0 idle, 1 move, 2 attack, 3 attack-move, 4 guard point, 5 guard
 entity, 6 scatter, 7 hold, 8 pursue). Command tags: 0 `Spawn`, 1 `Place`, 2 `SpawnUnit`, 3
 `PlaceStructure`, 4 `BuildStructure`, 5 `QueueUnit`, 6 `CancelUnit`, 7 `SetRally`, 8 `SetRepeat`, 9
@@ -102,12 +123,21 @@ movement table, the weapon table, the building table and its placement digest, w
 every collision and formation setting (each struct destructured without `..`, so a new setting is a
 compile error until it is hashed), the path budget, the flowfield threshold and the replan settings,
 the targeting and destruction settings (or that there are none; both `write_hash` destructure their
-settings without `..`, WP13.1c-1), and the numbers of every optional
-rule set a world that saves may have: the ore (its rules and the start amount of every field cell,
-through the ore fingerprint, which at `version == 0` is the start), the money rules
-(`credits_per_ore`) and the repair and sale rules (all four numbers). Of the other optional rule
-sets (harvest, production, power, vision, match) only whether the world has them is hashed: a world
-with any of them does not save yet, and their numbers join in WP13.1c-2; the AI profile digests are
+settings without `..`, WP13.1c-1), and for each optional rule set a flag whether the world has it
+and its numbers (WP13.1c-2, each destructured without `..`): the ore (`Ore::write_rules`: `start`,
+`max`, `regrow_amount`, `regrow_period` and the number of field cells; which cells are fields comes
+from the terrain digest), the harvest (`Harvest::write_rules`: all 26 numbers of `HarvestRules`,
+the harvester kinds, and with storage the capacity table and the price of a unit of ore), the money
+(`credits_per_ore`), production (`queue_limit`, `exit_radius`, the build speed `num` and `den`, and
+the production table by its stored digest, `ProductionTable::rules_digest`, which `new` takes over
+every field of every `UnitBuild`, destructured), power (`shortage_floor_permille`,
+`defence_cutoff_permille`) and repair and sale (all four numbers). The building table enters by its
+two digests as since WP13.1a; `digest_of` now destructures `BuildingStats` without `..` (the same
+bytes, no pin moves). Until WP13.1c-2 the ore entered by its fingerprint (the current amounts, so
+only an ore at its start could restore) and harvest, production and power only by their presence;
+that is replaced by the numbers above. Of vision and the match only the presence is hashed: a world
+with either does not save yet (WP13.1c-3). The starting credits are not rules: they are the stores
+at tick 0, state in section `H`. The AI profile digests are
 checked by each AI part on its own (WP13.1d, "The AI" below). The weapon table enters through `WeaponTable::rules_digest`, which destructures the
 table without `..` and returns its stored digest (nothing is recomputed on save or restore); that
 digest is made by `digest_of` when the table is built, which destructures every weapon and loadout
@@ -201,17 +231,16 @@ its kind, so the kind alone does not say which.
 
 ## Not saved yet: the gates
 
-Sections of WP13.1c-2 (buildings, economy, production, power, repair, vision, outcome) are not in
-the file. `World::save` refuses with `SaveError::Unsupported(section)` every world in which one of
+Repair and sale, vision and the outcome are not in the file (WP13.1c-3). `World::save` refuses with `SaveError::Unsupported(section)` every world in which one of
 them holds anything that is not its tick-0 state, so a half-saved world can never load silently.
 The exact test per section (checked in this order, the first one that fails names the section):
 
 | Section | `save` refuses when |
 |---|---|
-| `economy` | the ore changed since the start (`version != 0`), the world has harvest rules, or money was spent |
-| `production`, `power`, `vision`, `outcome` | the world has those rules at all (even at tick 0: their state starts moving in the first step; WP13.1c-2 lifts this) |
-| `buildings` | a structure is under construction (`build_left != 0`) |
+| `vision`, `outcome` | the world has those rules at all (even at tick 0: their state starts moving in the first step; WP13.1c-3 lifts this) |
 | `repair` | a structure is repairing or being sold |
+
+The gates `economy`, `production`, `power` and `buildings` are gone (WP13.1c-2).
 
 The subsystem gates come first; then, slot by slot, the column gates (the last two rows). The
 pathing, flowfield, formation and turning gates of WP13.1a are gone (WP13.1b saves those sections),
@@ -471,6 +500,103 @@ wreck's owner, a turret target (since WP13.1a). Single-bit flips of a real save:
 `no_flip_in_the_combat_sections_panics` (every bit of the first 64 bytes of `X` and `D`, one bit in
 every 97th byte of `E`; each restored world steps four ticks). A sample, not a proof.
 
+## WP13.1c-2: economy, buildings, production, power
+
+| Part | WP13.1c-2 |
+|---|---|
+| ore amounts, `version` | saved, `O`; the running sum derived |
+| harvester records (`units`), docks, delivered, stores, capacity | saved, `H` |
+| claims on ore cells | derived: rebuilt as the inverse of the bound harvesters' cells (`apply` and `sync` keep them so) |
+| `live` (harvester slots of the tick) | derived: the bound slots ascending (only `sync` binds and unbinds, and it lists exactly the slots it binds) |
+| harvester mail | saved as a count, always 0 between ticks: `apply` clears the mail of every bound harvester, and `run_dock` only answers bound ones |
+| harvest rules, kinds, `harvester_def`, `dock_def`, storage table, `per_def`, price | rules (digest) and derived from them |
+| money spent | saved, `C` |
+| `build_left` | saved, `E` |
+| completions, stalled builds | derived (reports): `advance_construction` clears both first; nothing before it in a step reads them (`refresh_power` reads entities only) |
+| placement rejections, production rejections | derived (reports): `World::step` clears them before the commands |
+| units put out (`produced`) | derived (report): `advance_production` clears it first; nothing earlier in the step reads it |
+| factory records (id, rally, repeat, items, done, status) | saved, `U`; `status` is not hashed and no step reads it before writing it, but it is the readout between ticks, so it is saved |
+| power totals | saved, `I`: recounted at the start of every step before anything reads them, but the readout between ticks (`power_of`) and `PartialEq` see the last count, and a plant that fell after it is no longer in a recount |
+| unpowered defences | derived inside the step from the totals |
+| occupancy | derived: rebuilt from the structures as since WP13.1a (a structure under construction occupies its cells, so the same rebuild covers it) |
+
+**Host side, lost for one tick after a load (for WP13.1e):** the reports above start empty in a
+restored world. A host that shows "structure completed", "unit ready", "build stalled: no money" or a
+refusal of the last tick before the load does not show it again after the load. Nothing in the
+simulation reads them across a tick.
+
+**Restore checks** (each the value the writer can leave, with the writer; each with a case in
+`every_economy_bound_restores_and_one_past_it_is_refused`, the value at the bound restoring and
+stepping 30 ticks, one past refused with the message):
+
+* Ore: another number of field cells ("another number of ore cells", a byte edit in
+  `another_number_of_ore_cells_is_refused`); an amount above `max` ("more ore in a cell than the
+  rules allow": `start <= max`, `regrow` stops at `max`, `take` only lowers); `version` at
+  `u64::MAX` ("the ore version cannot advance": `set` adds one; the same rule as the tick).
+* Harvesters: more records than entity slots (`sync` grows them to the slot count, which never
+  shrinks; a record past it would not be unbound by `sync` and `run_dock` would index the entities
+  past their end); `load > capacity` (`decide` takes at most the room left); `wait` above
+  `max(retry_period, recheck_period, call_timeout, mine_period - 1)` (every value `decide`,
+  `search`, `park`, `go_return`, `dock_walk_failed` and `apply` set; otherwise it counts down);
+  `cell`, `focus` or `bad` neither `NO_CELL` nor a field cell (chosen from cells with ore, a
+  player's order onto a cell with ore, a claimed cell); `own` with a point off the map (cell centres,
+  dock, queue and park points on the map, or the unit's own order, checked in `E`); `tries >
+  max_tries` (at `max_tries` the walk is given up or the counter reset; it can stay at `max_tries`
+  after a search that parks); `spot > 2 * queue_rows` (`queue_walk`: `1 + 2 * row + side`); a
+  non-empty mail; two bound harvesters on one cell ("two harvesters claim one ore cell"); an
+  unknown phase.
+* Docks: ids not ascending by slot (`sync` builds the list in slot order; `dock_index` searches
+  it); an exit cell off the map or a point that is not its centre (`new_dock` clamps the exit onto
+  the map); a dock whose refinery still lives in its slot with another owner, point, exit or side
+  than `new_dock` gives it (owner and anchor never change; a dock whose refinery died after the
+  harvest stage is not compared and is dropped by the next `sync`); `left > grant_timeout` (set to
+  it, counted down from the next tick); unloading `wait >= unload_period` (set to `unload_period`
+  on arrival and counted down once in the same `run_dock`, or set to `unload_period - 1`); a queue
+  with a harvester twice or with the holder (`run_dock` queues only one that is neither); an inbox
+  not strictly ascending by sender slot (`apply` sends at most one message per harvester, in slot
+  order, and `run_dock` empties it every tick); an unknown side, bay or message.
+* Per-player lists (delivered, stores, capacity, spent): players not strictly ascending ("player
+  totals out of order"; `add_to`, `pay` insert sorted); power totals the same ("power totals out of
+  order", `refresh_power`).
+* Construction: `build_left` above the build ticks of the kind's building entry, or non-zero on an
+  entity without a table entry or a cell ("a construction the construction stage never leaves";
+  `apply_from` sets the scaled `build_ticks` right after `place_structure`, `advance_construction`
+  counts down).
+* Production: factories not ascending by slot (`get_or_insert`); a rally cell off the map
+  (`set_rally`); more items than `queue_limit` (`queue_unit` and the repeat refuse a full queue; the
+  free unit of a finished structure goes into the queue of a structure that could take no order
+  before it was finished, so it is alone, and `queue_limit >= 1`); a paid item whose kind is not in
+  the table, a free item that is not the unit of a `comes_with` pair or not first ("a queue item the
+  production stage never holds"); `done` above `build_ticks * 1000` of a paid front item, or non-zero
+  on an empty queue or a free front item ("progress the production stage never leaves":
+  `advance_production` clamps at the total, and every change of the front item resets it); an
+  unknown status.
+
+Not checked, on purpose (looser than reachable, not needed for safety; for 13.1h): that a harvester
+in ToOre or Mine has a cell and one in ToDock a dock; a harvester's `generation` against its slot;
+that a harvester waits in at most one dock queue; the bay holder and queue entries being harvesters;
+`MissingPrerequisite(kind)` naming a building; the free item's kind against the factory's own
+`comes_with`; the power totals against the standing structures (they are the count of the start of
+the last step, which the restore cannot redo); the stores and capacities against the structures.
+None of them is reached by a save the game writes; each only by a hand-made file.
+
+**Coverage record** (lesson 3; `the_coverage_record_is_pinned` in `save_economy.rs`): over the saves
+every 97 ticks of the eleven scenarios below, these saved values are non-default at some save tick:
+the ore amounts and version; bound and unbound harvester records, load, phases to ore, mine, no
+dock, driving, queued, granted and unload, wait, cell, dock, own, spot; docks, their free, reserved
+and unloading bays, queues and an `arrived` message in an inbox; delivered, stores, capacity, money
+spent; `build_left`; factory records with rally, repeat, items, progress and the statuses idle,
+building, waiting for money, waiting for exit; power made and used. Never non-default there: a
+harvester's `generation` (every scenario spawns harvesters into fresh slots), `focus`, `bad`,
+`tries`, the phases search, park, called and manual at a save tick, the mail (empty by the rule
+above), a dock's owner other than 0 and side other than +x (in the eleven scenarios), request and
+cancel messages, a free queue item, the statuses missing prerequisite, stopped and not standing.
+`fields_no_scenario_reaches_round_trip` (sf_sim) sets every one of them (the mail excepted) and
+round-trips the world by `PartialEq` with a byte-equal resave.
+
+**Mutations** (each made in a scratch edit, the named test failing, then undone): listed in the PR
+of WP13.1c-2.
+
 ## The CI scenarios through saves
 
 `tools/sf_headless/tests/save_paths.rs` runs `bridge_200`, `replan`, `formation_move`, `crowd_jam`,
@@ -485,9 +611,20 @@ carries, routes; `replan` routes, fields, formations and a stuck unit's request 
 `crowd_jam` routes, fields and formations; `turning` turn carries. Each claimed state is asserted at
 each of its save ticks, in the world and in the restored one (`save_contents` equal). `formation_move`
 and `crowd_jam` also run with a save after every one of their first 400 ticks.
-`probe_which_scenarios_save` pins which section refuses each of the other non-AI CI scenarios
-(after WP13.1c-1: `buildings` for placement and construction, `power` for defences, `vision` for
-vision and vision_targeting, `economy` for the rest).
+`tools/sf_headless/tests/save_economy.rs` (WP13.1c-2) does the same for `placement`,
+`construction`, `ore_256`, `harvest`, `storage`, `money`, `production`, `production_repeat`,
+`power`, `defences` and `silo`, each with its claims (a structure half built and the reports of
+construction or placement; ore taken; harvesters to ore or mining, on their way, unloading, with a
+load, in a dock queue, a message in a dock inbox, a bay granted, ore delivered, stores, money
+spent; a factory, a unit half built, a rally point, a repeating factory; power totals, a player
+short of power, defences without power; and the combat state of `power` and `defences`).
+`every_economy_scenario_restores_after_every_tick` (`#[ignore]`, release) saves, restores and
+resaves after every tick of all eleven to their pins; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
+does the first 300 ticks of `harvest` and `production_repeat` in every build, and in sf_sim
+`the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
+all of it (a dock queue, a full queue mid-item, a structure half built, player 0 short of power)
+and compares by `PartialEq` and checksum. `probe_which_scenarios_still_refuse` pins the rest:
+`match` (vision), `repair_sell` (outcome), `vision` and `vision_targeting` (vision).
 
 `tools/sf_headless/tests/save_combat.rs` (WP13.1c-1) does the same for the combat scenarios
 `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry` and `destruction`, with the

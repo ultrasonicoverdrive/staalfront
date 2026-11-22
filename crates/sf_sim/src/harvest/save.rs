@@ -505,6 +505,170 @@ impl Harvest {
     }
 }
 
+/// Test hooks: the harvest state is private to this module.
+#[cfg(test)]
+impl Harvest {
+    /// The first bound harvester and the first dock.
+    fn first_bound(&mut self) -> &mut Core {
+        &mut self.units.iter_mut().find(|h| h.core.bound).unwrap().core
+    }
+
+    /// Sets one value of the case `what` at its bound (`at`) or one past it, for the restore checks
+    /// (`economy_tests.rs`). Panics on an unknown case.
+    pub(crate) fn edit_for_test(&mut self, what: &str, at: bool) {
+        let r = self.rules;
+        let past = u16::from(!at);
+        match what {
+            "load" => self.first_bound().load = r.capacity + past,
+            "wait" => {
+                let most = r
+                    .retry_period
+                    .max(r.recheck_period)
+                    .max(r.call_timeout)
+                    .max(r.mine_period - 1);
+                self.first_bound().wait = most + past;
+            }
+            "tries" => self.first_bound().tries = r.max_tries + u8::from(!at),
+            "spot" => self.first_bound().spot = (2 * r.queue_rows + past) as u8,
+            "cell" => self.first_bound().bad = if at { NO_CELL } else { 0 },
+            "own" => {
+                let x = if at { 64 } else { 65 };
+                self.first_bound().own = Order::Move(Vec2::new(Fx::from_int(x), Fx::ONE));
+            }
+            "mail" => {
+                if !at {
+                    self.units.iter_mut().find(|h| h.core.bound).unwrap().mail =
+                        vec![Reply::Granted];
+                }
+            }
+            "claims" => {
+                let cells: Vec<u32> = self
+                    .units
+                    .iter()
+                    .filter(|h| h.core.bound && h.core.cell != NO_CELL)
+                    .map(|h| h.core.cell)
+                    .collect();
+                let mut bound = self.units.iter_mut().filter(|h| h.core.bound);
+                let (a, b) = (bound.next().unwrap(), bound.next().unwrap());
+                a.core.cell = cells[0];
+                b.core.cell = if at { NO_CELL } else { cells[0] };
+            }
+            "records" => {
+                if !at {
+                    self.units.push(Hv {
+                        core: Core::NONE,
+                        mail: Vec::new(),
+                    });
+                }
+            }
+            "reserved" => {
+                self.docks[0].bay = Bay::Reserved {
+                    who: EntityId::new(7, 0),
+                    left: r.grant_timeout + past,
+                }
+            }
+            "unloading" => {
+                self.docks[0].bay = Bay::Unloading {
+                    who: EntityId::new(7, 0),
+                    wait: r.unload_period - 1 + past,
+                }
+            }
+            "queue" => {
+                self.docks[0].bay = Bay::Reserved {
+                    who: EntityId::new(7, 0),
+                    left: 1,
+                };
+                let q = if at { 8 } else { 7 };
+                self.docks[0].queue = vec![EntityId::new(9, 0), EntityId::new(q, 0)];
+            }
+            "inbox" => {
+                let second = if at { 9 } else { 8 };
+                self.docks[0].inbox = vec![
+                    Mail {
+                        from: EntityId::new(8, 0),
+                        msg: Msg::Request,
+                    },
+                    Mail {
+                        from: EntityId::new(second, 0),
+                        msg: Msg::Cancel,
+                    },
+                ];
+            }
+            "dock_order" => {
+                if !at {
+                    self.docks.swap(0, 1);
+                }
+            }
+            "dock_point" => {
+                if !at {
+                    self.docks[0].point.x += Fx::EPSILON;
+                }
+            }
+            "dock_owner" => {
+                if !at {
+                    self.docks[0].owner = PlayerId(9);
+                }
+            }
+            "delivered" => {
+                self.delivered = if at {
+                    vec![(PlayerId(0), 5), (PlayerId(1), 0)]
+                } else {
+                    vec![(PlayerId(1), 5), (PlayerId(0), 0)]
+                }
+            }
+            _ => panic!("unknown case {what}"),
+        }
+    }
+
+    /// Changes one rule (save tests): 0 a harvest number, 1 the harvester kinds, 2 a storage
+    /// capacity, 3 the price of a unit of ore.
+    pub(crate) fn rules_edit_for_test(&mut self, which: u8) {
+        match which {
+            0 => self.rules.queue_rows += 1,
+            1 => self.kinds.push(Kind(999)),
+            2 => self.storage.as_mut().unwrap().table[0].1 += 1,
+            _ => self.storage.as_mut().unwrap().price += 1,
+        }
+    }
+
+    /// Puts every saved harvest value that no CI scenario saves non-default into this state, each
+    /// at a value the harvest stage can leave (the targeted round trip of the coverage record).
+    pub(crate) fn set_unreached_for_test(&mut self, field: u32) {
+        let r = self.rules;
+        let mut bound = self.units.iter_mut().filter(|h| h.core.bound);
+        let phases = [
+            Phase::Search,
+            Phase::Park,
+            Phase::ToDock(Call::Called),
+            Phase::Manual,
+        ];
+        for (k, phase) in phases.into_iter().enumerate() {
+            let Some(hv) = bound.next() else { break };
+            let c = &mut hv.core;
+            c.phase = phase;
+            c.generation = 3 + k as u32;
+            c.focus = field;
+            c.bad = field;
+            c.tries = r.max_tries;
+        }
+        let d = &mut self.docks[0];
+        d.side = Side::NegY;
+        d.inbox = vec![
+            Mail {
+                from: EntityId::new(7, 0),
+                msg: Msg::Request,
+            },
+            Mail {
+                from: EntityId::new(8, 0),
+                msg: Msg::Cancel,
+            },
+        ];
+        // `side` is the refinery's: a dock that no longer stands (slot reused) is not compared.
+        d.id = EntityId::new(d.id.index(), d.id.generation() + 1);
+        d.owner = PlayerId(1);
+    }
+}
+
 /// What the harvest state holds, for [`crate::save::SaveContents`].
 #[derive(Copy, Clone, Default)]
 pub(crate) struct HarvestCounts {

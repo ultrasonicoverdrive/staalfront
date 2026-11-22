@@ -233,6 +233,25 @@ impl Ore {
         Ok(())
     }
 
+    /// Sets an amount without the rules (save tests).
+    #[cfg(test)]
+    pub(crate) fn set_amount_for_test(&mut self, cell: Cell, amount: u16) {
+        let i = self.index(cell).unwrap();
+        self.set(i, amount);
+    }
+
+    /// Sets the version (save tests).
+    #[cfg(test)]
+    pub(crate) fn set_version_for_test(&mut self, version: u64) {
+        self.version = version;
+    }
+
+    /// Changes the regrowth amount (save tests: another rule).
+    #[cfg(test)]
+    pub(crate) fn set_regrow_for_test(&mut self, amount: u16) {
+        self.rules.regrow_amount = amount;
+    }
+
     /// Whether `index` (row-major) is a field cell.
     pub(crate) fn is_field_index(&self, index: u32) -> bool {
         self.fields.binary_search(&index).is_ok()
