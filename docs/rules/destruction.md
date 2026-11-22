@@ -111,6 +111,9 @@ the world it is still in, the last being 1).
 
 Recorded with the death (`Death::killer`, `Death::assists`), counted per player (`World::tally_of`: kills,
 assists, losses) and per unit (`World::kills_of`), all of it **state**, hashed.
+The tally counters saturate at `u32::MAX` (WP13.1c-1; were `+= 1`): a debug build would panic and a
+release build wrap to 0 on one more death, so the builds would differ. Unreachable in play; below
+the maximum nothing changes (`docs/rules/save.md`).
 
 The rule, which does not read `Shot::hp_after`, `Impact::hp_after` or the order of the shots (the WP5.1 and
 WP5.4 follow-ups: that order follows the slots and would give the kill to whoever has the lowest slot):
@@ -192,7 +195,7 @@ across, or with the `--fight` option of `sf_game` (every armed mobile unit attac
 base), which `--shots-tick N` waits for before taking the screenshots of `--shots`.
 
 The wrecks and rubble are drawn from the models of the art sets (the vehicle wrecks `neutral_wreck_light_vehicle`,
-`..._medium_...` and `..._heavy_...` of set v3, which has them, and `neutral_rubble_1x1` to `4x5` of set v5 since WP11.6c, set v4 before): a
+`..._medium_...` and `..._heavy_...` of set v5 since WP11.6d, set v3 before (it lacked the LOD2 nodes), and `neutral_rubble_1x1` to `4x5` of set v5 since WP11.6c, set v4 before): a
 vehicle's by its size (in the shipped data up to 1.2 cells light, up to 1.3 medium, the rest heavy), rubble by the nearest footprint
 area, scaled to fit the structure's real footprint; a dark primitive of the right size stands in if a model does
 not load (with a warning). The model files, the size bounds and the colour are data in

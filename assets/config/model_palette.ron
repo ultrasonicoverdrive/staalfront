@@ -35,6 +35,18 @@
             rubber: (46, 44, 40),
             accent: (122, 74, 48),
         ),
+        // Plants (WP11.6d: the broadleaf tree and its fallen twin; no team material either):
+        // paint = foliage, paint2 = shaded foliage, paint_light = sunlit foliage (the `paint3`
+        // slot), metal = bark, rubber = soil, accent = dry leaves. Dark olive greens, muted.
+        "flora": (
+            paint: (86, 98, 70),
+            paint_light: (104, 116, 86),
+            paint2: (60, 70, 48),
+            paint2_shade: (72, 82, 58),
+            metal: (62, 52, 42),
+            rubber: (46, 44, 40),
+            accent: (118, 96, 58),
+        ),
         // The automated Network defences (WP11.6c: the automated gun, the unmanned artillery):
         // graphite plates with an amber lamp; they carry the player colour like a faction.
         "network": (

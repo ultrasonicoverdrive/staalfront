@@ -275,6 +275,19 @@ impl ArmorTable {
     pub fn digest(&self) -> u64 {
         self.digest
     }
+
+    /// The digest worked out again from the fields (the guard of the rules digest of a save,
+    /// WP13.1c-1). Destructured without `..`: a new field fails to compile until it is hashed.
+    pub(crate) fn rules_digest(&self) -> u64 {
+        let ArmorTable {
+            damage_types,
+            armor_types,
+            percent,
+            units,
+            digest: _,
+        } = self;
+        digest_of(damage_types, armor_types, percent, units)
+    }
 }
 
 fn digest_of(

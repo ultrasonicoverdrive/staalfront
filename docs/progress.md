@@ -3619,6 +3619,31 @@ What it does not settle:
 
 * **Fix round 5 (B4).** The ticket counter skips 0 (`next_ticket_after`, used by all eight increments in `path.rs`) and `Job::restore` refuses a job with ticket 0, so a command's route (ticket 0) can never make an unowned, unchecked job owned before `serve`. Case in `every_impossible_job_state_is_corrupt`, `the_ticket_counter_skips_zero`; no pin moved.
 
+### WP13.1c-1 notes: saving weapons, projectiles, targeting and destruction (20-11-2026)
+
+* Format version 3: sections `X` (the projectile store whole) and `D` (wrecks and tally, before
+  `P`); the entity section gains the weapon slots, the engagement memory and the kills. The gates for
+  projectiles, weapons, targeting and destruction are gone; the gates of WP13.1c-2 (buildings,
+  economy, production, power, repair, vision, outcome) stay. Details: `docs/rules/save.md`.
+* Derived, not saved: the shots, impacts, attacks and damage records of the last tick (cleared by
+  `weapons::update_all` before anything reads them) and the deaths (cleared by `reap`).
+* Epoch rule: a job saved after a tick in which structures fell is behind the service by exactly
+  the rubble born then; that is allowed (and nothing else), and its memory is not judged (the next
+  service replans it unread). `a_job_behind_the_service_restores_and_replans`.
+* Rules digest: the weapon table through `WeaponTable::rules_digest`, the weapon and armor digests,
+  the targeting and destruction settings, all destructured without `..` (same bytes for the checksum).
+* Tally counters saturate (were `+= 1`); same values below `u32::MAX`, no pin moved.
+* Five combat CI scenarios (`weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`,
+  `destruction`) run through a save every 97 ticks and end on their pins
+  (`tools/sf_headless/tests/save_combat.rs`); the every-tick probe over all five passes in release
+  (ignored in debug). In `sf_sim`, `the_battle_restores_after_every_tick` saves after every tick of a
+  700-tick battle with every projectile kind and a job behind the service at two ticks.
+* Not saved yet (WP13.1c-2): buildings, economy, production, power, repair, vision, outcome; so
+  `defences` (power), `vision_targeting` (vision) and `repair_sell` (economy) still refuse.
+* Known gap (for 13.1h): a projectile's or wreck's owner and a projectile's heading are not checked
+  (any value is reachable or harmless); the slack of a straight or arcing shell past the map edge
+  (`STEP_SLACK`) is a reasoned bound, not a measured one.
+
 ### WP9.3c notes: the defence lock gate (14-11-2026)
 
 * **What changed.** Data only: `assets/ai/normal.ron`, both goal lists end at the second refinery (no tower, advanced defences, radar or bunker). Tests re-pinned with cause (below); `docs/rules/ai.md` "Defence lock (WP9.3c)"; PLAN note of 14-11-2026; screenshots `docs/screenshots/wp9.3c/`.
@@ -3872,6 +3897,18 @@ Rules and numbers: `docs/rules/audio.md` section 3c (Power, Volume against the m
 * **Also**: `play_at_scaled` with scale 0 starts nothing (it took a voice slot); config tests for the shipped values, a file without the new fields, the range edges; a mapped original is left alone with the load full; the heavy-moment numbers (0.719, 0.703, 0.627) are pinned.
 * **Mutations** (each reverted, failing tests named in the PR): see the PR body.
 * **Gaps**: not listened to by the builder (Tijmen did, 18-11-2026, see "Heard." above); the cue limiter is a gain model; the master limiter has no attack time (a little distortion on a sharp transient is possible, not judged by ear); the steady fight is 5 dB louder than the music at most, by decision (confirmed by Tijmen 18-11-2026).
+
+### WP11.6d notes: decor and wrecks in style G (18-11-2026)
+
+Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and bake; PR #152 in review). Render only: nothing in `sf_sim`, `sf_ai`, `sf_headless`, `pinned.rs` or `ci.yml`.
+
+* **Built** (`tools/sf_model_gen/src/decor.rs`, 14 files in `assets/set_v5`): four wrecks (light, medium, heavy vehicle, boat), `neutral_rock_large/_small`, `neutral_fence`, `neutral_cliff_edge`, the four ore field stages and the broadleaf tree and its fallen twin. Triangles (LOD0/1/2): cliff 974/344/120, fence 432/132/60, ore 358/110/50, 514/154/70, 748/220/100, 1060/308/140, rock large 1482/88/40, small 858/88/40, broadleaf 494/114/46, fallen 478/122/64, wrecks heavy 996/228/92, light 826/210/74, medium 1294/350/126, vessel 757/157/119. `sf_asset_check assets/set_v5`: 171 files, no finding.
+* **Kept from set v3**: the pine, the fallen and burnt pine, the burnt broadleaf (dark green or black, they pass the checker; not in set v5, not wired). **Replaced**: both rocks and the four wrecks (they fail the checker: sunk below the ground, LOD2 without the `debris` / `scorch` nodes), the bright broadleaf, the fence and cliff edge of set v4 (60 and 8 triangles), the ore stages. Reasons in `docs/art-style.md` section 12.
+* **New palette entry `flora`** (foliage, bark, soil, dry leaves) for the broadleaf; no existing palette value or bake constant changed, and none of the 157 earlier files changed a byte (`git status` after the regeneration showed only the 14 new files).
+* **Wired** (model paths only): `models.ron` (pack `set_v5`), `wrecks.ron` (three vehicle wrecks, set v3 -> set v5), `unit_defs.ron` (`ore_field` -> `neutral_ore_field_stage_04`); the pinned strings in `wreck_looks.rs` and `sf_data/tests/units.rs` follow. The boat wreck has no class in `wrecks.ron` (no vessel leaves a wreck).
+* **New kit rules**: blobs keep their extent in every level (jitter on the absolute angle, compass points at full radius), a wreck is burnt (soot, steel, debris and pit tones), wrecks have hull, turret, barrel and the fx anchors. Tests: `tools/sf_model_gen/tests/decor.rs` and the table-driven tests of `models.rs` (wreck and scenery branches, 14 new footprints), the 14 files pinned in `generator.rs` (`PINNED_DECOR`), `far_levels.rs` leaves the new files out of the pre-round table, `set_v5_load.rs` (file count, anchors for wrecks, a `decor` contact sheet).
+* **Sweep fixes (21-11-2026)**: ore nuggets are a darker, warmer mineral (`accent` at tone 800); wrecks are soot-dark (`SOOT` 200, rust patches at 650, charred strips) and every slot is held to its tone and to a baked brightness of 0.10 (measured 0.061-0.072); the boat has a lofted hull with a pointed bow; the fallen broadleaf lies along its trunk; the wreck anchors are required by the checker, not read by the engine (`fx.rs`), and the node test checks `fx_fire_0` under the hull; an in-game decor picture (`decor_in_game_both_factions.png`, scratch test, decor is not a role so no M1 match can place it).
+* **Gaps**: the decor is not placed on any map yet (the map WPs do that); the wrecks are seen in the game only after a fight (`destruction_screenshot`); the boat wreck is unused; broadleaf height is 4.8 m (a low tree); the wreck anchors are unused by the engine.
 
 ### WP13.1d notes: saving the computer player's state (20-11-2026)
 

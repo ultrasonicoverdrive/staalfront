@@ -162,11 +162,18 @@ impl TargetingConfig {
             && (1..=MAX_PURSUIT_RESET_TICKS).contains(&self.pursuit_reset)
     }
 
+    /// In the checksum and in the rules digest of a save. Destructured without `..`: a new
+    /// setting fails to compile until it is hashed.
     pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
+        let TargetingConfig {
+            scan_cooldown,
+            pursuit,
+            pursuit_reset,
+        } = self;
         h.write_bytes(SETTINGS_TAG);
-        h.write_bytes(&self.scan_cooldown.to_le_bytes());
-        h.write_fx(self.pursuit);
-        h.write_bytes(&self.pursuit_reset.to_le_bytes());
+        h.write_bytes(&scan_cooldown.to_le_bytes());
+        h.write_fx(*pursuit);
+        h.write_bytes(&pursuit_reset.to_le_bytes());
     }
 }
 
