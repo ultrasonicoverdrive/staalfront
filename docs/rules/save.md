@@ -627,7 +627,7 @@ its pin; `silo` only to tick 4400, because from tick 4401 it sells a structure a
 refused as `repair` (WP13.1c-3; found by the first run of the probe). On the container (4 cores,
 shared with other builds, load 3 to 7) the eleven took 65 minutes side by side: a save and restore
 costs tens of milliseconds on these maps (the fresh world is cloned and the path graphs rebuilt), so
-`harvest` alone took 38 minutes, `money` 45; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
+`harvest` alone took 38 minutes, `money` 45; the rerun of `silo` to tick 4400 passed in 17 minutes; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
 does the first 300 ticks of `harvest` and `production_repeat` in every build, and in sf_sim
 `the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
 all of it (a dock queue, a full queue mid-item, a structure half built, player 0 short of power)
