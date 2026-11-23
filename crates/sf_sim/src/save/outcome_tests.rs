@@ -429,8 +429,10 @@ fn cases() -> Vec<Case> {
             "a repair the repair stage never leaves",
             "repairing on a unit",
             |w, at| {
+                // Both below full hit points: the unit is refused for not being a structure.
                 let slot = if at { 2 } else { 5 };
                 w.entities.hp[2] = 39;
+                w.entities.hp[5] = 1;
                 w.entities.repairing[slot] = true;
             },
         ),
@@ -610,9 +612,20 @@ fn repair_or_sale_without_repair_rules_is_refused() {
     let mut fresh = fresh_for(Some(&[P0, P1, P2]), RULES);
     fresh.repair = None;
     assert_eq!(
-        World::restore(fresh, &bare.save().unwrap()),
+        World::restore(fresh.clone(), &bare.save().unwrap()),
         Err(SaveError::Corrupt("a sale the repair stage never leaves"))
     );
+    // A repair: player 2's construction centre below full hit points, the sale taken away.
+    bare.entities.sell_left[3] = 0;
+    bare.entities.hp[2] = 39;
+    bare.entities.repairing[2] = true;
+    assert_eq!(
+        World::restore(fresh.clone(), &bare.save().unwrap()),
+        Err(SaveError::Corrupt("a repair the repair stage never leaves"))
+    );
+    // Without either it restores.
+    bare.entities.repairing[2] = false;
+    assert!(World::restore(fresh, &bare.save().unwrap()).is_ok());
 }
 
 /// The match rules enter the rules digest by number: another player list (other players, or one
