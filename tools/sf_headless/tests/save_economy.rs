@@ -100,7 +100,6 @@ const SCENARIOS: [(&str, &[Claim]); 12] = [
             SPENT,
             STORED,
             POWER,
-            WRECKS,
             ECONOMY_REPORTS,
         ],
     ),
@@ -218,7 +217,7 @@ every_tick_tests! {
 /// `sell_ticks` right after its order), then on to the pin.
 #[test]
 fn the_repairs_and_sales_of_repair_sell_restore_after_every_tick() {
-    let last = run_through_saves_window("repair_sell", 380, 500, &[REPAIRING, SELLING, DEFEAT])
+    let last = run_through_saves_window("repair_sell", 380, 500, &[REPAIRING, SELLING])
         .unwrap_or_else(|e| panic!("repair_sell: {e}"));
     assert_eq!(last, expected("repair_sell"));
 }
@@ -290,8 +289,13 @@ fn the_coverage_record_is_pinned() {
         "harvester.wait",
         "ore.amount",
         "ore.version",
+        "outcome.begun",
+        "outcome.defeats",
+        "outcome.result.won",
         "power.made",
         "power.used",
+        "repairing",
+        "sell_left",
         "spent",
         "stored",
     ]
