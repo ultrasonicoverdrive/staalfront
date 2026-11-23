@@ -188,8 +188,8 @@ fn rifleman(w: &mut World, tick: u64, owner: PlayerId, x: i32, y: i32, me: u32, 
 
 /// Three players (each a construction centre: slots 0, 1, 2), a barn of player 0 (slot 3) that a
 /// rifleman of player 1 (slot 4) shoots and is then removed, an idle rifleman of player 2 (slot 5);
-/// the barn is repaired from tick 40. Player 0 sells its construction centre at tick 70 (defeated
-/// in that tick: it stops standing at the order) and its barn at 90. Then with
+/// the barn is repaired from tick 40; player 0 sells its construction centre at tick 70 (defeated
+/// in that tick: it stops standing at the order) and its barn at 90; then with
 /// `draw` players 1 and 2 sell theirs at tick 120 (a draw), else only player 1 does (player 2
 /// wins).
 fn match_world(draw: bool) -> World {
@@ -454,7 +454,7 @@ fn cases() -> Vec<Case> {
             "defeat twice",
             |w, at| {
                 oc(w).defeats.push((if at { P1 } else { P0 }, Tick(80)));
-                // Two defeats of three players: decided, so the result is the win of player 2.
+                // Two defeats of three players: decided, so the result is the win of player 2 (`P2`).
                 oc(w).result = Some(MatchResult {
                     tick: Tick(80),
                     verdict: Verdict::Won(P2),
@@ -565,7 +565,7 @@ fn mid_match() -> World {
     w
 }
 
-/// The bytes of `w`; for the result-tag case the tag byte of the draw (2) is made 3.
+/// The bytes of `w`; for the result-tag case the tag byte of the draw (2) is made 3 (unknown).
 fn bytes_of(name: &str, w: &World) -> Vec<u8> {
     let mut bytes = w.save().unwrap();
     if name == "result tag" && w.match_result().is_some() {

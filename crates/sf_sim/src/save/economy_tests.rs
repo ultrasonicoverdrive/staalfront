@@ -833,8 +833,8 @@ fn an_ore_version_at_its_maximum_restores_and_wraps() {
     assert!(back.ore.as_ref().unwrap().version() < 1000);
 }
 
-/// WP13.1c-3a, the 13.1c-2 bounds with structures in sale: a structure being sold does not stand
-/// (`is_standing` is false), so it gives no power, no storage, no dock and builds nothing. Player 0
+/// Structures in sale against the economy bounds (`docs/rules/save.md`, the repair section): a
+/// structure being sold does not stand (`is_standing` is false), so it gives no power, no storage, no dock and builds nothing. Player 0
 /// sells its refinery, its factory (with a queue) and its silo at tick 200, player 1 its plant at
 /// 205; a refund lands in the store whatever the capacity, so the store holds more than it. Saved,
 /// restored and resaved after every tick from 195 to 280, going on with the restored world: every
