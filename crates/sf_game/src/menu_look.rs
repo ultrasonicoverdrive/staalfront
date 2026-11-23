@@ -139,6 +139,12 @@ pub struct Words {
     pub paused_title: String,
     pub settings_title: String,
     pub start_match: String,
+    /// The start menu's match against the computer opponent (WP9.4c).
+    pub start_ai_match: String,
+    /// The button that chooses its level; `{level}` is the word of the level (`ai_level_names`).
+    pub ai_level: String,
+    /// The word of each level of `ai_levels.ron`: `(profile name, what the player reads)`.
+    pub ai_level_names: Vec<(String, String)>,
     pub start_sandbox: String,
     pub settings: String,
     pub quit: String,
@@ -192,6 +198,16 @@ pub struct Words {
     pub sound_ra_not_found: String,
     pub sound_ra_loading: String,
     pub sound_ra_found: String,
+}
+
+impl Words {
+    /// What the player reads for the AI level `level` (its name when it has no word, which `check` rules out).
+    pub fn ai_level_name<'a>(&'a self, level: &'a str) -> &'a str {
+        self.ai_level_names
+            .iter()
+            .find(|(n, _)| n == level)
+            .map_or(level, |(_, w)| w.as_str())
+    }
 }
 
 /// The whole of `menu_look.ron`, checked.
@@ -283,6 +299,21 @@ impl MenuLook {
         }
         if !caps.contains(&self.defaults.frame_cap) {
             return Err("defaults.frame_cap must be one of frame_caps".into());
+        }
+        // Every shipped AI level has its word, and no word is for a level that is not shipped (WP9.4c).
+        let levels = &crate::ai_level::AiLevels::embedded().levels;
+        let named: Vec<&String> = self.words.ai_level_names.iter().map(|(n, _)| n).collect();
+        if named.len() != levels.len() || !levels.iter().all(|l| named.contains(&l)) {
+            return Err(format!(
+                "words.ai_level_names must name exactly the levels of ai_levels.ron ({})",
+                levels.join(", ")
+            ));
+        }
+        if self.words.ai_level_names.iter().any(|(_, w)| w.is_empty()) {
+            return Err("words.ai_level_names has an empty word".into());
+        }
+        if !self.words.ai_level.contains("{level}") {
+            return Err("words.ai_level must have a {level} place".into());
         }
         let mut seen: Vec<Action> = Vec::new();
         for row in self.key_groups.iter().flat_map(|g| &g.rows) {
@@ -405,6 +436,18 @@ mod tests {
             [&*w.start_match, &*w.start_sandbox, &*w.settings, &*w.quit],
             ["Match", "Sandbox", "Settings", "Quit"]
         );
+        // WP9.4c: the words of the computer opponent's level, one per shipped level.
+        assert_eq!(w.start_ai_match, "Match against the computer");
+        assert_eq!(w.ai_level, "Computer level: {level}");
+        assert_eq!(
+            w.ai_level_names,
+            [
+                ("easy".to_owned(), "Easy".to_owned()),
+                ("normal".to_owned(), "Normal".to_owned()),
+                ("hard".to_owned(), "Hard".to_owned())
+            ]
+        );
+        assert_eq!(w.ai_level_name("hard"), "Hard");
         assert_eq!(
             [&*w.resume, &*w.restart, &*w.main_menu, &*w.back],
             ["Resume", "Restart", "Main menu", "Back"]
@@ -464,6 +507,17 @@ mod tests {
         assert!(broken("quit: \"Quit\",", "").is_err());
         assert!(broken("dim: (0, 0, 0, 170),", "dim: (0, 0, 0, 170), colour: 1,").is_err());
         assert!(MenuLook::from_ron("not ron").is_err());
+        // Every shipped AI level has a word, and only those (WP9.4c).
+        assert!(broken(", (\"hard\", \"Hard\")", "").is_err());
+        assert!(
+            broken(
+                "(\"hard\", \"Hard\")",
+                "(\"hard\", \"Hard\"), (\"brutal\", \"Brutal\")"
+            )
+            .is_err()
+        );
+        assert!(broken("(\"hard\", \"Hard\")", "(\"hard\", \"\")").is_err());
+        assert!(broken("Computer level: {level}", "Computer level").is_err());
         // The unchanged file is fine.
         assert!(broken("width_px: 760", "width_px: 760").is_ok());
     }

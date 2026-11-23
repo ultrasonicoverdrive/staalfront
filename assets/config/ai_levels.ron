@@ -1,0 +1,9 @@
+// The difficulty levels of the computer opponent (WP9.4c): the shipped profiles that count as levels, in the
+// order the start menu cycles them, and the one a player who never chose has. A level is the file name of a
+// profile under `assets/ai/` without `.ron` (`easy` is `assets/ai/easy.ron`). This is the one place that
+// lists them: `--ai <level>`, the start menu and the tests read it. The words the player reads
+// ("Easy", "Normal", "Hard") are in `menu_look.ron`; the numbers of each level are in its profile file.
+(
+    default: "normal",
+    levels: ["easy", "normal", "hard"],
+)

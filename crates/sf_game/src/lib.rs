@@ -106,6 +106,7 @@
 //! three screenshots (close-up, middle, whole map) and exits. Both are what
 //! CI runs on the software adapters. See the README, "Benchmark (M0)".
 
+pub mod ai_level;
 pub mod announce;
 pub mod args;
 pub mod bench;
@@ -178,6 +179,11 @@ pub fn run(preset: Preset) -> i32 {
     let mut options = Options::from_env(preset);
     for warning in &options.warnings {
         eprintln!("{name}: {warning}");
+    }
+    // `--ai` with something the game will not start with (WP9.4c): said once, nothing starts.
+    if let Some(refused) = &options.ai_refused {
+        eprintln!("{name}: {refused}");
+        return 2;
     }
     // The player's settings (WP11.5a): read before the window is made, because the window mode, the
     // frame cap and the present mode depend on them. A bad file is said once and replaced by the

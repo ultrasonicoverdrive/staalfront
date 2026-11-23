@@ -60,6 +60,10 @@ pub struct Settings {
     pub keys: BTreeMap<Action, Vec<Binding>>,
     /// The volumes and the original Red Alert audio switch (WP11.5b).
     pub sound: SoundSettings,
+    /// The level of the computer opponent (WP9.4c): a profile name of `ai_levels.ron`, `None` = never
+    /// chosen, so the default level stands. A name that is no longer shipped is read as the default
+    /// ([`crate::ai_level::AiLevels::or_default`]).
+    pub ai_level: Option<String>,
 }
 
 impl Default for Settings {
@@ -73,6 +77,7 @@ impl Default for Settings {
             palette: d.palette,
             keys: BTreeMap::new(),
             sound: SoundSettings::default(),
+            ai_level: None,
         }
     }
 }

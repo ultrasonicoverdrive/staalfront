@@ -126,6 +126,13 @@ pub struct Options {
     /// the computer opponent the file gives a player (`FILE` may be a bare name: `m1_ai` is
     /// `assets/matches/m1_ai.ron`). Sets the scene to [`Scene::Match`]. `Some(None)` is the default match; `None` is no match.
     pub match_file: Option<Option<PathBuf>>,
+    /// `--ai LEVEL` (WP9.4c, only with `--match`): every computer player of the match plays this shipped
+    /// profile (`assets/config/ai_levels.ron`: easy, normal, hard) instead of the one the match file names.
+    /// Only ever a shipped level: a bad one is in [`Options::ai_refused`] instead.
+    pub ai_level: Option<String>,
+    /// `--ai` was given something the game will not start with (no `--match`, no value, or a level that is
+    /// not shipped): the message. `sf_game::run` prints it and ends without starting.
+    pub ai_refused: Option<String>,
     pub screen: ScreenMode,
     pub present: Present,
     /// `--windowed`, `--fullscreen` or `--resolution` was given: the window mode of the command line
@@ -199,6 +206,8 @@ impl Options {
             fight: false,
             harvest: false,
             match_file: None,
+            ai_level: None,
+            ai_refused: None,
             screen: ScreenMode::Windowed,
             present: Present::Vsync,
             screen_given: false,
@@ -221,6 +230,9 @@ impl Options {
         let mut present_given = false;
         // A flag that chooses or tunes the scene: the player who gave it does not want the menu.
         let mut scene_flag = false;
+        // `--ai LEVEL` (WP9.4c): checked against the scene once every flag has been read.
+        let mut ai_given = false;
+        let mut ai_value: Option<String> = None;
 
         let mut args = args.into_iter().peekable();
         while let Some(arg) = args.next() {
@@ -278,6 +290,10 @@ impl Options {
                         args.next_if(|next| !next.starts_with("--"))
                             .map(PathBuf::from),
                     );
+                }
+                "--ai" => {
+                    ai_given = true;
+                    ai_value = args.next_if(|next| !next.starts_with("--"));
                 }
                 "--map" => o.map_dir = value(&mut o.warnings),
                 "--map-cells" => {
@@ -454,6 +470,33 @@ impl Options {
             }
         }
 
+        // The level of the computer opponent (WP9.4c): only with a match, and only a shipped one. A refused
+        // flag stops the start (`sf_game::run`), it is not a warning: a player who asked for `hard` and got
+        // `normal` would not know.
+        if ai_given {
+            let levels = crate::ai_level::AiLevels::embedded();
+            match (&ai_value, o.scene == Scene::Match) {
+                (_, false) => {
+                    o.ai_refused =
+                        Some("--ai needs --match: the sandbox has no computer opponent".to_owned());
+                }
+                (None, _) => {
+                    o.ai_refused = Some(format!(
+                        "--ai needs a level: the shipped levels are {}",
+                        levels.list_text()
+                    ));
+                }
+                (Some(v), true) => match levels.find(v) {
+                    Some(level) => o.ai_level = Some(level.to_owned()),
+                    None => {
+                        o.ai_refused = Some(format!(
+                            "--ai {v}: unknown level, the shipped levels are {}",
+                            levels.list_text()
+                        ));
+                    }
+                },
+            }
+        }
         // The record is of a match: the world it is made of is the match file's (`docs/rules/hitch_log.md`).
         if o.record.is_some() && o.scene != Scene::Match {
             o.warnings
@@ -778,5 +821,54 @@ mod tests {
         let replay = parse(Preset::Game, "--match --replay play.ron");
         assert_eq!(replay.replay, Some(PathBuf::from("play.ron")));
         assert_eq!(parse(Preset::Game, "--replay play.ron").replay, None);
+    }
+
+    /// `--ai LEVEL` (WP9.4c): with `--match` it sets the shipped level; without `--match`, without a value
+    /// or with a level that is not shipped it is refused with a message (and sets no level), and without
+    /// the flag nothing changes.
+    #[test]
+    fn ai_sets_the_level_of_a_match_and_is_refused_otherwise() {
+        let plain = parse(Preset::Game, "--match m1_ai");
+        assert_eq!(
+            (plain.ai_level.clone(), plain.ai_refused.clone()),
+            (None, None)
+        );
+        for level in ["easy", "normal", "hard"] {
+            let o = parse(Preset::Game, &format!("--match m1_ai --ai {level}"));
+            assert_eq!(o.ai_level.as_deref(), Some(level));
+            assert_eq!(o.ai_refused, None);
+            assert_eq!(o.scene, Scene::Match);
+        }
+        // The flag may come first, and the match flag after it keeps its file name.
+        let o = parse(Preset::Game, "--ai hard --match m1_ai");
+        assert_eq!(o.ai_level.as_deref(), Some("hard"));
+        assert_eq!(o.match_file, Some(Some(PathBuf::from("m1_ai"))));
+        // No match: refused, naming the flag it needs.
+        let o = parse(Preset::Game, "--ai hard");
+        assert_eq!(o.ai_level, None);
+        let e = o.ai_refused.expect("refused");
+        assert!(e.contains("--ai needs --match"), "{e}");
+        let o = parse(Preset::Game, "--sandbox --ai hard");
+        assert!(o.ai_refused.is_some() && o.ai_level.is_none());
+        // An unknown level names the shipped ones (and the one given).
+        let o = parse(Preset::Game, "--match m1_ai --ai brutal");
+        assert_eq!(o.ai_level, None);
+        let e = o.ai_refused.expect("refused");
+        assert!(
+            e.contains("brutal") && e.contains("easy, normal, hard"),
+            "{e}"
+        );
+        // Case matters: the levels are the profile names.
+        assert!(
+            parse(Preset::Game, "--match --ai Hard")
+                .ai_refused
+                .is_some()
+        );
+        // A missing value is refused too, and does not eat the next flag.
+        let o = parse(Preset::Game, "--match --ai --harvest");
+        assert!(o.ai_refused.expect("refused").contains("needs a level"));
+        assert!(o.harvest);
+        let o = parse(Preset::Game, "--match --ai");
+        assert!(o.ai_refused.is_some());
     }
 }
