@@ -212,12 +212,13 @@ every_tick_tests! {
     every_tick_repair_sell => "repair_sell",
 }
 
-/// The short every-tick case of WP13.1c-3a for every build: `repair_sell` from tick 380 to 500
-/// saved after every tick (the repairs start at 400 and 410, the sales at 400 and 480: a sale at
-/// `sell_ticks` right after its order), then on to the pin.
+/// The short every-tick case of WP13.1c-3a for every build: `repair_sell` from tick 380 to 540
+/// saved after every tick (at 400 the opponent's repair and sale of player 0's plant are refused,
+/// the repair of the plant starts at 410, the sale of the barracks at 480: at `sell_ticks` right
+/// after its order, at 1 in tick 539, removed in 540), then on to the pin.
 #[test]
 fn the_repairs_and_sales_of_repair_sell_restore_after_every_tick() {
-    let last = run_through_saves_window("repair_sell", 380, 500, &[REPAIRING, SELLING])
+    let last = run_through_saves_window("repair_sell", 380, 540, &[REPAIRING, SELLING])
         .unwrap_or_else(|e| panic!("repair_sell: {e}"));
     assert_eq!(last, expected("repair_sell"));
 }

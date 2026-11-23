@@ -403,6 +403,86 @@ fn repair_and_sale_at_zero_hit_points_round_trip() {
     }
 }
 
+/// Every build, every tick: an own structure given a repair and a sale in the same tick, in both
+/// orders (repair then sale: the sale clears the flag; sale then repair: the repair is refused),
+/// and a structure destroyed while being repaired and one destroyed while being sold (the freed
+/// slot holds neither). Saved, restored and resaved after every tick, going on with the restored
+/// world: every checksum is the uninterrupted run's.
+#[test]
+fn repair_and_sale_together_and_under_fire_restore_after_every_tick() {
+    // A sale longer than the barn lasts under fire (2 hit points a tick against 1 repaired).
+    let rules = RepairRules {
+        sell_ticks: 200,
+        ..RULES
+    };
+    let fresh = || fresh_for(Some(&[P0, P1]), rules);
+    // Slots 0 and 1 the construction centres, 2 to 5 barns of player 0, 6 to 9 riflemen of
+    // player 1 on them; the two on barns 2 and 3 are removed at tick 25.
+    let build = || {
+        let mut w = fresh();
+        place(&mut w, 0, HQ, P0, 4, 30);
+        place(&mut w, 0, HQ, P1, 34, 30);
+        for (x, y) in [(10, 10), (10, 20), (20, 10), (20, 20)] {
+            place(&mut w, 0, BARN, P0, x, y);
+        }
+        for (k, (x, y)) in [(14, 10), (14, 20), (24, 10), (24, 20)]
+            .into_iter()
+            .enumerate()
+        {
+            rifleman(&mut w, 1, P1, x, y, 6 + k as u32, 2 + k as u32);
+        }
+        send(&mut w, 25, Command::Despawn { id: id(6) });
+        send(&mut w, 25, Command::Despawn { id: id(7) });
+        let repair = |s| Command::Repair {
+            structure: id(s),
+            on: true,
+        };
+        let sell = |s| Command::Sell { structure: id(s) };
+        for c in [repair(2), sell(2), sell(3), repair(3), repair(4), sell(5)] {
+            send(&mut w, 30, c);
+        }
+        w
+    };
+    let ticks = 160;
+    let mut straight = build();
+    let want: Vec<u64> = (0..ticks).map(|_| straight.step().checksum).collect();
+    let mut w = build();
+    let mut repaired_before_removal = false;
+    let mut sold_before_removal = false;
+    for (t, &sum) in want.iter().enumerate() {
+        assert_eq!(w.step().checksum, sum, "tick {t}");
+        let e = &w.entities;
+        if t == 30 {
+            assert!(
+                e.hp[2] < BARN_HP && e.hp[3] < BARN_HP,
+                "damaged before the orders"
+            );
+            assert_eq!(
+                (e.sell_left[2], e.repairing[2]),
+                (200, false),
+                "repair then sale"
+            );
+            assert_eq!(
+                (e.sell_left[3], e.repairing[3]),
+                (200, false),
+                "sale then repair"
+            );
+            assert!(e.repairing[4] && e.sell_left[5] == 200);
+        }
+        repaired_before_removal |= e.alive[4] && e.repairing[4] && e.hp[4] <= 2;
+        sold_before_removal |= e.alive[5] && e.sell_left[5] > 0 && e.hp[5] <= 20;
+        let back = round_trip_on(fresh(), &w);
+        assert_eq!(settled(back.clone()), settled(w.clone()), "tick {t}");
+        w = back;
+    }
+    assert!(repaired_before_removal && sold_before_removal);
+    let e = &w.entities;
+    for s in [4, 5] {
+        assert!(!e.alive[s], "barn {s} destroyed");
+        assert_eq!((e.repairing[s], e.sell_left[s]), (false, 0), "slot {s}");
+    }
+}
+
 type Case = (&'static str, &'static str, fn(&mut World, bool));
 
 fn oc(w: &mut World) -> &mut crate::outcome::Outcome {

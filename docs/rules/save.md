@@ -691,10 +691,15 @@ own records. So no check refuses a state a sale writes: the store above its capa
 refinery or silo paid its refund (`finish_sale` pays after the removal, "whatever its capacity"), a
 factory record of a factory in sale, power totals that still count a plant whose sale started after
 the recount. `structures_in_sale_restore_after_every_tick` (`save/economy_tests.rs`) sells player 0's
-refinery, factory (with a queue) and silo at tick 200 and player 1's plant at 205 in the economy
-world with repair rules and saves after every tick from 195 to 280: four structures in sale at once,
-the store above its capacity, a factory record and power totals during a sale, every checksum the
-uninterrupted run's.
+refinery, factory and silo at tick 300 and player 1's plant at 305 in the economy world with repair
+rules and saves after every tick from 295 to 380, every checksum the uninterrupted run's. It asserts
+each state at the save tick that holds it: at 299 the refinery has a harvester in its bay and two
+queued (the next step sells it); at 300 the factory in sale with a non-empty queue; at 305 the plant
+in sale while player 1's power totals, counted at the start of that step, still have it; four
+structures in sale at once; and a store above its capacity because of a refund, told apart from the
+capacity that went with the sale (the store is above the capacity from tick 300 on without any
+refund): a refinery or silo of player 0 went in that step and the store rose above the capacity
+(a delivery stops at the capacity, production only spends).
 
 **Host side, lost for one tick after a load (for WP13.1e):** `repair_status` reads `waiting`, so a
 structure that waited for money in the tick before the load shows `Repairing` instead of
@@ -715,7 +720,10 @@ world, once ending in a win and once in a draw, and asserts at save ticks a stru
 sale at `sell_ticks` and at 1, one defeat undecided, three players, the win and the draw;
 `a_match_that_has_not_begun_round_trips` (begun false); `repair_and_sale_at_zero_hit_points_round_trip`
 (a world without destruction, both built through `World::step`); `the_repair_and_outcome_coverage_names_are_reached`
-(every coverage name of this part, the draw included).
+(every coverage name of this part, the draw included);
+`repair_and_sale_together_and_under_fire_restore_after_every_tick` (every build, every tick: a repair
+and a sale of an own structure in one tick in both orders, a structure destroyed while being
+repaired and one while being sold, the freed slots holding neither).
 
 ## The CI scenarios through saves
 
@@ -745,11 +753,13 @@ defeat, the decided match, the reports of the repair stage).
 its pin. Until WP13.1c-3a the save of `silo` was refused as `repair` after ticks 4401 to 4460 (its
 sale) and the probe skipped those ticks; since WP13.1c-3a no tick of any of the twelve is refused and
 `run_through_saves_covered` fails on any refusal (the `Gated` exception is removed).
-`the_repairs_and_sales_of_repair_sell_restore_after_every_tick` saves after every tick from 380 to 500
-of `repair_sell` in every build. On the container (4 cores,
-shared with other builds, load 3 to 7) the eleven took 65 minutes side by side: a save and restore
-costs tens of milliseconds on these maps (the fresh world is cloned and the path graphs rebuilt), so
-`harvest` alone took 38 minutes, `money` 45; the run of `silo` through the sale (refused exactly after ticks 4401 to 4460, saving again from 4461) passed in 23 minutes; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
+`the_repairs_and_sales_of_repair_sell_restore_after_every_tick` saves after every tick from 380 to 540
+of `repair_sell` in every build (the refused repair and sale at 400, the repair from 410, the sale
+from 480 at `sell_ticks` to 1 at 539). On the container (4 cores, shared with other builds, load 3
+to 7) the eleven of WP13.1c-2 took 65 minutes side by side: a save and restore costs tens of
+milliseconds on these maps (the fresh world is cloned and the path graphs rebuilt), so `harvest`
+alone took 38 minutes, `money` 45; in WP13.1c-3a `every_tick_repair_sell` and `every_tick_silo`
+(through the sale, no tick refused) passed together in 2116 s; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
 does the first 200 ticks of `harvest` and `production_repeat` in every build, with the claims
 they reach by then, and in sf_sim
 `the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
@@ -757,7 +767,10 @@ all of it (a dock queue, a full queue mid-item, a structure half built, player 0
 and compares by `PartialEq` and checksum. `probe_which_scenarios_still_refuse` pins the rest:
 `match`, `vision` and `vision_targeting`, all three refused as `vision` (WP13.1c-3b); `repair_sell`
 saves since WP13.1c-3a. The 15 `ai_*` scenarios have vision too; their world-and-AI round trip is
-WP13.1e (the host saves world and AI together).
+WP13.1e (the host saves world and AI together). `every_ci_scenario_saves_or_refuses_for_vision`
+reads the scenario list of the CI headless job from `.github/workflows/ci.yml` and gives each a
+class at the first save tick: it saves (and restores onto `build_fresh_world`, resaving the same
+bytes), or it is one of the eighteen above and refused exactly as `Unsupported("vision")`.
 
 `tools/sf_headless/tests/save_combat.rs` (WP13.1c-1) does the same for the combat scenarios
 `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry` and `destruction`, with the
