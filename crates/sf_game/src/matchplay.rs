@@ -352,7 +352,11 @@ mod tests {
             assert_eq!(back, ai, "{level}");
             // The loader reads that level's file for the seat, and the AI made is the level's.
             let made = reading(&at);
-            assert_eq!(*asked.borrow(), [level.clone()], "{level}");
+            assert_eq!(
+                asked.borrow().as_slice(),
+                std::slice::from_ref(level),
+                "{level}"
+            );
             assert_eq!(made.len(), 1);
             digests.push(made[0].digest());
             // `ais_at_level` is the same path.
