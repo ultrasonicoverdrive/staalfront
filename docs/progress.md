@@ -3967,3 +3967,25 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
 * **Gaps.** Neutral models (the supply truck) are not in the readability rule; the supply truck's paint is 6 from
   the rock, as it was from the old rock. The pictures are lavapipe renders of scratch match files, not committed. Fix round 1: the after pictures were made again on the new ore levels, plus
   `after_ore_depleted_zoom_*` (tick 2000, harvested cells).
+
+### WP9.4c notes: choose the AI level in the game (23-11-2026)
+
+* **What was built.** `sf_game` only, plus data and docs; nothing in `crates/sf_sim` or `crates/sf_ai`, no profile number changed.
+  `sf_game --match m1_ai --ai easy|normal|hard` puts the named shipped profile on every computer seat
+  (`matchplay::with_level`, `ais_at_level`); the start menu has **Match against the computer** (`m1_ai`) and a **Computer level**
+  button that cycles Easy, Normal, Hard and is saved in the settings file (`ai_level`, default Normal). The levels are listed in one
+  place, `assets/config/ai_levels.ron` (`sf_game::ai_level`); the words are `menu_look.ron`, checked against that list. Rules:
+  `docs/rules/ai.md` "Choosing the level in the game", `docs/rules/menus.md` "The computer's level". Picture:
+  `docs/screenshots/wp9.4c/start_menu_level_hard_t00001.png`.
+* **Decision (23-11-2026, Tijmen "Ga verder met je advies").** The AI line is split: tuning the levels waits for a diagnosis of
+  the start-site bias of `m1_duel`; 9.4c does not depend on balance (PLAN.md note under WP9.4).
+* **Checked by hand** (debug binary, 23-11-2026): `sf_game --ai hard` exits 2 with "--ai needs --match"; `--match m1_ai --ai brutal`
+  exits 2 naming "easy, normal, hard"; `--match --ai` exits 2 "needs a level"; `--match m1_ai --ai easy|hard --exit-after 3` under
+  Xvfb prints "1 computer player(s) at the level easy|hard". The menu picture was taken with `ai_level: Some("hard")` in the settings.
+* **Not done / gaps.** Nobody has played the levels yet (that is what this is for). A `--record` names the match file but not the
+  level (a replay does not run the AIs, so it does not matter there). The level cannot be changed from the pause menu (Main menu,
+  then the button). No "unfair" level. The menu was not clicked through in a real window: the state machine and the runner's
+  `apply_to_game` are tested, the button's picture is taken from the real game, the click path is not run with real X events
+  (`scripts/menus_e2e.py` was not extended).
+* **Pins.** None moved: the whole workspace test run passes (the `golden.rs` and `assets/scenarios/*.expected` checks included) and the
+  release `--expect` run of the CI scenarios is in the PR.
