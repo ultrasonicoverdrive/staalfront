@@ -1,5 +1,5 @@
-//! The economy, building, production and power scenarios of CI run through save and restore
-//! (WP13.1c-2, `docs/rules/save.md`).
+//! The economy, building, production, power and (WP13.1c-3a) repair, sale and match-outcome
+//! scenarios of CI run through save and restore (WP13.1c-2, `docs/rules/save.md`).
 //!
 //! Every [`EVERY`] ticks the world is saved and restored onto a fresh world built from the same
 //! scenario, and the run goes on with the restored one (the runner is `common/saves.rs`). The final
@@ -34,8 +34,9 @@ const HARVEST: &[Claim] = &[
     ROUTES,
 ];
 
-/// The scenarios that save since WP13.1c-2, with the states each carries across its saves.
-const SCENARIOS: [(&str, &[Claim]); 11] = [
+/// The scenarios that save since WP13.1c-2 (and `repair_sell` since WP13.1c-3a), with the states
+/// each carries across its saves.
+const SCENARIOS: [(&str, &[Claim]); 12] = [
     ("placement", &[CONSTRUCTING, ECONOMY_REPORTS]),
     ("construction", &[CONSTRUCTING, ECONOMY_REPORTS]),
     ("ore_256", &[ORE_CHANGED]),
@@ -79,7 +80,22 @@ const SCENARIOS: [(&str, &[Claim]); 11] = [
     ),
     (
         "silo",
-        &[CONSTRUCTING, STORED, UNLOADING, DOCK_QUEUE, DELIVERED],
+        &[CONSTRUCTING, STORED, UNLOADING, DOCK_QUEUE, DELIVERED, SELLING],
+    ),
+    (
+        "repair_sell",
+        &[
+            REPAIRING,
+            SELLING,
+            MATCH_BEGUN,
+            DEFEAT,
+            DECIDED,
+            SPENT,
+            STORED,
+            POWER,
+            WRECKS,
+            ECONOMY_REPORTS,
+        ],
     ),
 ];
 
@@ -139,64 +155,30 @@ fn defences_continues_through_saves() {
     check("defences", EVERY, claims_of("defences"));
 }
 
-/// `silo` sells a structure: from then until the sale is over the save is refused as `repair`
-/// (repair and sale are saved in WP13.1c-3). The save at a tick inside that window is refused with
-/// exactly that and nothing else; the saves before and after it go on to the pin.
+/// `silo` sells a structure (ticks 4401 to 4460): since WP13.1c-3a every save restores, the sale
+/// too, and the run goes on to the pin.
 #[test]
 fn silo_continues_through_saves() {
-    let mut gated = Gated {
-        allowed: Some(SaveError::Unsupported("repair")),
-        extra: vec![SILO_SALE.0 - 1, SILO_SALE.0, SILO_SALE.1, SILO_SALE.1 + 1],
-        refused: Vec::new(),
-    };
-    let last = run_through_saves_gated(
-        "silo",
-        EVERY,
-        u64::MAX,
-        claims_of("silo"),
-        &mut BTreeSet::new(),
-        &mut gated,
-    )
-    .unwrap_or_else(|e| panic!("silo: {e}"));
-    assert_eq!(last, expected("silo"));
-    assert_eq!(gated.refused, [SILO_SALE.0, SILO_SALE.1], "silo");
+    check("silo", EVERY, claims_of("silo"));
 }
 
-/// The first and the last tick after which the save of `silo` is refused as `repair` (the sale),
-/// measured by `every_tick_silo`.
-const SILO_SALE: (u64, u64) = (4401, 4460);
+/// `repair_sell` repairs, waits for money, sells and ends in a won match (WP13.1c-3a).
+#[test]
+fn repair_sell_continues_through_saves() {
+    check("repair_sell", EVERY, claims_of("repair_sell"));
+}
 
 /// A save after every tick of `name` to the end and its pin: every save restores and every resave
 /// is the save. One test per scenario so the harness runs them side by side; slow (tens of ms a
 /// save), so `#[ignore]`d: `cargo test --release -p sf_headless --test save_economy -- --ignored
-/// every_tick` (`docs/rules/save.md` gives the time). In `silo` the ticks of the sale are refused
-/// as `repair` (WP13.1c-3) and only those: the saves go on after it.
+/// every_tick` (`docs/rules/save.md` gives the time). No tick is refused (WP13.1c-3a: the sale of
+/// `silo` saves too).
 fn every_tick(name: &str) {
-    let mut gated = Gated::default();
-    if name == "silo" {
-        gated.allowed = Some(SaveError::Unsupported("repair"));
-    }
     let start = std::time::Instant::now();
-    let last = run_through_saves_gated(
-        name,
-        1,
-        u64::MAX,
-        claims_of(name),
-        &mut BTreeSet::new(),
-        &mut gated,
-    )
-    .unwrap_or_else(|e| panic!("{name}: {e}"));
+    let last = run_through_saves_covered(name, 1, u64::MAX, claims_of(name), &mut BTreeSet::new())
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
     assert_eq!(last, expected(name), "{name}");
-    if name == "silo" {
-        let want: Vec<u64> = (SILO_SALE.0..=SILO_SALE.1).collect();
-        assert_eq!(gated.refused, want, "silo: the ticks refused as repair");
-    }
-    eprintln!(
-        "{name}: every tick in {:?}, refused {:?}..{:?}",
-        start.elapsed(),
-        gated.refused.first(),
-        gated.refused.last()
-    );
+    eprintln!("{name}: every tick in {:?}", start.elapsed());
 }
 
 macro_rules! every_tick_tests {
@@ -221,6 +203,17 @@ every_tick_tests! {
     every_tick_power => "power",
     every_tick_defences => "defences",
     every_tick_silo => "silo",
+    every_tick_repair_sell => "repair_sell",
+}
+
+/// The short every-tick case of WP13.1c-3a for every build: `repair_sell` from tick 380 to 500
+/// saved after every tick (the repairs start at 400 and 410, the sales at 400 and 480: a sale at
+/// `sell_ticks` right after its order), then on to the pin.
+#[test]
+fn the_repairs_and_sales_of_repair_sell_restore_after_every_tick() {
+    let last = run_through_saves_window("repair_sell", 380, 500, &[REPAIRING, SELLING, DEFEAT])
+        .unwrap_or_else(|e| panic!("repair_sell: {e}"));
+    assert_eq!(last, expected("repair_sell"));
 }
 
 /// The short every-tick case for every build: the first 200 ticks of `harvest` and of
@@ -300,14 +293,13 @@ fn the_coverage_record_is_pinned() {
     assert_eq!(covered, want);
 }
 
-/// The CI scenarios without an AI that still refuse to save hold state of a section WP13.1c-3
-/// saves by the first save tick: their save is refused, naming the section.
+/// The CI scenarios without an AI that still refuse to save hold state of a section WP13.1c-3b
+/// saves by the first save tick: their save is refused, naming the section (only vision is left).
 #[test]
 fn probe_which_scenarios_still_refuse() {
     let mut wrong = Vec::new();
     for (name, section) in [
         ("match", "vision"),
-        ("repair_sell", "outcome"),
         ("vision", "vision"),
         ("vision_targeting", "vision"),
     ] {
