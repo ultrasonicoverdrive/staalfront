@@ -70,8 +70,10 @@ fn buildings() -> BuildingTable {
         },
         function,
         exit_side: None,
-        build_ticks: 0,
-        cost: None,
+        // A barn has build ticks, so that a save can claim one under construction (refused with a
+        // repair or a sale, so it has a cost too); placed by `PlaceStructure` it stands complete.
+        build_ticks: if kind == BARN { 10 } else { 0 },
+        cost: (kind == BARN).then_some(100),
         power: 0,
         factions: 1,
         requires: Vec::new(),
@@ -315,8 +317,27 @@ fn a_match_that_has_not_begun_round_trips() {
         w.step();
     }
     assert!(!w.match_begun() && w.entities.alive[0]);
-    let back = round_trip_on(fresh(), &w);
-    assert_eq!(settled(back), settled(w));
+    let mut back = round_trip_on(fresh(), &w);
+    assert_eq!(settled(back.clone()), settled(w.clone()));
+    // Player 1 places its construction centre after the restore: both worlds begin the match in
+    // the same tick and go on equal.
+    for x in [&mut w, &mut back] {
+        let at = x.tick.0;
+        x.schedule(
+            Tick(at),
+            P0,
+            Command::PlaceStructure {
+                kind: HQ,
+                cell: crate::terrain::Cell::new(20, 20),
+                owner: P1,
+            },
+        )
+        .unwrap();
+    }
+    for t in 0..20 {
+        assert_eq!(back.step().checksum, w.step().checksum, "tick {t}");
+    }
+    assert!(w.match_begun() && back.match_begun());
 }
 
 /// Without destruction nothing removes a structure at zero hit points: a sale goes on at zero, and
@@ -538,6 +559,63 @@ fn cases() -> Vec<Case> {
                 o.defeats.push((P2, Tick(if at { 80 } else { 81 })));
                 o.result = Some(MatchResult {
                     tick: Tick(if at { 80 } else { 81 }),
+                    verdict: Verdict::Draw,
+                });
+            },
+        ),
+        (
+            "a repair the repair stage never leaves",
+            "repairing under construction",
+            |w, at| {
+                w.entities.hp[3] = BARN_HP - 1;
+                w.entities.sell_left[3] = 0;
+                w.entities.repairing[3] = true;
+                w.entities.build_left[3] = u32::from(!at);
+            },
+        ),
+        (
+            "a sale the repair stage never leaves",
+            "sell_left under construction",
+            |w, at| w.entities.build_left[3] = u32::from(!at),
+        ),
+        (
+            "a sale the repair stage never leaves",
+            "sell_left without a table entry",
+            |w, at| {
+                // Past the bound slot 2 keeps its cell but loses its table entry (a legacy
+                // `Place` entity, at zero hit points): only `def != NO_DEF` refuses the sale.
+                w.entities.sell_left[2] = 1;
+                if !at {
+                    w.entities.def[2] = NO_DEF;
+                    w.entities.hp[2] = 0;
+                }
+            },
+        ),
+        (
+            "a match result the match stage never leaves",
+            "won by a player not in the match",
+            |w, at| {
+                let o = oc(w);
+                o.defeats.push((P1, Tick(80)));
+                o.result = Some(MatchResult {
+                    tick: Tick(80),
+                    verdict: Verdict::Won(if at { P2 } else { PlayerId(3) }),
+                });
+            },
+        ),
+        (
+            "a match result the match stage never leaves",
+            "draw with too few defeats",
+            |w, at| {
+                // The last two fall together; past the bound one player is left undefeated.
+                let o = oc(w);
+                o.defeats = if at {
+                    vec![(P0, Tick(80)), (P1, Tick(80)), (P2, Tick(80))]
+                } else {
+                    vec![(P0, Tick(80)), (P1, Tick(80))]
+                };
+                o.result = Some(MatchResult {
+                    tick: Tick(80),
                     verdict: Verdict::Draw,
                 });
             },
