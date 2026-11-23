@@ -42,10 +42,10 @@ Header:
 | Bytes | Field |
 |---|---|
 | 4 | magic `SFSV` |
-| 4 | `format_version`, `u32`, now **4** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`; 2 was WP13.1b, without `X`, `D` and the combat columns of `E`; 3 was WP13.1c-1, without `O`, `H`, `C`, `U`, `I` and `build_left`) |
+| 4 | `format_version`, `u32`, now **5** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`; 2 was WP13.1b, without `X`, `D` and the combat columns of `E`; 3 was WP13.1c-1, without `O`, `H`, `C`, `U`, `I` and `build_left`; 4 was WP13.1c-2, without `G`, `repairing` and `sell_left`) |
 | 8 | `rules_digest`, `u64` (`World::rules_digest`) |
 | 8 | `tick`, `u64`: the number of the next tick to run |
-| 4 | the number of sections, `u32`, now 13 |
+| 4 | the number of sections, `u32`, now 14 |
 
 Then the sections, each a tag byte and a `u32` length, in this order:
 
@@ -62,7 +62,8 @@ Then the sections, each a tag byte and a `u32` length, in this order:
   count `wait`, `u32`, and the shots left of a burst `burst_left`, `u8`), the engagement memory
   (every field of `Engage`: the order to resume as a flag and an order, `chase`, `anchor`, `held`,
   `rest`, `aim`, `reach`, `cool`) and the kills (`u16`); then (WP13.1c-2) the construction ticks
-  left (`build_left`, `u32`). A free slot
+  left (`build_left`, `u32`); then (WP13.1c-3a) the repair flag (`repairing`, a flag) and the sale
+  ticks left (`sell_left`, `u32`). A free slot
   holds the neutral values `Entities::clear` writes, so only its generation is written.
 * `Q` command queue: every pending command with its `(tick, player, sequence)` key, then every
   player's next sequence number.
@@ -106,6 +107,9 @@ which rule sets the fresh world has, so the reader knows):
   free flag, `done`, the status 0 idle, 1 building, 2 waiting for money, 3 waiting for exit, 4
   missing prerequisite + kind, 5 stopped, 6 not standing).
 * `I` power: the totals of the last recount (player, made, used).
+* `G` the match outcome (WP13.1c-3a), empty in a world without match rules: `begun` (a flag), the
+  defeats in their order (count, then player `u8` and tick `u64`), the result (0 none; 1 won + tick
+  + player; 2 draw + tick).
 
 Order tags are the checksum's (0 idle, 1 move, 2 attack, 3 attack-move, 4 guard point, 5 guard
 entity, 6 scatter, 7 hold, 8 pursue). Command tags: 0 `Spawn`, 1 `Place`, 2 `SpawnUnit`, 3
@@ -131,12 +135,16 @@ the harvester kinds, and with storage the capacity table and the price of a unit
 (`credits_per_ore`), production (`queue_limit`, `exit_radius`, the build speed `num` and `den`, and
 the production table by its stored digest, `ProductionTable::rules_digest`, which `new` takes over
 every field of every `UnitBuild`, destructured), power (`shortage_floor_permille`,
-`defence_cutoff_permille`) and repair and sale (all four numbers). The building table enters by its
+`defence_cutoff_permille`), repair and sale (all four numbers, destructured without `..` since
+WP13.1c-3a) and (WP13.1c-3a) the match rules (`Outcome::write_rules`, `MatchRules` destructured: the
+number of players and each player, ascending). The building table enters by its
 two digests as since WP13.1a; `digest_of` now destructures `BuildingStats` without `..` (the same
 bytes, no pin moves). Until WP13.1c-2 the ore entered by its fingerprint (the current amounts, so
 only an ore at its start could restore) and harvest, production and power only by their presence;
-that is replaced by the numbers above. Of vision and the match only the presence is hashed: a world
-with either does not save yet (WP13.1c-3). The starting credits are not rules: they are the stores
+that is replaced by the numbers above. Of vision only the presence is hashed: a world with vision
+rules does not save yet (WP13.1c-3b). Until WP13.1c-3a the match rules too entered only by their
+presence; another player list now gives another digest (`the_match_and_repair_numbers_are_in_the_digest`:
+two, three other and four players, each of the four repair numbers, no match rules). The starting credits are not rules: they are the stores
 at tick 0, state in section `H`. The AI profile digests are
 checked by each AI part on its own (WP13.1d, "The AI" below). The weapon table enters through `WeaponTable::rules_digest`, which destructures the
 table without `..` and returns its stored digest (nothing is recomputed on save or restore); that
@@ -231,22 +239,23 @@ its kind, so the kind alone does not say which.
 
 ## Not saved yet: the gates
 
-Repair and sale, vision and the outcome are not in the file (WP13.1c-3). `World::save` refuses with `SaveError::Unsupported(section)` every world in which one of
-them holds anything that is not its tick-0 state, so a half-saved world can never load silently.
-The exact test per section (checked in this order, the first one that fails names the section):
+Vision is not in the file (WP13.1c-3b). `World::save` refuses with
+`SaveError::Unsupported("vision")` every world that has vision rules at all (even at tick 0: its
+state starts moving in the first step), so a half-saved world can never load silently.
 
 | Section | `save` refuses when |
 |---|---|
-| `vision`, `outcome` | the world has those rules at all (even at tick 0: their state starts moving in the first step; WP13.1c-3 lifts this) |
-| `repair` | a structure is repairing or being sold |
+| `vision` | the world has vision rules at all (WP13.1c-3b lifts this) |
 
-The gates `economy`, `production`, `power` and `buildings` are gone (WP13.1c-2).
+The gates `repair` (a structure repairing or being sold) and `outcome` (a world with match rules)
+are gone (WP13.1c-3a), and with them the last column gate (`check_unsaved_columns` is removed). The
+gates `economy`, `production`, `power` and `buildings` are gone (WP13.1c-2). The `targeting` and
+`crowd` tests in `check_unsaved_sections` stay as guards; they never refuse (their state is the
+entity columns, `Targeting::has_state` and `Crowd::has_state` say so).
 
-The subsystem gates come first; then, slot by slot, the column gates (the last two rows). The
-pathing, flowfield, formation and turning gates of WP13.1a are gone (WP13.1b saves those sections),
+The pathing, flowfield, formation and turning gates of WP13.1a are gone (WP13.1b saves those sections),
 and so are the projectile, weapon, destruction and targeting gates (WP13.1c-1 saves them; a world
-with a weapon table, targeting and destruction saves, `save_combat.rs`). Only the state of the
-building and repair columns is gated, not the presence of the building and repair rules.
+with a weapon table, targeting and destruction saves, `save_combat.rs`).
 
 | Part | WP13.1c-1 |
 |---|---|
@@ -269,7 +278,7 @@ instead of putting it on the free list, so nothing overflows). The bit-flip test
 single-bit change of a save and steps each world that restores four ticks; none panics
 (`every_truncation_is_an_error_and_no_flip_panics`). Every `Corrupt` check above has a case in
 `every_impossible_world_is_corrupt`, every gate one in
-`a_section_that_is_not_saved_yet_refuses_the_save`.
+`a_section_that_is_not_saved_yet_refuses_the_save` (since WP13.1c-3a only the vision gate).
 
 **Crowd is saved in this WP**, not in 13.1b as the split planned: its whole state is the per-entity
 `CrowdState` (the `Crowd` struct holds settings, shapes derived from the tables, scratch and stats),
@@ -608,6 +617,106 @@ round-trips the world by `PartialEq` with a byte-equal resave.
 **Mutations** (each made in a scratch edit, the named test failing, then undone): listed in the PR
 of WP13.1c-2.
 
+## WP13.1c-3a: repair, sale and the match outcome
+
+| Part | WP13.1c-3a |
+|---|---|
+| `repairing`, `sell_left` (entity columns) | saved, `E` |
+| repair rules | rules (digest, all four numbers) |
+| repair refusals (`rejections`) | derived (report): `World::step` clears them before the commands |
+| repairs waiting for money (`waiting`), sales finished (`sold`) | derived (reports): `advance_repair_sell` clears both first; nothing in the simulation reads them (only `repair_status` and `sales()`, host side) |
+| match players | rules (digest, the number and each player) |
+| `begun`, defeats, result | saved, `G` |
+| `dirty` | derived: false between steps (`evaluate_match_rules` clears it at the end of every step; only `despawn` and `sell_command` set it, both inside a step and before that call) |
+
+The repair and sale columns are read in `E`, before every later section and before the occupancy and
+path-graph rebuild, so every check or rebuild that asks `is_standing` (which reads `build_left`,
+`sell_left` and the hit points) sees the saved values.
+
+**Restore checks, each with its writer.** Both processes start only through `repair_target`
+(`repair.rs`): a live structure with a table entry (`def` not `NO_DEF`) and a cell, of the sender,
+complete (`build_left == 0`), not being sold, standing; and only in a world with repair rules
+(`apply_repair` returns false without them). Nothing makes a structure incomplete again, and nothing
+moves its cell. Refused as `Corrupt`:
+
+* `repairing` set on an entity that is not a table structure with a cell, in a world without repair
+  rules, on one under construction, or at (or above) the kind's full hit points, or on a kind that
+  cannot be damaged ("a repair the repair stage never leaves"). Writers: `repair_command` sets the
+  flag only for `hp < max` with `max > 0`; `repair_step` clears it when the structure is full, no
+  longer stands, or its `max` is 0; `sell_command` clears it; `Entities::clear` and the spawn write
+  false. The only writer that raises hit points is `repair_step`, which clears the flag at full. The
+  hit points may be 0: an order at tick `t` (accepted while the structure stands) and a shot in the
+  weapon stage of the same tick that takes it to 0, in a world without destruction (with destruction
+  `reap` removes it in the same tick). The next `repair_step` clears it.
+* `sell_left` above `sell_ticks`, set on an entity that is not a table structure with a cell, in a
+  world without repair rules, on one under construction, or together with `repairing` ("a sale the
+  repair stage never leaves"). Writers: `sell_command` writes `sell_ticks` (so a sale ordered in the
+  step before the save is at the full value) and clears `repairing`; `repair_command` refuses a
+  structure being sold (`BeingSold`); `advance_repair_sell` counts down by one at the start of the next
+  step and removes the structure at 0 (`finish_sale` through `despawn`), so a live slot never holds 0
+  after a sale started. Any hit points (0 included, a world without destruction) are allowed.
+* A defeat of a player not in the match, of a player twice, or at a tick not below the world's tick
+  ("a defeat the match stage never records"). Writer: `decide` pushes a defeat only for a player of
+  the rules that is not yet defeated, with the tick of the running step; the tick counter advances
+  after `evaluate_match`.
+* The defeats not in ascending `(tick, player)` ("the defeats are out of order"): `decide` runs once
+  per step and walks the players ascending.
+* A defeat or a result while `begun` is false ("a defeat before the match began"): `decide` returns
+  before the defeats until the match begins, and a result needs a defeat.
+* The result against the defeats ("a match result the match stage never leaves"), with `n` players:
+  none with at most `n - 2` defeats (two or more players left); won by `p` with `n - 1` defeats, `p`
+  a player of the match not defeated, the result tick the tick of the last defeat; a draw with `n`
+  defeats, the result tick the last defeat's and the last two defeats in that tick (with only one
+  falling, the one before would have won in an earlier step). Writer: the end of `decide`, in the step
+  of the defeats that leave one or no player.
+* An unknown result tag ("unknown match result").
+
+Each check has a case at its bound and one past it in
+`every_repair_and_outcome_bound_restores_and_one_past_it_is_refused` (`save/outcome_tests.rs`, on the
+match world after tick 100: one defeat of three players, a barn in sale), plus
+`repair_or_sale_without_repair_rules_is_refused`.
+
+Not checked, on purpose (looser than reachable, for 13.1h): that `begun` is false only while some
+player lacks a standing construction centre, and that every player not defeated in an undecided
+match owns one (both true at every save: `decide` runs at the end of the step and nothing after it
+changes what stands; but they judge the outcome against the entities); the owner of a repaired or
+sold structure against the match players; a defeat tick against the begin tick (not saved). None of
+them is reached by a save the game writes.
+
+**The 13.1c-2 checks with a structure in sale.** A structure being sold does not stand. Of the
+WP13.1c-2 restore checks none reads `is_standing`, the store against the capacity or the power
+totals against the structures: the dock check rebuilds a dock with `new_dock` from the live slot
+(owner, anchor and side do not change in a sale); the production and power checks read only their
+own records. So no check refuses a state a sale writes: the store above its capacity after a sold
+refinery or silo paid its refund (`finish_sale` pays after the removal, "whatever its capacity"), a
+factory record of a factory in sale, power totals that still count a plant whose sale started after
+the recount. `structures_in_sale_restore_after_every_tick` (`save/economy_tests.rs`) sells player 0's
+refinery, factory (with a queue) and silo at tick 200 and player 1's plant at 205 in the economy
+world with repair rules and saves after every tick from 195 to 280: four structures in sale at once,
+the store above its capacity, a factory record and power totals during a sale, every checksum the
+uninterrupted run's.
+
+**Host side, lost for one tick after a load (for WP13.1e):** `repair_status` reads `waiting`, so a
+structure that waited for money in the tick before the load shows `Repairing` instead of
+`WaitingForMoney` until the next step; `sales()` is empty until the next step; the repair refusals
+start empty.
+
+**For 13.1h (from the review of #163):** bit flips inside the sections `O`, `H`, `C`, `U` and `I` on a
+world with economy rules (the flip test of WP13.1a runs on a world without them); a free queue item
+over the limit is only reachable as the last item of the queue (`advance_production` pushes it
+behind the paid ones), while the check allows it at any place.
+
+**Coverage record** (WP13.1c-3a part of `the_coverage_record_is_pinned`): at the saves every 97 ticks
+of the CI scenarios, `repairing`, `sell_left`, `outcome.begun`, `outcome.defeats` and
+`outcome.result.won` are non-default at some save tick (in `repair_sell` and `silo`); never
+`outcome.result.draw` (no CI scenario ends in a draw). In `save/outcome_tests.rs`,
+`repair_sale_and_the_outcome_restore_after_every_tick` saves after every tick of a three-player match
+world, once ending in a win and once in a draw, and asserts at save ticks a structure under repair, a
+sale at `sell_ticks` and at 1, one defeat undecided, three players, the win and the draw;
+`a_match_that_has_not_begun_round_trips` (begun false); `repair_and_sale_at_zero_hit_points_round_trip`
+(a world without destruction, both built through `World::step`); `the_repair_and_outcome_coverage_names_are_reached`
+(every coverage name of this part, the draw included).
+
 ## The CI scenarios through saves
 
 `tools/sf_headless/tests/save_paths.rs` runs `bridge_200`, `replan`, `formation_move`, `crowd_jam`,
@@ -624,18 +733,20 @@ each of its save ticks, in the world and in the restored one (`save_contents` eq
 and `crowd_jam` also run with a save after every one of their first 400 ticks.
 `tools/sf_headless/tests/save_economy.rs` (WP13.1c-2) does the same for `placement`,
 `construction`, `ore_256`, `harvest`, `storage`, `money`, `production`, `production_repeat`,
-`power`, `defences` and `silo`, each with its claims (a structure half built and the reports of
+`power`, `defences`, `silo` and (WP13.1c-3a) `repair_sell`, each with its claims (a structure half built and the reports of
 construction or placement; ore taken; harvesters to ore or mining, on their way, unloading, with a
 load, in a dock queue, a message in a dock inbox, a bay granted, ore delivered, stores, money
 spent; a factory, a unit half built, a rally point, a repeating factory; power totals, a player
-short of power, defences without power; and the combat state of `power` and `defences`).
-`every_tick_<name>` (eleven tests, `#[ignore]`, release: `cargo test --release -p sf_headless
+short of power, defences without power; and the combat state of `power` and `defences`; a structure
+being sold in `silo`; in `repair_sell` a structure being repaired, one being sold, a match begun, a
+defeat, the decided match, the reports of the repair stage).
+`every_tick_<name>` (twelve tests, `#[ignore]`, release: `cargo test --release -p sf_headless
 --test save_economy -- --ignored every_tick`) saves, restores and resaves after every tick of each to
-its pin; in `silo` the save is refused as `repair` after ticks 4401 to 4460, while it sells a
-structure (WP13.1c-3; found by the first run of the probe): the probe skips exactly those ticks,
-asserts that error and no other, and saves again from tick 4461 on (the silo gone, the capacity
-shrunk). `silo_continues_through_saves` saves besides after ticks 4400, 4401, 4460 and 4461 and
-asserts that 4401 and 4460 are refused as `repair` and the run reaches its pin. On the container (4 cores,
+its pin. Until WP13.1c-3a the save of `silo` was refused as `repair` after ticks 4401 to 4460 (its
+sale) and the probe skipped those ticks; since WP13.1c-3a no tick of any of the twelve is refused and
+`run_through_saves_covered` fails on any refusal (the `Gated` exception is removed).
+`the_repairs_and_sales_of_repair_sell_restore_after_every_tick` saves after every tick from 380 to 500
+of `repair_sell` in every build. On the container (4 cores,
 shared with other builds, load 3 to 7) the eleven took 65 minutes side by side: a save and restore
 costs tens of milliseconds on these maps (the fresh world is cloned and the path graphs rebuilt), so
 `harvest` alone took 38 minutes, `money` 45; the run of `silo` through the sale (refused exactly after ticks 4401 to 4460, saving again from 4461) passed in 23 minutes; `the_first_ticks_of_harvest_and_production_restore_after_every_tick`
@@ -644,7 +755,9 @@ they reach by then, and in sf_sim
 `the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
 all of it (a dock queue, a full queue mid-item, a structure half built, player 0 short of power)
 and compares by `PartialEq` and checksum. `probe_which_scenarios_still_refuse` pins the rest:
-`match` (vision), `repair_sell` (outcome), `vision` and `vision_targeting` (vision).
+`match`, `vision` and `vision_targeting`, all three refused as `vision` (WP13.1c-3b); `repair_sell`
+saves since WP13.1c-3a. The 15 `ai_*` scenarios have vision too; their world-and-AI round trip is
+WP13.1e (the host saves world and AI together).
 
 `tools/sf_headless/tests/save_combat.rs` (WP13.1c-1) does the same for the combat scenarios
 `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry` and `destruction`, with the
@@ -677,6 +790,8 @@ uninterrupted run.
   the weapon digest (`WeaponStats`, `Loadout`), `ArmorTable::rules_digest`,
   `Ore::at_start`, `Crowd::has_state`, `Targeting::has_state`,
   `check_unsaved_sections` (money, repair, placement), `check_crowd`, `put_crowd`,
+  `outcome::save` (`Outcome`), `Outcome::write_rules` (`MatchRules`), the repair rules in
+  `rules_digest` (`RepairRules`, WP13.1c-3a),
   `rules_digest` (the collision, formation and replan settings) and `Turning::write_hash` (in the
   movement digest) for theirs. A field added to any of them is
   a compile error until it is handled here (shown in the PR of WP13.1a: a field `pub(crate) probe:

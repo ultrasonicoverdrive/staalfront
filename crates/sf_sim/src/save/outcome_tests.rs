@@ -343,7 +343,11 @@ fn repair_and_sale_at_zero_hit_points_round_trip() {
     for _ in 0..80 {
         // Try a repair of slot 0 in this tick on a copy: keep it if the tick leaves the flag on a
         // barn at zero hit points.
-        if repaired_at_zero.is_none() && w.entities.len() > 3 && w.entities.hp[0] > 0 && w.entities.hp[0] < BARN_HP {
+        if repaired_at_zero.is_none()
+            && w.entities.len() > 3
+            && w.entities.hp[0] > 0
+            && w.entities.hp[0] < BARN_HP
+        {
             let mut trial = w.clone();
             let now = trial.tick.0;
             send(
@@ -536,19 +540,15 @@ fn cases() -> Vec<Case> {
                 });
             },
         ),
-        (
-            "unknown match result",
-            "result tag",
-            |w, at| {
-                if !at {
-                    // Replaced in the bytes below.
-                    oc(w).result = Some(MatchResult {
-                        tick: Tick(0x77),
-                        verdict: Verdict::Draw,
-                    });
-                }
-            },
-        ),
+        ("unknown match result", "result tag", |w, at| {
+            if !at {
+                // Replaced in the bytes below.
+                oc(w).result = Some(MatchResult {
+                    tick: Tick(0x77),
+                    verdict: Verdict::Draw,
+                });
+            }
+        }),
     ]
 }
 

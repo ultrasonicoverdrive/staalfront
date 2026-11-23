@@ -976,16 +976,14 @@ type Gate = (&'static str, fn(&mut World));
 /// One change per section that this format does not save yet, each the smallest that leaves the
 /// tick-0 state. Since WP13.1c-3a only vision is left (repair, sale and the outcome are saved).
 fn gates() -> Vec<Gate> {
-    vec![
-        ("vision", |w| {
-            w.vision = Some(Box::new(crate::vision::Vision::new(
-                64,
-                48,
-                Default::default(),
-                Vec::new(),
-            )));
-        }),
-    ]
+    vec![("vision", |w| {
+        w.vision = Some(Box::new(crate::vision::Vision::new(
+            64,
+            48,
+            Default::default(),
+            Vec::new(),
+        )));
+    })]
 }
 
 #[test]

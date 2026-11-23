@@ -80,7 +80,14 @@ const SCENARIOS: [(&str, &[Claim]); 12] = [
     ),
     (
         "silo",
-        &[CONSTRUCTING, STORED, UNLOADING, DOCK_QUEUE, DELIVERED, SELLING],
+        &[
+            CONSTRUCTING,
+            STORED,
+            UNLOADING,
+            DOCK_QUEUE,
+            DELIVERED,
+            SELLING,
+        ],
     ),
     (
         "repair_sell",

@@ -83,7 +83,9 @@ pub(crate) fn restore(r: &mut ByteReader<'_>, o: &mut Outcome, now: Tick) -> Sav
     )?;
     // One check per tick, in ascending tick; within it the players in ascending order.
     ensure(
-        defeats.windows(2).all(|d| (d[0].1, d[0].0) < (d[1].1, d[1].0)),
+        defeats
+            .windows(2)
+            .all(|d| (d[0].1, d[0].0) < (d[1].1, d[1].0)),
         "the defeats are out of order",
     )?;
     ensure(
