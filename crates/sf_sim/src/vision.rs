@@ -907,5 +907,10 @@ impl World {
     }
 }
 
+mod save;
+
+#[cfg(test)]
+mod save_tests;
+
 #[cfg(test)]
 mod tests;
