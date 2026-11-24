@@ -3922,6 +3922,25 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
 * Gap: the generation of a remembered entity id is not checked against its slot (needs an `sf_sim`
   accessor). The world is not saved alongside in these tests; WP13.1e joins both.
 
+### WP13.1c-3b notes: saving vision, the last gate (24-11-2026)
+
+* A new section `V` holds the vision: the stamp of every slot as the last pass left it (with its
+  `disc` flag, so which stamps the cap refused is not decided again) and per player whether it has a
+  picture, its explored words and its version; format version 6, 15 sections. The counts, visible
+  words, disc counts and sums are rebuilt from the stamps on restore and equal the saved world by
+  `PartialEq`. The rules digest hashes all four `VisionRules` fields unconditionally instead of the
+  presence of vision rules. Saved/derived table, bounds with their writers, the coverage record and
+  the 13.1e and 13.1h lists: `docs/rules/save.md`.
+* The gate `vision` is gone and no gate is left: every world saves. `match`, `vision` and
+  `vision_targeting` save every 97 ticks and continue to their pins (`save_vision.rs`); the world of
+  every CI scenario saves at tick 97, the 15 `ai_*` scenarios stepped without their AI
+  (`every_ci_scenario_world_saves`). World and AI together is WP13.1e.
+* No pin moved; no change in the simulation's behaviour.
+* Gaps: a player index without a picture, a structure in sale stamping nothing and a stamp refused at
+  the cap are reached by no CI scenario at a save tick (round trips through `World::step` in
+  `vision/save_tests.rs`); the host's fog caches (`SimSnapshot.fog_version`, `FogApplied`) must be
+  reset on load (13.1e); the stamp of a live slot is not checked against its entity (13.1h).
+
 ### WP13.1c-3a notes: saving repair, sale and the match outcome (23-11-2026)
 
 * The entity columns `repairing` and `sell_left` join section `E`, and a new section `G` holds the
