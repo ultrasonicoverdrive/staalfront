@@ -140,7 +140,8 @@ and `matchplay.rs` (`the_local_player_cannot_be_an_ai`, `the_ais_come_from_the_c
 Edges, as built (WP9.1d):
 
 * **Match file and menu.** `--match m1_ai` and Restart keep the file (`a_restart_equals_a_fresh_start`). Choosing **Match** in the start menu
-  afterwards starts the plain default `m1` (`Runner::begin` sets the match file to the default when a scene is chosen); the menu has no file choice.
+  afterwards starts the plain default `m1` (`Runner::begin` sets the match file to the default when a scene is chosen). Since WP9.4c the start menu also has **Match against the computer**,
+  which plays the match named by `ai_match` in `assets/config/ai_levels.ron` (`m1_ai`) at the level shown; there is no other file choice.
 * **Bare names.** `--match NAME` where `NAME` is one component without an extension now means `assets/matches/NAME.ron`. A match file without an
   extension, named without a directory, in the working directory is no longer reachable that way (write `./NAME`).
 * **`sf_headless` ignores `controller`.** A scenario's `match_file` with `controller: Ai` runs that player static; headless AIs come only from the

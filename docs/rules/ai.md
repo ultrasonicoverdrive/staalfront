@@ -1757,7 +1757,9 @@ nothing in `crates/sf_sim` or `crates/sf_ai` changed, no number of any profile c
   it parses): `levels: ["easy", "normal", "hard"]` (the order the menu cycles them) and `default: "normal"`. A level is the file
   name of a profile under `assets/ai/` without `.ron`. The command line, the start menu and `matchplay` all ask this list; the
   words the player reads for them ("Easy", "Normal", "Hard") are `words.ai_level_names` in `menu_look.ron`, which is checked
-  to name exactly these levels.
+  to name exactly these levels. The same file names the match of the start menu's **Match against the computer**
+  (`ai_match: "m1_ai"`). At startup `sf_game::ai_refusal` refuses, with exit code 2 and before a window, a level whose
+  `assets/ai/<level>.ron` is missing (`AiLevels::check_profiles`), as it refuses a bad `--ai`.
 * **Command line.** `sf_game --match m1_ai --ai hard` (`easy`, `normal`, `hard`): every computer player of the match plays
   `assets/ai/hard.ron` instead of the profile the match file names (`matchplay::with_level` rewrites only the profile name
   of each `Controller::Ai` seat; the seed, the objects and the human seat stay). The console says `match m1_ai: 1 computer

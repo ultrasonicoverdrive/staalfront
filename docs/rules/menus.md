@@ -135,11 +135,17 @@ While a menu is open **no click, key or wheel reaches the map, the sidebar, the 
   not play the click sound for a click on the map. The one thing left alone is the **T** test-sound key and the F1 panels
   (they are debug tools).
 * The sim is held while a menu is open, so nothing moves behind it either.
+* **A low window** (WP9.4c fix round 0): when the button column of the start or pause menu does not fit between the margins
+  (six buttons are about 700 px at UI scale 2), the buttons and their gaps shrink together until it does, so Quit never ends
+  below the window edge; a menu that fits is laid out as before (`the_start_menu_fits_a_low_window_at_every_scale`, down to
+  800 x 480 at every UI scale).
 
 Checked on a real window (`scripts/menus_e2e.py`, Xvfb and lavapipe, real X events): with no menu open **B** gives the build line
 and a click on the first tile of the sidebar gives the sidebar line (the controls); with the pause menu open the same keys,
 **Ctrl+1**, clicks on the map and clicks on the sidebar produce **no** such line and no tick. With the gating taken out of
-`render` the check fails ("13 of 14 checks passed": the build and group lines appear).
+`render` the check fails ("13 of 14 checks passed": the build and group lines appear). Last run 24-11-2026 (WP9.4c fix round 0):
+29 of 29 checks passed, with the start menu's six buttons (the script places them from the layout rule, `button_y`) and the
+new check that the Computer level button is in the settings file at once.
 
 ## Settings file
 
@@ -330,7 +336,7 @@ generator is the cost; the match map is loaded, not generated).
 
 * The unit tests named above; `tests/menu_screenshot.rs` through the real renderer (the dim and the buttons' colours at the
   layout's positions, the banner with its two buttons under it, both palettes' swatches in the choice); the real game on a
-  software adapter for every picture in `docs/screenshots/wp11.5a/`; `scripts/menus_e2e.py` (26 checks, real X events).
+  software adapter for every picture in `docs/screenshots/wp11.5a/`; `scripts/menus_e2e.py` (29 checks, real X events, last run 24-11-2026 on the six-button start menu of WP9.4c).
 * **Mutations** (a scratch edit, the test that fails, reverted): the menu closes instead of going back from the settings
   (`esc_goes_back_one_screen_at_a_time...`, `the_tabs_switch_the_page...`); Esc while a key is awaited also leaves the page
   (`esc_while_a_key_is_awaited...`); the conflict check removed (`a_key_another_action_has_is_refused...`,

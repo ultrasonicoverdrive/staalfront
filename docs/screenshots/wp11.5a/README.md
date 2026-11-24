@@ -29,4 +29,4 @@ shot), except the last one. The tick is in the file name and in the HUD's top ba
 
 The menus under test are the same functions the HUD calls (`menu_view::begin_frame`, `finish_frame`, `result_buttons`). The
 real-window behaviour (Esc, the sim held, nothing reaching the game, Resume, Restart, Main menu, Quit, the key capture, the settings
-file) is `scripts/menus_e2e.py`, which prints PASS or FAIL for 26 checks.
+file) is `scripts/menus_e2e.py`, which prints PASS or FAIL for each check (26 at WP11.5a; 29 since WP9.4c, last run 24-11-2026, all passed).
