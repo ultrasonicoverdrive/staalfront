@@ -773,7 +773,8 @@ impl Runner {
         let same_ai = match ai {
             None => self.options.ai_level.is_none(),
             Some(level) => {
-                self.options.match_file == Some(Some(PathBuf::from(crate::ai_level::AI_MATCH)))
+                self.options.match_file
+                    == Some(Some(crate::ai_level::AiLevels::embedded().ai_match_path()))
                     && self.options.ai_level.as_deref() == Some(level)
             }
         };
@@ -788,7 +789,9 @@ impl Runner {
             options.match_file = match (scene == Scene::Match, ai) {
                 (false, _) => None,
                 (true, None) => Some(None),
-                (true, Some(_)) => Some(Some(PathBuf::from(crate::ai_level::AI_MATCH))),
+                (true, Some(_)) => {
+                    Some(Some(crate::ai_level::AiLevels::embedded().ai_match_path()))
+                }
             };
             options.ai_level = ai.map(str::to_owned);
         }
@@ -1097,8 +1100,22 @@ impl Runner {
 
     /// A setting changed in the menu: apply it to the window, the engine or the picture, and write the
     /// settings.
+    /// A change that needs no window or engine: written to the settings file at once, `true` when
+    /// `change` was one (the AI level, WP9.4c: it is only read when a match starts).
+    fn apply_change_without_window(&mut self, change: Change) -> bool {
+        if change != Change::AiLevel {
+            return false;
+        }
+        let settings = self.menu.settings().clone();
+        self.store.save(&settings);
+        true
+    }
+
     fn apply_change(&mut self, ctx: &mut Context, change: Change) {
         use crate::settings::WindowMode;
+        if self.apply_change_without_window(change) {
+            return;
+        }
         let settings = self.menu.settings().clone();
         match change {
             Change::Window => ctx.set_fullscreen(settings.window == WindowMode::Borderless),
@@ -1131,7 +1148,7 @@ impl Runner {
                     play_test_sound(audio, which);
                 }
             }
-            // Only saved: the level is read when a match starts.
+            // Saved above, in `apply_change_without_window`.
             Change::AiLevel => {}
             Change::RaAudio => {
                 let now = self.menu.sound_now();
@@ -3699,17 +3716,9 @@ fn match_scene(
     let mut ais =
         crate::matchplay::ais_at_level(&def, options.ai_level.as_deref(), &defs, &assets)?;
     if let Some(level) = &options.ai_level {
-        if ais.is_empty() {
-            eprintln!(
-                "sf_game: --ai {level}: the match {} has no computer player, so the level changes nothing",
-                def.name
-            );
-        } else {
-            println!(
-                "match {}: {} computer player(s) at the level {level}",
-                def.name,
-                ais.len()
-            );
+        match ai_level_line(level, &def.name, ais.len()) {
+            Ok(line) => println!("{line}"),
+            Err(note) => eprintln!("{note}"),
         }
     }
     if options.replay.is_some() && !ais.is_empty() {
@@ -3872,6 +3881,21 @@ fn fullscreen_key_works(menu_open: bool) -> bool {
 /// mode's command and never a selection.
 fn select_press_starts_selection(ui_busy: bool, build_active: bool, tool_active: bool) -> bool {
     !ui_busy && !build_active && !tool_active
+}
+
+/// What a match started with an AI level says (WP9.4c): the line on stdout with the number of computer
+/// players at that level, or (`Err`) the note on stderr that the match has none, so the level changes
+/// nothing.
+fn ai_level_line(level: &str, match_name: &str, ais: usize) -> Result<String, String> {
+    if ais == 0 {
+        Err(format!(
+            "sf_game: --ai {level}: the match {match_name} has no computer player, so the level changes nothing"
+        ))
+    } else {
+        Ok(format!(
+            "match {match_name}: {ais} computer player(s) at the level {level}"
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -4337,7 +4361,7 @@ mod tests {
     }
 
     /// WP9.4c: `--ai LEVEL` gives the computer player of the match the shipped profile of that level. The
-    /// easy profile thinks every 40 ticks and the other two every 10, so the number of thinks in 200 ticks
+    /// easy profile thinks every 40 ticks and the other two every 10, so the number of thinks in 600 ticks
     /// tells the easy AI from the others, and the worlds of the three levels differ after 600 ticks; with
     /// no `--ai` the match file's profile (normal) plays, exactly as the level `normal` does.
     #[test]
@@ -4377,7 +4401,7 @@ mod tests {
         assert_eq!(r.options.scene, Scene::Match);
         assert_eq!(
             r.options.match_file,
-            Some(Some(PathBuf::from(crate::ai_level::AI_MATCH)))
+            Some(Some(crate::ai_level::AiLevels::embedded().ai_match_path()))
         );
         assert_eq!(r.options.ai_level.as_deref(), Some("easy"));
         assert!(!r.pristine && !r.options.menu);
@@ -4402,6 +4426,76 @@ mod tests {
         );
         run_ticks(&r, 200);
         assert_eq!(r.sim.counters().thinks, 0);
+    }
+
+    /// WP9.4c: the pristine scene under the start menu is reused only when it is the match asked for. A
+    /// pristine `m1_ai` at one level (or at the file's own profile), or a pristine plain match, followed by
+    /// "Match against the computer" at another level builds the match at that level.
+    #[test]
+    fn a_pristine_match_at_another_level_is_not_reused_for_the_match_against_the_computer() {
+        let thinks_after = |line: &str, level: &'static str| {
+            let mut r = runner(line);
+            assert!(r.pristine, "{line}");
+            r.apply_to_game(vec![Outcome::StartAiMatch { level }]);
+            assert_eq!(r.options.ai_level.as_deref(), Some(level), "{line}");
+            run_ticks(&r, 200);
+            r.sim.counters().thinks
+        };
+        let easy = thinks_after("--menu start", "easy");
+        let normal = thinks_after("--menu start", "normal");
+        assert!(easy > 0 && easy < normal, "{easy} {normal}");
+        // The file's own profile is normal; easy must be played.
+        assert_eq!(thinks_after("--menu start --match m1_ai", "easy"), easy);
+        assert_eq!(
+            thinks_after("--menu start --match m1_ai --ai hard", "easy"),
+            easy
+        );
+        assert_eq!(
+            thinks_after("--menu start --match m1_ai --ai easy", "normal"),
+            normal
+        );
+        // The plain match has no computer player; the match against the computer has one.
+        assert_eq!(thinks_after("--menu start --match", "easy"), easy);
+        // The same match at the same level is reused, and plays that level.
+        assert_eq!(
+            thinks_after("--menu start --match m1_ai --ai easy", "easy"),
+            easy
+        );
+    }
+
+    /// WP9.4c: the level chosen in the start menu is written to the settings file at once.
+    #[test]
+    fn the_chosen_ai_level_is_saved_at_once() {
+        let dir = std::env::temp_dir().join(format!("sf_ai_level_save_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.ron");
+        let mut r = runner("");
+        r.store = crate::settings::Store::new(Some(file.clone()));
+        r.menu.open_start();
+        let outs = r
+            .menu
+            .handle(crate::menu::Event::Click(crate::menu::Item::CycleAiLevel));
+        assert_eq!(outs, [Outcome::Changed(Change::AiLevel)]);
+        assert!(r.apply_change_without_window(Change::AiLevel));
+        let text = std::fs::read_to_string(&file).expect("saved");
+        assert!(text.contains("\"hard\""), "{text}");
+        // Other changes need the window and are left to `apply_change`.
+        assert!(!r.apply_change_without_window(Change::UiScale));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// WP9.4c: `--ai` on a match with no computer player says so on stderr; with one it says the level.
+    #[test]
+    fn an_ai_level_on_a_match_without_a_computer_player_is_noted() {
+        let note = ai_level_line("hard", "m1", 0).unwrap_err();
+        assert!(
+            note.contains("no computer player") && note.contains("hard"),
+            "{note}"
+        );
+        assert_eq!(
+            ai_level_line("easy", "m1_ai", 1),
+            Ok("match m1_ai: 1 computer player(s) at the level easy".to_owned())
+        );
     }
 
     /// Restart keeps the match file or the sandbox it was started with: the match is still the match.

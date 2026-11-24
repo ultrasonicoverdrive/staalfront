@@ -167,6 +167,20 @@ use sf_render::TerrainConfig;
 
 pub use args::{Options, Preset};
 
+/// The exit code of a run that refuses its AI level (WP9.4c): a bad `--ai`, or a shipped level whose
+/// profile file is missing.
+pub const AI_REFUSED_EXIT: i32 = 2;
+
+/// Why the game will not start with these options and these assets because of the AI levels, `None` when
+/// it can: the refused `--ai` first, then a level of `ai_levels.ron` with no `ai/<level>.ron` under
+/// `assets`. [`run`] says it and returns [`AI_REFUSED_EXIT`] before it makes a window.
+pub fn ai_refusal(options: &Options, assets: &std::path::Path) -> Option<String> {
+    if let Some(refused) = &options.ai_refused {
+        return Some(refused.clone());
+    }
+    ai_level::AiLevels::embedded().check_profiles(assets).err()
+}
+
 /// Run the game window with the options of this process's command line.
 /// Returns the process exit code: 0 after a normal run, 1 when the options,
 /// the map or the model pack are unusable, the renderer could not start, a
@@ -180,10 +194,11 @@ pub fn run(preset: Preset) -> i32 {
     for warning in &options.warnings {
         eprintln!("{name}: {warning}");
     }
-    // `--ai` with something the game will not start with (WP9.4c): said once, nothing starts.
-    if let Some(refused) = &options.ai_refused {
+    // `--ai` with something the game will not start with, or a level without its profile (WP9.4c):
+    // said once, nothing starts.
+    if let Some(refused) = ai_refusal(&options, sf_engine::AssetRoot::resolve().root()) {
         eprintln!("{name}: {refused}");
-        return 2;
+        return AI_REFUSED_EXIT;
     }
     // The player's settings (WP11.5a): read before the window is made, because the window mode, the
     // frame cap and the present mode depend on them. A bad file is said once and replaced by the
@@ -296,4 +311,33 @@ pub(crate) fn drawn_scale_at_zoom_one(
             .with_structure_scale(bands.structure_scale(1.0)),
     );
     (drawn / true_size * 100.0).round() / 100.0
+}
+
+#[cfg(test)]
+mod ai_refusal_tests {
+    use super::*;
+
+    fn options(line: &str) -> Options {
+        Options::parse(Preset::Game, line.split_whitespace().map(str::to_owned))
+    }
+
+    /// WP9.4c: a bad `--ai` and a level without its profile stop the game before a window, with exit 2;
+    /// a good level with the shipped assets starts.
+    #[test]
+    fn a_refused_ai_level_stops_the_run_with_exit_code_two() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        assert_eq!(AI_REFUSED_EXIT, 2);
+        assert_eq!(
+            ai_refusal(&options("--match m1_ai --ai hard"), &assets),
+            None
+        );
+        assert_eq!(ai_refusal(&options(""), &assets), None);
+        let bad = ai_refusal(&options("--match m1_ai --ai brutal"), &assets).expect("refused");
+        assert!(bad.contains("easy, normal, hard"), "{bad}");
+        let empty = std::env::temp_dir().join(format!("sf_no_ai_{}", std::process::id()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let missing = ai_refusal(&options(""), &empty).expect("refused");
+        assert!(missing.contains("easy.ron"), "{missing}");
+        std::fs::remove_dir_all(&empty).ok();
+    }
 }

@@ -4,6 +4,9 @@
 // lists them: `--ai <level>`, the start menu and the tests read it. The words the player reads
 // ("Easy", "Normal", "Hard") are in `menu_look.ron`; the numbers of each level are in its profile file.
 (
+    // The match the start menu's "against the computer" entry plays (a name under `assets/matches`, as
+    // `--match` takes it); its computer seats get the chosen level.
+    ai_match: "m1_ai",
     default: "normal",
     levels: ["easy", "normal", "hard"],
 )

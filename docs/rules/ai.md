@@ -1768,7 +1768,7 @@ nothing in `crates/sf_sim` or `crates/sf_ai` changed, no number of any profile c
   A `--record` of such a match names the match file only, not the level: replaying it feeds the recorded commands, the AI's
   included, so the level does not matter there.
 * **Start menu.** The start menu had no match against the computer (its **Match** is `m1`, a static opponent), so two entries
-  were added there: **Match against the computer** (plays `m1_ai`, `ai_level::AI_MATCH`, at the level shown) and **Computer
+  were added there: **Match against the computer** (plays `m1_ai`, `ai_match` in `ai_levels.ron`, at the level shown) and **Computer
   level: Normal**, a button that cycles to the next level on each click and is saved in the settings file (`ai_level`, absent
   = the default; a saved name that is no longer shipped reads as the default). Restart keeps the level; the plain **Match**
   has no computer player and no level.

@@ -11,10 +11,6 @@ use serde::Deserialize;
 /// The text of `assets/config/ai_levels.ron`, compiled in.
 pub const EMBEDDED_AI_LEVELS: &str = include_str!("../../../assets/config/ai_levels.ron");
 
-/// The match file the start menu's "against the computer" entry plays (a bare name under
-/// `assets/matches`). Its AI seat gets the level the player chose.
-pub const AI_MATCH: &str = "m1_ai";
-
 /// The levels and the default.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +19,9 @@ pub struct AiLevels {
     pub default: String,
     /// The profile names that count as levels, in the order the menu cycles them.
     pub levels: Vec<String>,
+    /// The match file the start menu's "against the computer" entry plays (a bare name under
+    /// `assets/matches`). Its computer seats get the level the player chose.
+    pub ai_match: String,
 }
 
 impl AiLevels {
@@ -51,6 +50,17 @@ impl AiLevels {
                 return Err(format!("ai_levels.ron: level \"{name}\" is listed twice"));
             }
         }
+        let plain_file = !self.ai_match.is_empty()
+            && self
+                .ai_match
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !plain_file {
+            return Err(format!(
+                "ai_levels.ron: ai_match \"{}\" must be a bare match name under assets/matches",
+                self.ai_match
+            ));
+        }
         if !self.levels.contains(&self.default) {
             return Err(format!(
                 "ai_levels.ron: the default \"{}\" is not one of the levels",
@@ -66,6 +76,31 @@ impl AiLevels {
         LEVELS.get_or_init(|| {
             AiLevels::from_ron(EMBEDDED_AI_LEVELS).expect("the shipped ai_levels.ron is valid")
         })
+    }
+
+    /// The match the start menu plays against the computer, as `--match` would name it.
+    pub fn ai_match_path(&self) -> std::path::PathBuf {
+        std::path::PathBuf::from(&self.ai_match)
+    }
+
+    /// Checked at startup: every level has its profile file `ai/<level>.ron` under `assets`, so a level
+    /// the menu offers can always be played. The error names the missing files.
+    pub fn check_profiles(&self, assets: &std::path::Path) -> Result<(), String> {
+        let missing: Vec<String> = self
+            .levels
+            .iter()
+            .map(|l| assets.join("ai").join(format!("{l}.ron")))
+            .filter(|f| !f.is_file())
+            .map(|f| f.display().to_string())
+            .collect();
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "ai_levels.ron lists a level without its profile file: {} is missing",
+                missing.join(", ")
+            ))
+        }
     }
 
     /// The shipped level called `name`, `None` if it is not one.
@@ -103,6 +138,22 @@ mod tests {
         assert_eq!(l.levels, ["easy", "normal", "hard"]);
         assert_eq!(l.default, "normal");
         assert_eq!(l.list_text(), "easy, normal, hard");
+        assert_eq!(l.ai_match, "m1_ai");
+    }
+
+    #[test]
+    fn a_level_without_its_profile_file_is_refused_at_startup() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        assert_eq!(AiLevels::embedded().check_profiles(&assets), Ok(()));
+        let dir = std::env::temp_dir().join(format!("sf_ai_levels_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("ai")).unwrap();
+        std::fs::write(dir.join("ai/easy.ron"), "()").unwrap();
+        let e = AiLevels::embedded().check_profiles(&dir).unwrap_err();
+        assert!(
+            e.contains("normal.ron") && e.contains("hard.ron") && !e.contains("easy.ron"),
+            "{e}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -112,6 +163,10 @@ mod tests {
             let file = assets.join("ai").join(format!("{name}.ron"));
             assert!(file.is_file(), "{} is not a file", file.display());
         }
+        let m = assets
+            .join("matches")
+            .join(format!("{}.ron", AiLevels::embedded().ai_match));
+        assert!(m.is_file(), "{} is not a file", m.display());
     }
 
     #[test]
@@ -130,12 +185,23 @@ mod tests {
 
     #[test]
     fn a_list_that_cannot_work_is_refused() {
-        assert!(AiLevels::from_ron("(default: \"a\", levels: [])").is_err());
-        assert!(AiLevels::from_ron("(default: \"b\", levels: [\"a\"])").is_err());
-        assert!(AiLevels::from_ron("(default: \"a\", levels: [\"a\", \"a\"])").is_err());
-        assert!(AiLevels::from_ron("(default: \"A\", levels: [\"A\"])").is_err());
-        assert!(AiLevels::from_ron("(default: \"a\", levels: [\"a\"], extra: 1)").is_err());
+        assert!(AiLevels::from_ron("(ai_match: \"m\", default: \"a\", levels: [])").is_err());
+        assert!(AiLevels::from_ron("(ai_match: \"m\", default: \"b\", levels: [\"a\"])").is_err());
+        assert!(
+            AiLevels::from_ron("(ai_match: \"m\", default: \"a\", levels: [\"a\", \"a\"])")
+                .is_err()
+        );
+        assert!(AiLevels::from_ron("(ai_match: \"m\", default: \"A\", levels: [\"A\"])").is_err());
+        assert!(
+            AiLevels::from_ron("(ai_match: \"m\", default: \"a\", levels: [\"a\"], extra: 1)")
+                .is_err()
+        );
         assert!(AiLevels::from_ron("not ron").is_err());
-        assert!(AiLevels::from_ron("(default: \"a\", levels: [\"a\"])").is_ok());
+        assert!(
+            AiLevels::from_ron("(ai_match: \"../m\", default: \"a\", levels: [\"a\"])").is_err()
+        );
+        assert!(AiLevels::from_ron("(ai_match: \"\", default: \"a\", levels: [\"a\"])").is_err());
+        assert!(AiLevels::from_ron("(default: \"a\", levels: [\"a\"])").is_err());
+        assert!(AiLevels::from_ron("(ai_match: \"m\", default: \"a\", levels: [\"a\"])").is_ok());
     }
 }
