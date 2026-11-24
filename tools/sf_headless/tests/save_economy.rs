@@ -19,7 +19,6 @@ use std::collections::BTreeSet;
 use common::saves::*;
 use common::scenario_path;
 use sf_headless::scenario::Scenario;
-use sf_sim::save::SaveError;
 
 const HARVEST: &[Claim] = &[
     ORE_CHANGED,
@@ -305,37 +304,11 @@ fn the_coverage_record_is_pinned() {
     assert_eq!(covered, want);
 }
 
-/// The CI scenarios without an AI that still refuse to save hold state of a section WP13.1c-3b
-/// saves by the first save tick: their save is refused, naming the section (only vision is left).
-#[test]
-fn probe_which_scenarios_still_refuse() {
-    let mut wrong = Vec::new();
-    for (name, section) in [
-        ("match", "vision"),
-        ("vision", "vision"),
-        ("vision_targeting", "vision"),
-    ] {
-        let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
-        let mut world = Box::new(scenario.build_world().unwrap());
-        let mut arrivals = scenario.arrivals();
-        for _ in 0..EVERY {
-            arrivals.schedule_due(&mut world).unwrap();
-            world.step();
-        }
-        let got = world.save().err();
-        if got != Some(SaveError::Unsupported(section)) {
-            wrong.push(format!("{name}: {got:?}"));
-        }
-    }
-    assert!(wrong.is_empty(), "{wrong:?}");
-}
-
-/// The CI scenarios that refuse to save at the first save tick, all for vision (WP13.1c-3b): the
-/// three without an AI above and the fifteen AI scenarios of `save_ai.rs`.
-const REFUSE_FOR_VISION: [&str; 18] = [
-    "match",
-    "vision",
-    "vision_targeting",
+/// The CI scenarios with an AI (`save_ai.rs`). Their world saves like any other since WP13.1c-3b;
+/// the AI's own state is saved separately by `sf_ai` (WP13.1d, `save_ai.rs`), and saving world and
+/// AI together, so that a game with an AI goes on from a save, is the host's (WP13.1e). The class
+/// test below steps their world without the AI (the AI would only add commands).
+const WITH_AI: [&str; 15] = [
     "ai_fog",
     "ai_base",
     "ai_noore",
@@ -368,39 +341,41 @@ fn ci_scenarios() -> Vec<String> {
     list.split_whitespace().map(str::to_owned).collect()
 }
 
-/// Every CI scenario has a class at the first save tick: it saves (and the save restores onto a
-/// fresh world of the scenario, resaving to the same bytes), or it is in [`REFUSE_FOR_VISION`] and
-/// refused exactly as `Unsupported("vision")`. A new CI scenario gets its class here.
+/// Every CI scenario's world saves at the first save tick (WP13.1c-3b removed the last gate,
+/// vision), restores onto a fresh world of the scenario and resaves to the same bytes. The scenarios
+/// with an AI ([`WITH_AI`]) are stepped without it: this is the world's class, not the game's
+/// (world and AI together is WP13.1e). A new CI scenario is in it by itself.
 #[test]
-fn every_ci_scenario_saves_or_refuses_for_vision() {
+fn every_ci_scenario_world_saves() {
     let names = ci_scenarios();
     assert!(names.len() > 40, "{names:?}");
-    assert!(
-        REFUSE_FOR_VISION
-            .iter()
-            .all(|r| names.iter().any(|n| n == r))
-    );
+    assert!(WITH_AI.iter().all(|r| names.iter().any(|n| n == r)));
     let mut wrong = Vec::new();
+    let mut with_ai = 0;
     for name in &names {
         let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
+        // Which scenarios have an AI is the list above: one more or one less fails.
+        if scenario.ais.is_empty() == WITH_AI.contains(&name.as_str()) {
+            wrong.push(format!("{name}: has an AI {}", !scenario.ais.is_empty()));
+        }
+        with_ai += usize::from(!scenario.ais.is_empty());
         let mut world = Box::new(scenario.build_world().unwrap());
         let mut arrivals = scenario.arrivals();
         for _ in 0..EVERY {
             arrivals.schedule_due(&mut world).unwrap();
             world.step();
         }
-        let refuse = REFUSE_FOR_VISION.contains(&name.as_str());
-        match (world.save(), refuse) {
-            (Err(SaveError::Unsupported("vision")), true) => {}
-            (Ok(bytes), false) => {
+        match world.save() {
+            Ok(bytes) => {
                 let fresh = scenario.build_fresh_world().unwrap();
                 match sf_sim::World::restore(fresh, &bytes) {
                     Ok(back) if back.save().as_ref() == Ok(&bytes) => {}
                     other => wrong.push(format!("{name}: restore {:?}", other.err())),
                 }
             }
-            (got, _) => wrong.push(format!("{name}: {:?}", got.err())),
+            Err(e) => wrong.push(format!("{name}: {e:?}")),
         }
     }
     assert!(wrong.is_empty(), "{wrong:?}");
+    assert_eq!(with_ai, WITH_AI.len());
 }
