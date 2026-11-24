@@ -417,7 +417,7 @@ fn repair_and_sale_together_and_under_fire_restore_after_every_tick() {
     };
     let fresh = || fresh_for(Some(&[P0, P1]), rules);
     // Slots 0 and 1 the construction centres, 2 to 5 barns of player 0, 6 to 9 riflemen of
-    // player 1 on them; the two on barns 2 and 3 are removed at tick 25.
+    // player 1 on them; the two on barns 2 and 3 are removed at tick 25 by a despawn.
     let build = || {
         let mut w = fresh();
         place(&mut w, 0, HQ, P0, 4, 30);
