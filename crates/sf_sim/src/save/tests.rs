@@ -336,6 +336,11 @@ pub(super) fn settled(mut w: World) -> World {
         p.rejections.clear();
         p.produced.clear();
     }
+    if let Some(r) = w.repair.as_deref_mut() {
+        r.rejections.clear();
+        r.waiting.clear();
+        r.sold.clear();
+    }
     w.arsenal.shots.clear();
     w.arsenal.impacts.clear();
     w.arsenal.attacks.clear();
@@ -468,15 +473,15 @@ fn the_header_is_pinned() {
     let w = busy(fresh(), 2);
     let bytes = w.save().unwrap();
     assert_eq!(&bytes[..4], b"SFSV");
-    assert_eq!(&bytes[4..8], &[4, 0, 0, 0]);
+    assert_eq!(&bytes[4..8], &[5, 0, 0, 0]);
     assert_eq!(&bytes[8..16], &w.rules_digest().to_le_bytes());
     assert_eq!(&bytes[16..24], &2u64.to_le_bytes());
-    assert_eq!(&bytes[24..28], &[13, 0, 0, 0]);
+    assert_eq!(&bytes[24..28], &[14, 0, 0, 0]);
     assert_eq!(
         sections(&bytes).iter().map(|s| s.0).collect::<Vec<_>>(),
-        b"WEQXDPFMOHCUI".to_vec()
+        b"WEQXDPFMOHCUIG".to_vec()
     );
-    assert_eq!(FORMAT_VERSION, 4);
+    assert_eq!(FORMAT_VERSION, 5);
 }
 
 #[test]
@@ -969,24 +974,16 @@ fn a_broken_free_list_is_corruption() {
 type Gate = (&'static str, fn(&mut World));
 
 /// One change per section that this format does not save yet, each the smallest that leaves the
-/// tick-0 state.
+/// tick-0 state. Since WP13.1c-3a only vision is left (repair, sale and the outcome are saved).
 fn gates() -> Vec<Gate> {
-    vec![
-        ("repair", |w| w.entities.repairing[10] = true),
-        ("repair", |w| w.entities.sell_left[10] = 3),
-        ("vision", |w| {
-            w.vision = Some(Box::new(crate::vision::Vision::new(
-                64,
-                48,
-                Default::default(),
-                Vec::new(),
-            )));
-        }),
-        ("outcome", |w| {
-            let rules = crate::outcome::MatchRules::new(&[PlayerId(0), PlayerId(1)]).unwrap();
-            w.outcome = Some(Box::new(crate::outcome::Outcome::new(rules)));
-        }),
-    ]
+    vec![("vision", |w| {
+        w.vision = Some(Box::new(crate::vision::Vision::new(
+            64,
+            48,
+            Default::default(),
+            Vec::new(),
+        )));
+    })]
 }
 
 #[test]

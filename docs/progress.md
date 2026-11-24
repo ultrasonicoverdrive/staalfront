@@ -3922,6 +3922,22 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
 * Gap: the generation of a remembered entity id is not checked against its slot (needs an `sf_sim`
   accessor). The world is not saved alongside in these tests; WP13.1e joins both.
 
+### WP13.1c-3a notes: saving repair, sale and the match outcome (23-11-2026)
+
+* The entity columns `repairing` and `sell_left` join section `E`, and a new section `G` holds the
+  match outcome (`begun`, the defeats, the result); format version 5. The gates `repair` and
+  `outcome` are gone; only `vision` is left (WP13.1c-3b). The rules digest hashes the match players
+  (number and each) instead of the presence of match rules. Bounds with their writers, the
+  derived/saved table and the 13.1e and 13.1h lists: `docs/rules/save.md`.
+* `repair_sell` now saves and continues to its pin with a save every 97 ticks; `silo` saves after
+  every tick, its sale included (the refused window 4401 to 4460 is gone). `match`, `vision`,
+  `vision_targeting` and the `ai_*` scenarios still refuse (vision).
+* No pin moved; no change in the simulation's behaviour.
+* Gaps: a draw, three players, a match that has not begun and repair or sale at zero hit points are
+  reached by no CI scenario (unit round trips in `save/outcome_tests.rs`); after a load
+  `repair_status` shows `Repairing` instead of `WaitingForMoney` and `sales()` is empty for one tick
+  (13.1e).
+
 ### WP13.1c-2 notes: saving the economy, construction, production and power (21-11-2026)
 
 * New sections `O` (ore), `H` (harvesters, docks, delivered, stores, capacity), `C` (money spent),

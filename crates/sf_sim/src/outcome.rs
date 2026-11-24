@@ -126,6 +126,16 @@ impl Outcome {
         }
     }
 
+    /// The match rules for the rules digest (WP13.1c-3a): the number of players, then each,
+    /// ascending. Destructured without `..`: a new rule fails to compile until it is hashed.
+    pub(crate) fn write_rules(&self, h: &mut Fnv1a64) {
+        let MatchRules { players } = &self.rules;
+        h.write_u64(players.len() as u64);
+        for p in players {
+            h.write_u8(p.0);
+        }
+    }
+
     pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
         h.write_bytes(SECTION_TAG);
         h.write_u64(self.rules.players.len() as u64);
