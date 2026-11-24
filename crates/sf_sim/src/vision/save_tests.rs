@@ -30,7 +30,7 @@ fn vision_rules() -> VisionRules {
         .with_shared(vec![(P0, P2)])
 }
 
-/// The match world of WP13.1c-3a's tables (players 0 and 2) with vision: player 0 shares with 2.
+/// The match world of the WP13.1c-3a tables with vision, players 0 and 2, the first sharing with the other.
 /// On a map of 40 by 41 cells: 1640 cells, so the last explored word has bits past the map.
 fn fresh() -> World {
     bare().with_vision(vision_rules()).unwrap()
@@ -150,7 +150,7 @@ fn vision_restores_after_every_tick() {
         assert!(names.contains(&n), "{n}: {claimed:?}");
     }
     // The ones with a fixed tick: the sale stamps nothing from the tick of the order, the gap
-    // closes with the first object of player 1.
+    // closes with the first object of player 1 (slot 6).
     let first = |n: &str| claimed.iter().find(|c| c.0 == n).unwrap().1;
     assert_eq!(first("vision.stamp.selling"), 31);
     assert!(first("vision.player.gap") == 1);
@@ -181,7 +181,7 @@ fn a_sale_stamps_nothing_until_the_barn_is_gone_and_restores_at_each_tick() {
         ));
         w = round_trip(&w);
     }
-    // The order's tick: sold from the order on; the pass of the next tick stamps sight 0.
+    // The order's tick: sold from the order on; the pass of the next tick stamps a sight of nothing.
     assert_eq!(seen[0], (true, SELL_TICKS, Some((0, false))));
     assert!(seen.iter().any(|s| !s.0), "{seen:?}");
     // Once the barn is gone the next pass unstamps the slot.
@@ -457,7 +457,7 @@ fn mid() -> World {
     w
 }
 
-/// The bytes of `w`; for the tag cases the first stamp's or the first player's tag made 2.
+/// The bytes of `w`; for the tag cases the first stamp's or the first player's tag made 2 (unknown).
 fn bytes_of(name: &str, w: &World, at: bool) -> Vec<u8> {
     let mut bytes = w.save().unwrap();
     if at {
@@ -562,6 +562,16 @@ fn every_vision_rule_is_in_the_digest() {
         ..r()
     };
     assert_ne!(with(fewer).rules_digest(), base, "a kind less");
+    // The same sights under other kinds: only the kinds tell them apart.
+    let kinds = |k| VisionRules {
+        sights: vec![(RIFLEMAN, 5000), (k, 3000)],
+        ..r()
+    };
+    assert_ne!(
+        with(kinds(BARN)).rules_digest(),
+        with(kinds(HQ)).rules_digest(),
+        "the kinds of the same sights"
+    );
     // Gate off and no pairs (the checksum hashes them only when set; the digest always).
     let plain = with(VisionRules::new(LEGACY, r().sights));
     assert_ne!(plain.rules_digest(), base, "gate and pairs");
