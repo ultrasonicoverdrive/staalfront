@@ -79,6 +79,15 @@ pub const SELLING: Claim = ("a structure being sold", |c| c.selling > 0);
 pub const MATCH_BEGUN: Claim = ("a match that has begun", |c| c.match_begun);
 pub const DEFEAT: Claim = ("a defeated player", |c| c.defeats > 0);
 pub const DECIDED: Claim = ("a decided match", |c| c.decided);
+// WP13.1c-3b.
+pub const VISION: Claim = ("a vision picture", |c| c.vision_players > 0 && c.stamps > 0);
+pub const STAMP_DEAD: Claim = ("a vision stamp of a slot that died in the tick", |c| {
+    c.stamps_dead > 0
+});
+pub const STAMP_BLIND: Claim = ("a vision stamp of sight nothing", |c| c.stamps_blind > 0);
+pub const FOG: Claim = ("fog (explored, not visible)", |c| c.fog);
+pub const SHARED: Claim = ("a cell seen only through shared vision", |c| c.shared_seen);
+pub const TWO_PICTURES: Claim = ("two players with a picture", |c| c.vision_players >= 2);
 
 /// The claims whose state is a report of the last tick: derived, empty in a restored world, so
 /// asserted in the saved world only.

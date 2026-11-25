@@ -17,14 +17,17 @@
 //!   the projectiles and `D` the wrecks and the tally (WP13.1c-1), `P` the path service (WP13.1b),
 //!   `F` the flowfields, `M` the formations, then (WP13.1c-2) `O` the ore, `H` the harvesters,
 //!   docks and stores, `C` the money spent, `U` the factories and `I` the power totals, then
-//!   (WP13.1c-3a) `G` the match outcome, in that order. The construction state (`build_left`) and
+//!   (WP13.1c-3a) `G` the match outcome and (WP13.1c-3b) `V` the vision, in that order. The construction state (`build_left`) and
 //!   the repair and sale state (`repairing`, `sell_left`, WP13.1c-3a) are columns of `E`.
 //!
-//! # Not yet saved
+//! Then (WP13.1c-3b) `V` the vision: the stamps of the last pass and per player the explored
+//! words and the version; the counts, visible words and sums are rebuilt from the stamps.
 //!
-//! Vision comes in WP13.1c-3b; until then [`World::save`] refuses, with [`SaveError::Unsupported`]
-//! naming the section, any world in which it holds something that is not its tick-0 state; the
-//! exact test per section is in `docs/rules/save.md`. A world that saves therefore restores whole.
+//! # Gates
+//!
+//! None is left (WP13.1c-3b saved vision, the last): every world saves. [`SaveError::Unsupported`]
+//! stays for the targeting and crowd guards of `check_unsaved_sections` (which never refuse: their
+//! state is the entity columns) and for a section a later rule set adds before it is saved.
 //!
 //! # Guards
 //!
@@ -56,7 +59,7 @@ pub const MAGIC: [u8; 4] = *b"SFSV";
 
 /// The layout of the bytes after the magic. Raised whenever that layout changes; an older save is
 /// refused with [`SaveError::Version`] (no migration yet).
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
 
 const SECTION_WORLD: u8 = b'W';
 const SECTION_ENTITIES: u8 = b'E';
@@ -72,11 +75,12 @@ const SECTION_MONEY: u8 = b'C';
 const SECTION_PRODUCTION: u8 = b'U';
 const SECTION_POWER: u8 = b'I';
 const SECTION_OUTCOME: u8 = b'G';
+const SECTION_VISION: u8 = b'V';
 /// The sections of this format, in file order. `D` comes before `P`: the path service's restore
 /// check of the job's epoch counts the rubble of the last tick (WP13.1c-1). `O` comes before `H`:
 /// a harvester's claimed cell must be an ore field. The sections of a rule set the world does not
 /// have are empty (the rules digest says which it has).
-const SECTIONS: [u8; 14] = [
+const SECTIONS: [u8; 15] = [
     SECTION_WORLD,
     SECTION_ENTITIES,
     SECTION_QUEUE,
@@ -91,6 +95,7 @@ const SECTIONS: [u8; 14] = [
     SECTION_PRODUCTION,
     SECTION_POWER,
     SECTION_OUTCOME,
+    SECTION_VISION,
 ];
 
 /// What a world holds of the sections WP13.1b saves: for tests that save in the middle of a run
@@ -197,6 +202,20 @@ pub struct SaveContents {
     pub defeats: u32,
     /// The match is decided (won or drawn).
     pub decided: bool,
+    /// Players with a vision picture (WP13.1c-3b).
+    pub vision_players: u32,
+    /// Slots with a vision stamp.
+    pub stamps: u32,
+    /// Vision stamps of slots that died after the last pass (removed by the next).
+    pub stamps_dead: u32,
+    /// Vision stamps of a sight of nothing (a structure being built or sold, a unit without sight).
+    pub stamps_blind: u32,
+    /// Vision stamps whose disc the cap refused.
+    pub stamps_refused: u32,
+    /// A player has a cell explored and not visible (fog).
+    pub fog: bool,
+    /// A viewer sees a cell only through a player that shares with it.
+    pub shared_seen: bool,
 }
 
 impl World {
@@ -335,6 +354,24 @@ impl World {
             match_begun: self.match_begun(),
             defeats: self.defeats().len() as u32,
             decided: self.match_result().is_some(),
+            ..self.vision_contents()
+        }
+    }
+
+    /// The part of [`SaveContents`] of WP13.1c-3b (the rest at its defaults).
+    fn vision_contents(&self) -> SaveContents {
+        let Some(v) = self.vision.as_deref() else {
+            return SaveContents::default();
+        };
+        let c = v.contents(&self.entities.alive);
+        SaveContents {
+            vision_players: c.players,
+            stamps: c.stamps,
+            stamps_dead: c.dead,
+            stamps_blind: c.blind,
+            stamps_refused: c.refused,
+            fog: c.fog,
+            shared_seen: c.shared_seen,
             ..SaveContents::default()
         }
     }
@@ -383,6 +420,12 @@ impl World {
         );
         if let Some(o) = self.outcome.as_deref() {
             outcome::coverage(o, &mut out);
+        }
+        // WP13.1c-3b.
+        if let Some(v) = self.vision.as_deref() {
+            let selling: Vec<bool> = e.sell_left.iter().map(|&n| n > 0).collect();
+            let building: Vec<bool> = e.build_left.iter().map(|&n| n > 0).collect();
+            v.coverage(&e.alive, &selling, &building, &mut out);
         }
         if let Some(p) = self.production.as_deref() {
             for f in &p.factories {
@@ -1750,9 +1793,7 @@ fn check_unsaved_sections(w: &World) -> SaveResult<()> {
         // The report of the last step: cleared at the start of the next.
         rejections: _,
     } = &w.placement;
-    if w.vision.is_some() {
-        return Err(SaveError::Unsupported("vision"));
-    }
+    // Vision is saved (WP13.1c-3b, section `V`); its fields are named in `Vision::save`.
     // The outcome is saved (WP13.1c-3a, section `G`); its fields are named in `outcome::save`.
     Ok(())
 }
@@ -1762,8 +1803,8 @@ impl World {
     /// table and setting the checksum hashes as rules. Two worlds built from the same match and
     /// assets have the same digest; a save only restores onto a world with the digest it was made
     /// with. The path, flowfield, replan, formation and turning settings (WP13.1b) are in it, and
-    /// the numbers of the rule sets WP13.1c saves; the vision numbers (WP13.1c-3b) and the AI
-    /// profiles (WP13.1d) join it with them, and a world with vision rules does not save yet.
+    /// the numbers of the rule sets WP13.1c saves, every vision rule (WP13.1c-3b) among them. The
+    /// AI profiles are checked by the AI save itself (WP13.1d).
     pub fn rules_digest(&self) -> u64 {
         let mut h = Fnv1a64::new();
         h.write_bytes(b"sf-rules-1");
@@ -1914,17 +1955,40 @@ impl World {
             }
             None => h.write_u8(0),
         }
-        // Whether the world has vision rules: a world with them does not save yet; their numbers
-        // join in WP13.1c-3b.
-        h.write_u8(u8::from(self.vision.is_some()));
+        // The vision rules (WP13.1c-3b): every field, unconditionally, destructured without `..`.
+        // The sight per table position follows from them and the unit table (in its digest).
+        match self.vision.as_deref().map(crate::vision::Vision::rules) {
+            Some(crate::vision::VisionRules {
+                legacy_sight_milli,
+                sights,
+                acquire_needs_sight,
+                shared,
+            }) => {
+                h.write_u8(1);
+                h.write_u32(*legacy_sight_milli);
+                h.write_u64(sights.len() as u64);
+                for &(kind, sight) in sights {
+                    h.write_bytes(&kind.0.to_le_bytes());
+                    h.write_u32(sight);
+                }
+                h.write_u8(u8::from(*acquire_needs_sight));
+                h.write_u64(shared.len() as u64);
+                for &(sharer, viewer) in shared {
+                    h.write_u8(sharer.0);
+                    h.write_u8(viewer.0);
+                }
+            }
+            None => h.write_u8(0),
+        }
         h.finish()
     }
 
     /// The dynamic state of the world as bytes (`docs/rules/save.md`). Restore them with
     /// [`World::restore`] onto a fresh world built from the same match and assets.
     ///
-    /// Refused with [`SaveError::Unsupported`] while a section this format does not save yet holds
-    /// anything that is not its tick-0 state.
+    /// No section is gated since WP13.1c-3b: every world saves. [`SaveError::Unsupported`] is kept
+    /// for the targeting and crowd guards, which never refuse (their state is the entity columns),
+    /// and for a section a later rule set adds before it is saved.
     pub fn save(&self) -> Result<Vec<u8>, SaveError> {
         // Guard: every field is named. A new field fails to compile until it is saved, rebuilt or
         // gated here.
@@ -1973,8 +2037,9 @@ impl World {
             power,
             // Rules and the reports of the last tick; the state is the entity columns.
             repair: _,
-            // Gated (WP13.1c-3b).
-            vision: _,
+            // Saved in section `V` (WP13.1c-3b); the rules in the rules digest, the counts, visible
+            // words and sums rebuilt from the stamps. Fields named in `Vision::save`.
+            vision,
             // Saved in section `G` (WP13.1c-3a); the players are rules. Fields named in
             // `outcome::save`.
             outcome,
@@ -2041,6 +2106,10 @@ impl World {
         })?;
         w.section(SECTION_OUTCOME, |s| match outcome.as_deref() {
             Some(o) => outcome::save(s, o),
+            None => Ok(()),
+        })?;
+        w.section(SECTION_VISION, |s| match vision.as_deref() {
+            Some(v) => v.save(s),
             None => Ok(()),
         })?;
         Ok(w.finish())
@@ -2168,6 +2237,12 @@ impl World {
             outcome::restore(&mut s, o, tick)?;
         }
         s.end()?;
+        let mut s = r.section(SECTION_VISION)?;
+        let slots = world.entities.len();
+        if let Some(v) = world.vision.as_deref_mut() {
+            v.restore(&mut s, slots, tick)?;
+        }
+        s.end()?;
         r.end()?;
 
         // The free list: distinct free slots, and every free slot not on it retired for good.
@@ -2230,7 +2305,7 @@ fn rebuild_occupancy(world: &mut World) -> SaveResult<()> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 mod path_tests;
@@ -2243,7 +2318,7 @@ mod economy;
 mod outcome;
 
 #[cfg(test)]
-mod outcome_tests;
+pub(crate) mod outcome_tests;
 
 #[cfg(test)]
 mod economy_tests;

@@ -325,7 +325,7 @@ fn busy(mut w: World, ticks: u64) -> World {
 
 /// The world with what a restore does not bring back put equal on both sides: the reports of the
 /// last tick, the stats, the interpolation columns and the checksum history.
-pub(super) fn settled(mut w: World) -> World {
+pub(crate) fn settled(mut w: World) -> World {
     let e = &mut w.entities;
     e.prev_facing.clone_from(&e.facing);
     e.prev_turret.clone_from(&e.turret);
@@ -473,15 +473,15 @@ fn the_header_is_pinned() {
     let w = busy(fresh(), 2);
     let bytes = w.save().unwrap();
     assert_eq!(&bytes[..4], b"SFSV");
-    assert_eq!(&bytes[4..8], &[5, 0, 0, 0]);
+    assert_eq!(&bytes[4..8], &[6, 0, 0, 0]);
     assert_eq!(&bytes[8..16], &w.rules_digest().to_le_bytes());
     assert_eq!(&bytes[16..24], &2u64.to_le_bytes());
-    assert_eq!(&bytes[24..28], &[14, 0, 0, 0]);
+    assert_eq!(&bytes[24..28], &[15, 0, 0, 0]);
     assert_eq!(
         sections(&bytes).iter().map(|s| s.0).collect::<Vec<_>>(),
-        b"WEQXDPFMOHCUIG".to_vec()
+        b"WEQXDPFMOHCUIGV".to_vec()
     );
-    assert_eq!(FORMAT_VERSION, 5);
+    assert_eq!(FORMAT_VERSION, 6);
 }
 
 #[test]
@@ -615,7 +615,7 @@ fn every_truncation_is_an_error_and_no_flip_panics() {
 }
 
 /// The body of every section: `(tag, start, length)`.
-pub(super) fn sections(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
+pub(crate) fn sections(bytes: &[u8]) -> Vec<(u8, usize, usize)> {
     let mut out = Vec::new();
     let mut at = 28;
     while at < bytes.len() {
@@ -971,30 +971,35 @@ fn a_broken_free_list_is_corruption() {
     );
 }
 
-type Gate = (&'static str, fn(&mut World));
-
-/// One change per section that this format does not save yet, each the smallest that leaves the
-/// tick-0 state. Since WP13.1c-3a only vision is left (repair, sale and the outcome are saved).
-fn gates() -> Vec<Gate> {
-    vec![("vision", |w| {
-        w.vision = Some(Box::new(crate::vision::Vision::new(
-            64,
-            48,
-            Default::default(),
-            Vec::new(),
-        )));
-    })]
-}
-
+/// No section is gated since WP13.1c-3b: a world with vision rules (the last gate) saves at tick 0
+/// and after a step, and restores to itself.
 #[test]
-fn a_section_that_is_not_saved_yet_refuses_the_save() {
+fn no_section_is_gated_any_more() {
     let base = busy(fresh(), 4);
     base.save().expect("the base world saves");
-    for (k, (section, change)) in gates().into_iter().enumerate() {
-        let mut w = base.clone();
-        change(&mut w);
-        assert_eq!(w.save(), Err(SaveError::Unsupported(section)), "gate {k}");
-    }
+    let with_vision = || {
+        World::new(WorldConfig::new(7).with_map_size(64, 48))
+            .unwrap()
+            .with_vision(crate::vision::VisionRules::new(2000, Vec::new()))
+            .unwrap()
+    };
+    let mut w = with_vision();
+    let bytes = w.save().expect("tick 0 with vision saves");
+    assert_eq!(World::restore(with_vision(), &bytes).unwrap(), w);
+    w.schedule(
+        Tick(0),
+        PlayerId(0),
+        Command::Spawn {
+            kind: Kind(1),
+            pos: p(3, 4),
+            owner: PlayerId(0),
+        },
+    )
+    .unwrap();
+    w.step();
+    assert!(w.vision_discs(PlayerId(0)) > 0);
+    let back = World::restore(with_vision(), &w.save().unwrap()).unwrap();
+    assert_eq!(settled(back), settled(w));
 }
 
 #[test]

@@ -19,16 +19,16 @@ use crate::units::{Footprint, UnitStats, UnitTable};
 use crate::weapons::{Loadout, Mount, ProjectileKind, WeaponStats, WeaponTable};
 use crate::world::WorldConfig;
 
-const RIFLEMAN: Kind = Kind(1);
-const BARN: Kind = Kind(3);
-const HQ: Kind = Kind(6);
+pub(crate) const RIFLEMAN: Kind = Kind(1);
+pub(crate) const BARN: Kind = Kind(3);
+pub(crate) const HQ: Kind = Kind(6);
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 const P2: PlayerId = PlayerId(2);
-const SELL_TICKS: u32 = 10;
-const BARN_HP: u32 = 100;
+pub(crate) const SELL_TICKS: u32 = 10;
+pub(crate) const BARN_HP: u32 = 100;
 
-fn units() -> UnitTable {
+pub(crate) fn units() -> UnitTable {
     let structure = |kind, hp| UnitStats {
         kind,
         hp,
@@ -61,7 +61,7 @@ fn units() -> UnitTable {
     .unwrap()
 }
 
-fn buildings() -> BuildingTable {
+pub(crate) fn buildings() -> BuildingTable {
     let b = |kind, function| BuildingStats {
         kind,
         footprint: Footprint {
@@ -90,7 +90,7 @@ fn buildings() -> BuildingTable {
     .unwrap()
 }
 
-fn weapons() -> WeaponTable {
+pub(crate) fn weapons() -> WeaponTable {
     let rifle = WeaponStats {
         kind: 1,
         range: Fx::from_int(6),
@@ -120,7 +120,7 @@ fn weapons() -> WeaponTable {
     .unwrap()
 }
 
-const RULES: RepairRules = RepairRules {
+pub(crate) const RULES: RepairRules = RepairRules {
     hp_per_tick: 1,
     full_cost_permille: 0,
     sell_ticks: SELL_TICKS,
@@ -128,9 +128,14 @@ const RULES: RepairRules = RepairRules {
 };
 
 /// Units, weapons, buildings and repair; destruction and match rules for `players` if given.
-fn fresh_for(players: Option<&[PlayerId]>, rules: RepairRules) -> World {
+pub(crate) fn fresh_for(players: Option<&[PlayerId]>, rules: RepairRules) -> World {
+    fresh_sized(players, rules, 40)
+}
+
+/// [`fresh_for`] on a map 40 cells wide and `height` high.
+pub(crate) fn fresh_sized(players: Option<&[PlayerId]>, rules: RepairRules, height: u32) -> World {
     let factions: Vec<(PlayerId, u8)> = (0..4).map(|p| (PlayerId(p), 1)).collect();
-    let w = World::new(WorldConfig::new(7).with_map_size(40, 40))
+    let w = World::new(WorldConfig::new(7).with_map_size(40, height))
         .unwrap()
         .with_units(units())
         .unwrap()
@@ -153,16 +158,16 @@ fn fresh_for(players: Option<&[PlayerId]>, rules: RepairRules) -> World {
     }
 }
 
-fn send(w: &mut World, tick: u64, c: Command) {
+pub(crate) fn send(w: &mut World, tick: u64, c: Command) {
     w.schedule(Tick(tick), P0, c).unwrap();
 }
 
-fn place(w: &mut World, tick: u64, kind: Kind, owner: PlayerId, x: u32, y: u32) {
+pub(crate) fn place(w: &mut World, tick: u64, kind: Kind, owner: PlayerId, x: u32, y: u32) {
     let cell = crate::terrain::Cell::new(x, y);
     send(w, tick, Command::PlaceStructure { kind, cell, owner });
 }
 
-fn id(i: u32) -> EntityId {
+pub(crate) fn id(i: u32) -> EntityId {
     EntityId::new(i, 0)
 }
 

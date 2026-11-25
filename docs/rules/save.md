@@ -42,10 +42,10 @@ Header:
 | Bytes | Field |
 |---|---|
 | 4 | magic `SFSV` |
-| 4 | `format_version`, `u32`, now **5** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`; 2 was WP13.1b, without `X`, `D` and the combat columns of `E`; 3 was WP13.1c-1, without `O`, `H`, `C`, `U`, `I` and `build_left`; 4 was WP13.1c-2, without `G`, `repairing` and `sell_left`) |
+| 4 | `format_version`, `u32`, now **6** (1 was WP13.1a, without `P`, `F`, `M` and `prev_pos`; 2 was WP13.1b, without `X`, `D` and the combat columns of `E`; 3 was WP13.1c-1, without `O`, `H`, `C`, `U`, `I` and `build_left`; 4 was WP13.1c-2, without `G`, `repairing` and `sell_left`; 5 was WP13.1c-3a, without `V`) |
 | 8 | `rules_digest`, `u64` (`World::rules_digest`) |
 | 8 | `tick`, `u64`: the number of the next tick to run |
-| 4 | the number of sections, `u32`, now 14 |
+| 4 | the number of sections, `u32`, now 15 |
 
 Then the sections, each a tag byte and a `u32` length, in this order:
 
@@ -110,6 +110,11 @@ which rule sets the fresh world has, so the reader knows):
 * `G` the match outcome (WP13.1c-3a), empty in a world without match rules: `begun` (a flag), the
   defeats in their order (count, then player `u8` and tick `u64`), the result (0 none; 1 won + tick
   + player; 2 draw + tick).
+* `V` vision (WP13.1c-3b), empty in a world without vision rules: the stamp column (its length, then
+  per slot 0 for none or 1 and the stamp: owner `u8`, anchor `x` and `y` `u32`, footprint `w` and `h`
+  `u8`, sight `u32` in thousandths, and the `disc` flag), then the players (the length of the list,
+  then per index 0 for no picture or 1, the `version` `u64` and the explored words, a count and
+  `u64`s). Everything else is rebuilt (see *WP13.1c-3b* below).
 
 Order tags are the checksum's (0 idle, 1 move, 2 attack, 3 attack-move, 4 guard point, 5 guard
 entity, 6 scatter, 7 hold, 8 pursue). Command tags: 0 `Spawn`, 1 `Place`, 2 `SpawnUnit`, 3
@@ -137,12 +142,18 @@ the production table by its stored digest, `ProductionTable::rules_digest`, whic
 every field of every `UnitBuild`, destructured), power (`shortage_floor_permille`,
 `defence_cutoff_permille`), repair and sale (all four numbers, destructured without `..` since
 WP13.1c-3a) and (WP13.1c-3a) the match rules (`Outcome::write_rules`, `MatchRules` destructured: the
-number of players and each player, ascending). The building table enters by its
+number of players and each player, ascending) and (WP13.1c-3b) the vision rules (`VisionRules`
+destructured without `..` in `rules_digest`, all four fields unconditionally: a flag, the legacy
+sight, the number of sights and each kind and sight, the gate flag `acquire_needs_sight`, the number
+of shared pairs and each pair; the checksum's `write_hash` hashes the gate and the pairs only when
+set, the digest always). The building table enters by its
 two digests as since WP13.1a; `digest_of` now destructures `BuildingStats` without `..` (the same
 bytes, no pin moves). Until WP13.1c-2 the ore entered by its fingerprint (the current amounts, so
 only an ore at its start could restore) and harvest, production and power only by their presence;
-that is replaced by the numbers above. Of vision only the presence is hashed: a world with vision
-rules does not save yet (WP13.1c-3b). Until WP13.1c-3a the match rules too entered only by their
+that is replaced by the numbers above. Until WP13.1c-3b only the presence of vision rules was
+hashed; `every_vision_rule_is_in_the_digest` (`vision/save_tests.rs`) now changes each on its own
+(the legacy sight, a sight, a kind, a kind less, the gate, no pair, another pair, one pair more, gate
+and pairs both off, no vision rules) and asserts another digest. Until WP13.1c-3a the match rules too entered only by their
 presence; another player list now gives another digest (`the_match_and_repair_numbers_are_in_the_digest`:
 two, three other and four players, each of the four repair numbers, no match rules). The starting credits are not rules: they are the stores
 at tick 0, state in section `H`. The AI profile digests are
@@ -239,14 +250,13 @@ its kind, so the kind alone does not say which.
 
 ## Not saved yet: the gates
 
-Vision is not in the file (WP13.1c-3b). `World::save` refuses with
-`SaveError::Unsupported("vision")` every world that has vision rules at all (even at tick 0: its
-state starts moving in the first step), so a half-saved world can never load silently.
+**None is left** (WP13.1c-3b): every world saves, vision included. The table of gates is empty:
 
 | Section | `save` refuses when |
 |---|---|
-| `vision` | the world has vision rules at all (WP13.1c-3b lifts this) |
+| (none) | |
 
+The gate `vision` (a world with vision rules at all) is gone (WP13.1c-3b, section `V`).
 The gates `repair` (a structure repairing or being sold) and `outcome` (a world with match rules)
 are gone (WP13.1c-3a), and with them the last column gate (`check_unsaved_columns` is removed). The
 gates `economy`, `production`, `power` and `buildings` are gone (WP13.1c-2). The `targeting` and
@@ -277,8 +287,8 @@ live slot whose generation is `u32::MAX` (legal: its death retires the slot thro
 instead of putting it on the free list, so nothing overflows). The bit-flip test restores every
 single-bit change of a save and steps each world that restores four ticks; none panics
 (`every_truncation_is_an_error_and_no_flip_panics`). Every `Corrupt` check above has a case in
-`every_impossible_world_is_corrupt`, every gate one in
-`a_section_that_is_not_saved_yet_refuses_the_save` (since WP13.1c-3a only the vision gate).
+`every_impossible_world_is_corrupt`; `no_section_is_gated_any_more` saves and restores a world with
+vision rules at tick 0 and after a step (the gate test of the earlier phases, now without gates).
 
 **Crowd is saved in this WP**, not in 13.1b as the split planned: its whole state is the per-entity
 `CrowdState` (the `Crowd` struct holds settings, shapes derived from the tables, scratch and stats),
@@ -725,6 +735,131 @@ sale at `sell_ticks` and at 1, one defeat undecided, three players, the win and 
 and a sale of an own structure in one tick in both orders, a structure destroyed while being
 repaired and one while being sold, the freed slots holding neither).
 
+## WP13.1c-3b: vision
+
+| Part of `Vision` | WP13.1c-3b |
+|---|---|
+| `width`, `height`, `rules` | rules (the map size and every `VisionRules` field in the digest) |
+| `def_sight` | derived from the rules and the unit table (`with_vision`), both in the digest |
+| `masks` (the discs) | derived: `Vision::new` makes the disc of every sight above 0 of the rules; the pass never makes another (`mask_index` is reached only through `apply_disc`, for a stamp with a disc, whose sight comes from `vision_source`: the legacy sight or a table sight) |
+| `stamps` (per slot: owner, anchor, footprint, sight, `disc`) | saved, `V`, the column length too |
+| per player: present or not, the length of the list | saved, `V` |
+| per player: `explored`, `version` | saved, `V` |
+| per player: `count`, `visible`, `discs`, `sum`, `visible_cells`, `visible_mix` | rebuilt from the stamps |
+| per player: `explored_cells`, `explored_mix` | rebuilt from the explored words |
+| per player: `dirty` | derived: false between steps (`finish_pass` clears it at the end of every pass; only the pass sets it) |
+
+**The rebuild.** `Vision::restore` (`vision/save.rs`) puts the stamps back directly (not through
+`sync`, which would compare with the entities) and, slot by slot, explores each stamp's footprint and
+adds the disc of each stamp whose `disc` flag is set, with the same `apply_disc` the pass uses. A disc
+is added by integer addition, which commutes, so the counts, the visible words and the sums do not
+depend on the order the pass added in. The one thing that does depend on order is which stamps the
+cap refused (past 65,535 discs of one player the later slots in a pass are refused, and a refused
+stamp is retried each pass): that is the saved `disc` flag, so the rebuild never decides it again.
+The explored words cannot be rebuilt (they hold the history of every cell ever seen) and the version
+counts passes, so both are saved. The rebuilt vision equals the saved one by `PartialEq` (all of
+`Vision` derives it, the discs included) in every test below, and a resave is the save byte for byte.
+
+**Restore checks, each with its writer.** Refused as `Corrupt`:
+
+* A stamp column of another length than the slot count ("the vision stamps are not one per slot").
+  Writer: `update_vision` syncs every slot `0..len`, and `sync` grows the column to the slot it looks
+  at. Every slot is made before the pass in the step (`spawn_with`, reached from `World::apply` for the
+  commands and from `advance_production` for the factories, both before `update_vision`), and a slot is
+  never taken away, so after a step the column has exactly one entry per slot (none at tick 0).
+* An unknown stamp tag or player tag ("unknown vision stamp tag", "unknown vision player tag").
+* A player list longer than 256 ("a vision player out of range"): it is indexed by `PlayerId.0`
+  (`player_mut` grows it to the one it makes).
+* A player list that ends without a picture ("the vision players end with a gap"): `player_mut`
+  resizes the list to `k + 1` and makes player `k` at once. A gap below the last is legal (a player
+  index nobody owns anything of).
+* A version of 0 or above the tick ("a vision version the pass never reaches"). Writer:
+  `finish_pass` bumps a player's version once per pass in which its sets changed, one pass runs per
+  step, so at most the tick; a player is made by `explore_footprint` in the pass of its first object,
+  which explores at least one cell (a footprint is never empty: `UnitTable::new` refuses one, a unit is
+  1 by 1), so its version is at least 1 after that pass.
+* Explored words of another count than `ceil(width * height / 64)` ("explored words of the wrong
+  length"), a bit set past the last cell ("an explored cell off the map"). Writer: `PlayerVision::new`
+  makes the words, and `explore` and `add_row` set only bits of cells of the map.
+* A stamp with an empty footprint or a footprint past the map edge ("a vision stamp off the map").
+  Writer: `vision_source` takes a unit's cell from `cell_at` (on the map) and a structure's anchor and
+  footprint from the occupancy (a structure is placed only where its footprint fits).
+* A stamp whose sight is not 0, the legacy sight or a sight of the table ("a vision stamp with a sight
+  the rules do not give"). Writer: `vision_source` gives exactly those (0 for a structure that does not
+  stand). This also keeps the rebuild from making a disc `Vision::new` did not make.
+* A stamp with a `disc` flag and a sight of 0 ("a vision disc without a sight"): `add_source` adds no
+  disc for a sight of nothing.
+* A stamp of a player that has no picture ("a vision stamp of a player without a picture"):
+  `add_source` explores the footprint through `player_mut`, which makes the player.
+* More than 65,535 stamps with a disc for one player ("more vision discs than a count can hold"):
+  `add_source` refuses the disc at the cap. Exactly 65,535 restores.
+* A cell that the rebuild explores but the saved words do not hold: a visible cell, or a cell of a
+  stamp's footprint, not explored ("a cell in sight that was never explored"). Writers: `add_row`
+  explores every cell it makes visible, `explore_footprint` every footprint cell, and nothing ever
+  clears an explored bit.
+
+These are 14 checks. Each has a case at its bound and one past it in
+`every_vision_bound_restores_and_one_past_it_is_refused` (`vision/save_tests.rs`, on the vision world
+after tick 35; the tag cases are made in the bytes, and their bound is the tag 1 the save has); the
+disc cap has its case in `a_stamp_the_cap_refused_round_trips`, which also asserts that the refused
+stamp is the last slot's. The footprint has cases of an empty width, an empty height and a 2 by 2
+footprint at the right and the bottom edge (its far column or row on the last cell passes, one
+further is refused), so that a check on the anchor alone fails them. The two cases of "a cell in
+sight that was never explored" clear, at their bound, an explored cell that is out of sight and in
+no footprint, which restores.
+
+**With the AI and with production.** `ai_scenario_worlds_save_with_their_ai` (`save_economy.rs`,
+every build) runs each of the 15 `ai_*` CI scenarios with its AI, as CI does, for 194 ticks, and
+`ai_scenario_worlds_save_up_to_the_pin` (release, ignored) up to the pin: every 97 ticks the world
+is saved, restored onto a fresh world and resaved byte-equal, the restored checksum is the
+original's, and the final checksum is the pin. The run goes on with the original world, not the
+restored one: the world and its AI going on together after a restore is WP13.1e.
+`completion_and_production_with_vision_restore_at_every_tick` (`save/economy_tests.rs`, every build)
+saves, restores and goes on after every tick of 160 while, with vision on, a factory finishes and
+comes with a harvester (`comes_with`) and then hands out a unit it built, every checksum the
+uninterrupted run's.
+
+**Not checked, on purpose (looser than reachable, for 13.1h):** the stamp of a live slot against what
+its entity gives now. Between steps they agree except where something after the pass changes the
+entity in the same step: `reap` frees the slot of a unit killed by the weapon stage (its stamp stays
+until the next pass, the "dead slot" below), and in a world without destruction a shot can take a
+structure to 0 hit points after the pass, so it no longer stands while its stamp still has its
+sight. A check would have to name every such writer; none of it is reached by a save the game
+writes. Neither is the stamp of a free slot against its last owner, nor a stamp's sight against the
+kind of the entity, nor a version against the explored cells. Nor a picture of a player index the
+match does not have (the list may run to 256 whatever the players are), nor a refused stamp (`disc`
+false with a sight) while its player is far below the cap: the cap check bounds the discs from
+above only, and a refused stamp is retried by every pass, so a save the game writes has one only
+while the player is at the cap.
+
+**Coverage record.** `World::save_coverage` names the vision state at a save tick: `vision.player`,
+`vision.player.gap`, `vision.stamp`, `vision.stamp.dead` (a stamp of a slot that is not alive),
+`vision.stamp.blind` (a stamp of sight 0), `vision.stamp.selling`, `vision.stamp.building` (a sight-0
+stamp of a structure in sale or under construction), `vision.stamp.refused` (a disc the cap refused),
+`vision.fog` (a cell explored, not visible) and `vision.shared` (a viewer sees a cell only through its
+sharer). At the saves every 97 ticks of `match`, `vision` and `vision_targeting`
+(`the_vision_coverage_record_is_pinned`): `vision.fog`, `vision.player`, `vision.shared`,
+`vision.stamp`, `vision.stamp.blind` and `vision.stamp.building`. The claim saves of the same runs
+also hold a dead slot's stamp (all three scenarios). Never at a scenario save: `vision.player.gap`,
+`vision.stamp.selling`, `vision.stamp.refused`; each has a round trip built through `World::step` in
+`vision/save_tests.rs`: `vision_restores_after_every_tick` (every build, 120 ticks, a save, restore
+and resave after every tick, the rebuilt vision audited and compared by `PartialEq` and checksum with
+the uninterrupted run) reaches `vision.player`, `vision.player.gap` (players 0 and 2 have a picture,
+1 none, from tick 1), `vision.stamp`, `vision.shared` (player 0 shares with 2), `vision.fog` (from
+tick 9, a rifleman walking away), `vision.stamp.blind` and `vision.stamp.selling` (a barn sold at
+tick 30, asserted first at 31), `vision.stamp.dead` (a barn shot down in the weapon stage, after the
+pass, at tick 43), and asserts each at the tick it first holds;
+`a_sale_stamps_nothing_until_the_barn_is_gone_and_restores_at_each_tick` (the sale and the removal,
+round trips at each tick); `a_stamp_the_cap_refused_round_trips` (65,536 units of one player: the
+last is refused, the round trip keeps it refused, and after a unit goes it gets its disc in the
+restored world exactly as in the original).
+
+**Host side, for WP13.1e (reset on load, not fixed here):** the game's fog caches compare a
+version. `SimSnapshot` copies the fog bitsets only when `World::fog_version` changes
+(`sf_game/src/sim_snapshot.rs`, `fog_version`), and `FogApplied` (`sf_game/src/fog_view.rs`) keeps what
+the fog view last applied. A loaded world can have the same version number as the cached one with
+other bits, so both must be reset when the host loads a save.
+
 ## The CI scenarios through saves
 
 `tools/sf_headless/tests/save_paths.rs` runs `bridge_200`, `replan`, `formation_move`, `crowd_jam`,
@@ -764,13 +899,20 @@ does the first 200 ticks of `harvest` and `production_repeat` in every build, wi
 they reach by then, and in sf_sim
 `the_economy_world_restores_after_every_tick` saves after every one of 700 ticks of a world with
 all of it (a dock queue, a full queue mid-item, a structure half built, player 0 short of power)
-and compares by `PartialEq` and checksum. `probe_which_scenarios_still_refuse` pins the rest:
-`match`, `vision` and `vision_targeting`, all three refused as `vision` (WP13.1c-3b); `repair_sell`
-saves since WP13.1c-3a. The 15 `ai_*` scenarios have vision too; their world-and-AI round trip is
-WP13.1e (the host saves world and AI together). `every_ci_scenario_saves_or_refuses_for_vision`
-reads the scenario list of the CI headless job from `.github/workflows/ci.yml` and gives each a
-class at the first save tick: it saves (and restores onto `build_fresh_world`, resaving the same
-bytes), or it is one of the eighteen above and refused exactly as `Unsupported("vision")`.
+and compares by `PartialEq` and checksum. `tools/sf_headless/tests/save_vision.rs` (WP13.1c-3b) does
+the same for `match`, `vision` and `vision_targeting` (until WP13.1c-3b refused as `vision`) with the
+claims: a vision picture, two players with one, fog, a stamp of a slot that died in the tick, and in
+`match` a stamp of sight nothing, the match begun, a defeat and the decided match; in
+`vision_targeting` a cell seen only through shared vision and an engaged unit. `every_tick_match`, `every_tick_vision` and
+`every_tick_vision_targeting` (`#[ignore]`, release) save after every tick to the pin;
+`the_first_ticks_with_vision_restore_after_every_tick` saves after every one of the first 150 ticks of
+each in every build. `every_ci_scenario_world_saves` reads the scenario list of the CI headless job
+from `.github/workflows/ci.yml` and saves the world of every scenario at the first save tick (97),
+restores it onto `build_fresh_world` and resaves the same bytes: all of them, since no gate is left.
+The 15 `ai_*` scenarios (`WITH_AI`, checked against the scenarios that have an AI) are stepped without
+their AI there: their world saves; the AI is saved apart (`sf_ai`, WP13.1d, `save_ai.rs`), and saving
+world and AI together, so that a game with an AI goes on from a save, is the host's (WP13.1e), not
+done here.
 
 `tools/sf_headless/tests/save_combat.rs` (WP13.1c-1) does the same for the combat scenarios
 `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry` and `destruction`, with the
@@ -804,7 +946,8 @@ uninterrupted run.
   `Ore::at_start`, `Crowd::has_state`, `Targeting::has_state`,
   `check_unsaved_sections` (money, repair, placement), `check_crowd`, `put_crowd`,
   `outcome::save` (`Outcome`), `Outcome::write_rules` (`MatchRules`), the repair rules in
-  `rules_digest` (`RepairRules`, WP13.1c-3a),
+  `rules_digest` (`RepairRules`, WP13.1c-3a), `Vision::save` (`Vision`, `Stamp`, `Source`,
+  `PlayerVision`) and the vision rules in `rules_digest` (`VisionRules`, WP13.1c-3b),
   `rules_digest` (the collision, formation and replan settings) and `Turning::write_hash` (in the
   movement digest) for theirs. A field added to any of them is
   a compile error until it is handled here (shown in the PR of WP13.1a: a field `pub(crate) probe:

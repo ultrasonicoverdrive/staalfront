@@ -914,3 +914,87 @@ fn structures_in_sale_restore_after_every_tick() {
     // All four are gone by the end.
     assert!((1..=3).all(|s| !w.entities.alive[s]) && !w.entities.alive[5]);
 }
+
+/// WP13.1c-3b, every build: with vision on, a structure finishes and comes with a unit
+/// (`comes_with` of the factory) and the factory hands out a unit it built. Slots are made by
+/// `advance_construction` and `advance_production` before the pass; the world is saved, restored
+/// and resaved after every tick of the run, goes on with the restored one, and has the checksums
+/// of the uninterrupted run.
+#[test]
+fn completion_and_production_with_vision_restore_at_every_tick() {
+    let fresh = || {
+        fresh_rules(3, 250, true)
+            .with_vision(crate::vision::VisionRules::new(
+                2000,
+                vec![
+                    (ANCHOR, 4000),
+                    (FACTORY, 3000),
+                    (HARVESTER, 3000),
+                    (MAN, 5000),
+                ],
+            ))
+            .unwrap()
+    };
+    let build = || {
+        let mut w = fresh();
+        for c in [
+            Command::PlaceStructure {
+                kind: ANCHOR,
+                cell: cell(4, 4),
+                owner: P0,
+            },
+            Command::PlaceStructure {
+                kind: PLANT,
+                cell: cell(4, 10),
+                owner: P0,
+            },
+        ] {
+            send(&mut w, 0, P0, c);
+        }
+        send(
+            &mut w,
+            1,
+            P0,
+            Command::BuildStructure {
+                kind: FACTORY,
+                cell: cell(10, 4),
+            },
+        );
+        // Given after the factory stands (it takes 50 ticks from tick 1).
+        let factory = EntityId::new(2, 0);
+        send(&mut w, 60, P0, Command::QueueUnit { factory, kind: MAN });
+        w
+    };
+    let ticks = 160;
+    let mut straight = build();
+    let want: Vec<u64> = (0..ticks).map(|_| straight.step().checksum).collect();
+    let mut w = build();
+    let (mut done_at, mut man_at) = (None, None);
+    for (t, &sum) in want.iter().enumerate() {
+        let constructing = w.save_contents().constructing;
+        let slots = w.entities.len();
+        assert_eq!(w.step().checksum, sum, "tick {t}");
+        let e = &w.entities;
+        if constructing > 0 && w.save_contents().constructing == 0 {
+            done_at = Some(t);
+            assert!(
+                (slots..e.len()).any(|i| e.kind[i] == HARVESTER),
+                "comes with"
+            );
+        }
+        if man_at.is_none() && (slots..e.len()).any(|i| e.kind[i] == MAN) {
+            man_at = Some(t);
+        }
+        let bytes = w.save().unwrap();
+        let back = World::restore(fresh(), &bytes).unwrap();
+        assert_eq!(back.save().unwrap(), bytes, "tick {t}");
+        back.vision_audit().unwrap();
+        assert_eq!(settled(back.clone()), settled(w.clone()), "tick {t}");
+        w = back;
+    }
+    assert!(
+        done_at.is_some() && man_at.is_some(),
+        "{done_at:?} {man_at:?}"
+    );
+    assert!(w.vision.is_some());
+}
