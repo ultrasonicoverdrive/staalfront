@@ -153,7 +153,7 @@ fn vision_restores_after_every_tick() {
     // closes with the first object of player 1 (slot 6).
     let first = |n: &str| claimed.iter().find(|c| c.0 == n).unwrap().1;
     assert_eq!(first("vision.stamp.selling"), 31);
-    // The numbers `docs/rules/save.md` gives: fog from tick 9, the dead slot's stamp at tick 43.
+    // The numbers `docs/rules/save.md` gives: fog from tick 9 and the dead slot's stamp at tick 43 (below).
     assert_eq!(first("vision.fog"), 9);
     assert_eq!(first("vision.stamp.dead"), 43);
     assert!(first("vision.player.gap") == 1);
