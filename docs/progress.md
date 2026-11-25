@@ -3940,6 +3940,10 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   the cap are reached by no CI scenario at a save tick (round trips through `World::step` in
   `vision/save_tests.rs`); the host's fog caches (`SimSnapshot.fog_version`, `FogApplied`) must be
   reset on load (13.1e); the stamp of a live slot is not checked against its entity (13.1h).
+* Fix round 0 (25-11-2026): the 15 `ai_*` worlds now also save with their AI running (every 97
+  ticks, every build 194 ticks, release up to the pin; the run goes on with the original world), a
+  factory finishing with `comes_with` and production with vision round trip at every tick in every
+  build, and the footprint checks have edge cases that a check on the anchor alone fails.
 
 ### WP13.1c-3a notes: saving repair, sale and the match outcome (23-11-2026)
 

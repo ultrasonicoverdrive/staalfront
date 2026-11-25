@@ -343,8 +343,9 @@ fn ci_scenarios() -> Vec<String> {
 
 /// Every CI scenario's world saves at the first save tick (WP13.1c-3b removed the last gate,
 /// vision), restores onto a fresh world of the scenario and resaves to the same bytes. The scenarios
-/// with an AI ([`WITH_AI`]) are stepped without it: this is the world's class, not the game's
-/// (world and AI together is WP13.1e). A new CI scenario is in it by itself.
+/// with an AI ([`WITH_AI`]) are stepped without it here, which shows only that their start world
+/// saves; [`ai_scenario_worlds_save_with_their_ai`] and its release test run them with their AI.
+/// A new CI scenario is in it by itself.
 #[test]
 fn every_ci_scenario_world_saves() {
     let names = ci_scenarios();
@@ -378,4 +379,78 @@ fn every_ci_scenario_world_saves() {
     }
     assert!(wrong.is_empty(), "{wrong:?}");
     assert_eq!(with_ai, WITH_AI.len());
+}
+
+/// The ticks of the every-build window of [`ai_scenario_worlds_save_with_their_ai`]: two saves.
+const AI_WINDOW: u64 = 2 * EVERY;
+
+/// Runs the AI scenario `name` with its AI, as CI does, for `ticks` ticks (the pin when `None`),
+/// saves the world every [`EVERY`] ticks, restores onto a fresh world of the scenario and checks
+/// that the resave is byte-equal and that the restored checksum is the original's. The run goes
+/// on with the original world, not the restored one: world and AI continuing together after a
+/// restore is WP13.1e. Gives the failures and the number of saves made.
+fn ai_world_saves(name: &str, ticks: Option<u64>) -> (Vec<String>, u64) {
+    let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
+    assert!(!scenario.ais.is_empty(), "{name} has no AI");
+    let mut options = sf_headless::run::RunOptions::for_scenario(&scenario);
+    if let Some(t) = ticks {
+        options.ticks = t.min(options.ticks);
+    }
+    let mut wrong = Vec::new();
+    let mut saves = 0u64;
+    let finished = sf_headless::run::run_watched(&scenario, &options, |world| {
+        let t = world.tick().0;
+        if t % EVERY != 0 {
+            return;
+        }
+        saves += 1;
+        let bytes = match world.save() {
+            Ok(b) => b,
+            Err(e) => return wrong.push(format!("{name} tick {t}: save {e:?}")),
+        };
+        let fresh = scenario.build_fresh_world().unwrap();
+        match sf_sim::World::restore(fresh, &bytes) {
+            Ok(back) => {
+                if back.save().as_ref() != Ok(&bytes) {
+                    wrong.push(format!("{name} tick {t}: resave differs"));
+                }
+                if back.checksum() != world.checksum() {
+                    wrong.push(format!("{name} tick {t}: restored checksum differs"));
+                }
+            }
+            Err(e) => wrong.push(format!("{name} tick {t}: restore {e:?}")),
+        }
+    })
+    .unwrap();
+    if ticks.is_none() && finished.outcome.final_checksum != expected(name) {
+        wrong.push(format!("{name}: final checksum is not the pin"));
+    }
+    (wrong, saves)
+}
+
+/// Every build: each AI scenario ([`WITH_AI`]) runs with its AI for [`AI_WINDOW`] ticks and its
+/// world saves and restores at every save tick (the full run is the release test below).
+#[test]
+fn ai_scenario_worlds_save_with_their_ai() {
+    let mut wrong = Vec::new();
+    for name in WITH_AI {
+        let (w, saves) = ai_world_saves(name, Some(AI_WINDOW));
+        assert_eq!(saves, AI_WINDOW / EVERY, "{name}");
+        wrong.extend(w);
+    }
+    assert!(wrong.is_empty(), "{wrong:?}");
+}
+
+/// Release: [`ai_scenario_worlds_save_with_their_ai`] up to each scenario's pin, which the final
+/// checksum must still be (the saves only read the world).
+#[test]
+#[ignore = "release: cargo test --release -p sf_headless --test save_economy -- --ignored ai_scenario_worlds_save_up_to_the_pin"]
+fn ai_scenario_worlds_save_up_to_the_pin() {
+    let mut wrong = Vec::new();
+    for name in WITH_AI {
+        let (w, saves) = ai_world_saves(name, None);
+        assert!(saves > 0, "{name}");
+        wrong.extend(w);
+    }
+    assert!(wrong.is_empty(), "{wrong:?}");
 }

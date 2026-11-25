@@ -153,6 +153,9 @@ fn vision_restores_after_every_tick() {
     // closes with the first object of player 1 (slot 6).
     let first = |n: &str| claimed.iter().find(|c| c.0 == n).unwrap().1;
     assert_eq!(first("vision.stamp.selling"), 31);
+    // The numbers `docs/rules/save.md` gives: fog from tick 9, the dead slot's stamp at tick 43.
+    assert_eq!(first("vision.fog"), 9);
+    assert_eq!(first("vision.stamp.dead"), 43);
     assert!(first("vision.player.gap") == 1);
     assert_eq!(w.save_contents().stamps_blind, 0, "the sold barn is gone");
     let e = &w.entities;
@@ -181,7 +184,8 @@ fn a_sale_stamps_nothing_until_the_barn_is_gone_and_restores_at_each_tick() {
         ));
         w = round_trip(&w);
     }
-    // The order's tick: sold from the order on; the pass of the next tick stamps a sight of nothing.
+    // The step of the order (tick 30 to 31): sold from the order on, and the pass of that same
+    // step (the commands run first) already stamps a sight of nothing.
     assert_eq!(seen[0], (true, SELL_TICKS, Some((0, false))));
     assert!(seen.iter().any(|s| !s.0), "{seen:?}");
     // Once the barn is gone the next pass unstamps the slot.
@@ -233,6 +237,11 @@ fn a_stamp_the_cap_refused_round_trips() {
     w.step();
     assert_eq!(w.vision_discs(P0), MAX_DISCS_PER_PLAYER);
     assert_eq!(w.save_contents().stamps_refused, 1);
+    // The refused one is the last slot: the pass adds in slot order.
+    let st = &w.vision.as_deref().unwrap().stamps;
+    assert_eq!(st.len(), n as usize);
+    assert!(!st[n as usize - 1].unwrap().disc);
+    assert!(st[..n as usize - 1].iter().all(|s| s.unwrap().disc));
     assert!(w.save_coverage().contains(&"vision.stamp.refused"));
     let bytes = w.save().unwrap();
     let mut back = World::restore(make(), &bytes).unwrap();
@@ -296,21 +305,62 @@ fn explore(w: &mut World, p: PlayerId, i: u32) {
 /// Slot 5's stamp (the walking rifleman of player 0) made a stamp of `sight` without a disc at
 /// cell `(x, y)` of `owner`, its cell explored by `owner`.
 fn restamp(w: &mut World, owner: PlayerId, x: u32, y: u32, sight: u32, disc: bool) {
-    let width = vis(w).width;
-    if u64::from(x) < u64::from(width) && y < vis(w).height {
-        explore(w, owner, y * width + x);
+    restamp_sized(w, owner, (x, y), (1, 1), sight, disc);
+}
+
+/// [`restamp`] with a footprint of `fw` by `fh`, the cells of it on the map explored by `owner`.
+fn restamp_sized(
+    w: &mut World,
+    owner: PlayerId,
+    (x, y): (u32, u32),
+    (fw, fh): (u8, u8),
+    sight: u32,
+    disc: bool,
+) {
+    let (width, height) = (vis(w).width, vis(w).height);
+    for dy in 0..u32::from(fh) {
+        for dx in 0..u32::from(fw) {
+            if x + dx < width && y + dy < height {
+                explore(w, owner, (y + dy) * width + x + dx);
+            }
+        }
     }
     vis(w).stamps[5] = Some(Stamp {
         src: Source {
             owner,
             x,
             y,
-            w: 1,
-            h: 1,
+            w: fw,
+            h: fh,
             sight_milli: sight,
         },
         disc,
     });
+}
+
+/// Clears the first cell player 0 has explored and does not see and that is in no footprint:
+/// legal (the check is on cells in sight and in footprints only).
+fn clear_a_fog_cell(w: &mut World) {
+    let v = vis(w);
+    let width = v.width;
+    let feet: Vec<u32> = v
+        .stamps
+        .iter()
+        .flatten()
+        .filter(|s| s.src.owner == P0)
+        .flat_map(|s| {
+            let s = s.src;
+            (0..u32::from(s.h)).flat_map(move |dy| {
+                (0..u32::from(s.w)).map(move |dx| (s.y + dy) * width + s.x + dx)
+            })
+        })
+        .collect();
+    let cells = v.cells() as u32;
+    let pv = v.players[0].as_deref_mut().unwrap();
+    let i = (0..cells)
+        .find(|&i| bit(&pv.explored, i) && !bit(&pv.visible, i) && !feet.contains(&i))
+        .expect("a fog cell of player 0");
+    pv.explored[(i / 64) as usize] &= !(1u64 << (i % 64));
 }
 
 type Case = (&'static str, &'static str, fn(&mut World, bool));
@@ -337,6 +387,8 @@ fn cases() -> Vec<Case> {
                 vis(w).stamps.truncate(slots);
             },
         ),
+        // A tag is 0 or 1; the save has 1 where the case writes 2, which is the bound (the 0 side
+        // is every free slot and the gap at index 1, in the save as it is).
         ("unknown vision stamp tag", "stamp tag", |_, _| {}),
         ("a vision player out of range", "player count", |w, at| {
             let copy = vis(w).players[0].clone();
@@ -344,6 +396,7 @@ fn cases() -> Vec<Case> {
             v.players.resize(255 + usize::from(!at), None);
             v.players.push(copy);
         }),
+        // As the stamp tag.
         ("unknown vision player tag", "player tag", |_, _| {}),
         (
             "a vision version the pass never reaches",
@@ -363,6 +416,7 @@ fn cases() -> Vec<Case> {
         (
             "explored words of the wrong length",
             "explored words",
+            // A check of equality: the bound is the length the save has, one more is past it.
             |w, at| {
                 if !at {
                     let pv = vis(w).players[0].as_deref_mut().unwrap();
@@ -396,6 +450,20 @@ fn cases() -> Vec<Case> {
             restamp(w, P0, 3, 3, 0, false);
             vis(w).stamps[5].as_mut().unwrap().src.w = u8::from(at);
         }),
+        ("a vision stamp off the map", "stamp height", |w, at| {
+            restamp(w, P0, 3, 3, 0, false);
+            vis(w).stamps[5].as_mut().unwrap().src.h = u8::from(at);
+        }),
+        // A footprint of 2 by 2 at the right and the bottom edge: its last column (row) on the
+        // last cell of the map passes, one further is refused (not only its anchor on the map).
+        ("a vision stamp off the map", "footprint right", |w, at| {
+            let width = vis(w).width;
+            restamp_sized(w, P0, (width - 2 + u32::from(!at), 3), (2, 2), 0, false);
+        }),
+        ("a vision stamp off the map", "footprint bottom", |w, at| {
+            let height = vis(w).height;
+            restamp_sized(w, P0, (3, height - 2 + u32::from(!at)), (2, 2), 0, false);
+        }),
         (
             "a vision stamp with a sight the rules do not give",
             "stamp sight",
@@ -417,8 +485,11 @@ fn cases() -> Vec<Case> {
             "a cell in sight that was never explored",
             "visible cell",
             |w, at| {
-                // Slot 0's construction centre (player 0, 4 by 30) sees its own cell.
-                if !at {
+                // Slot 0's construction centre (player 0, 4 by 30) sees its own cell; at the bound a
+                // cell out of sight is cleared instead.
+                if at {
+                    clear_a_fog_cell(w);
+                } else {
                     let i = 30 * vis(w).width + 4;
                     let pv = vis(w).players[0].as_deref_mut().unwrap();
                     pv.explored[(i / 64) as usize] &= !(1u64 << (i % 64));
@@ -431,9 +502,12 @@ fn cases() -> Vec<Case> {
             |w, at| {
                 // The barn on sale (slot 3, at 20 by 20) sees nothing; its footprint is explored.
                 let i = 20 * vis(w).width + 20;
-                let pv = vis(w).players[0].as_deref_mut().unwrap();
-                // Nothing else sees it: barn 3 stamps sight 0 and nothing of player 0 is near.
-                if !at {
+                // Nothing else sees it: barn 3 stamps sight 0 and nothing of player 0 is near. At the
+                // bound a cell in no footprint and out of sight is cleared instead.
+                if at {
+                    clear_a_fog_cell(w);
+                } else {
+                    let pv = vis(w).players[0].as_deref_mut().unwrap();
                     pv.explored[(i / 64) as usize] &= !(1u64 << (i % 64));
                 }
             },

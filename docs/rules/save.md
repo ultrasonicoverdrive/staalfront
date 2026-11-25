@@ -798,10 +798,26 @@ counts passes, so both are saved. The rebuilt vision equals the saved one by `Pa
   explores every cell it makes visible, `explore_footprint` every footprint cell, and nothing ever
   clears an explored bit.
 
-Each check has a case at its bound and one past it in
+These are 14 checks. Each has a case at its bound and one past it in
 `every_vision_bound_restores_and_one_past_it_is_refused` (`vision/save_tests.rs`, on the vision world
-after tick 35; the tag cases are made in the bytes); the disc cap has its case in
-`a_stamp_the_cap_refused_round_trips`.
+after tick 35; the tag cases are made in the bytes, and their bound is the tag 1 the save has); the
+disc cap has its case in `a_stamp_the_cap_refused_round_trips`, which also asserts that the refused
+stamp is the last slot's. The footprint has cases of an empty width, an empty height and a 2 by 2
+footprint at the right and the bottom edge (its far column or row on the last cell passes, one
+further is refused), so that a check on the anchor alone fails them. The two cases of "a cell in
+sight that was never explored" clear, at their bound, an explored cell that is out of sight and in
+no footprint, which restores.
+
+**With the AI and with production.** `ai_scenario_worlds_save_with_their_ai` (`save_economy.rs`,
+every build) runs each of the 15 `ai_*` CI scenarios with its AI, as CI does, for 194 ticks, and
+`ai_scenario_worlds_save_up_to_the_pin` (release, ignored) up to the pin: every 97 ticks the world
+is saved, restored onto a fresh world and resaved byte-equal, the restored checksum is the
+original's, and the final checksum is the pin. The run goes on with the original world, not the
+restored one: the world and its AI going on together after a restore is WP13.1e.
+`completion_and_production_with_vision_restore_at_every_tick` (`save/economy_tests.rs`, every build)
+saves, restores and goes on after every tick of 160 while, with vision on, a factory finishes and
+comes with a harvester (`comes_with`) and then hands out a unit it built, every checksum the
+uninterrupted run's.
 
 **Not checked, on purpose (looser than reachable, for 13.1h):** the stamp of a live slot against what
 its entity gives now. Between steps they agree except where something after the pass changes the
@@ -810,7 +826,11 @@ until the next pass, the "dead slot" below), and in a world without destruction 
 structure to 0 hit points after the pass, so it no longer stands while its stamp still has its
 sight. A check would have to name every such writer; none of it is reached by a save the game
 writes. Neither is the stamp of a free slot against its last owner, nor a stamp's sight against the
-kind of the entity, nor a version against the explored cells.
+kind of the entity, nor a version against the explored cells. Nor a picture of a player index the
+match does not have (the list may run to 256 whatever the players are), nor a refused stamp (`disc`
+false with a sight) while its player is far below the cap: the cap check bounds the discs from
+above only, and a refused stamp is retried by every pass, so a save the game writes has one only
+while the player is at the cap.
 
 **Coverage record.** `World::save_coverage` names the vision state at a save tick: `vision.player`,
 `vision.player.gap`, `vision.stamp`, `vision.stamp.dead` (a stamp of a slot that is not alive),

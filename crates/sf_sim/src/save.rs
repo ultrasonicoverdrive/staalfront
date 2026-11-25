@@ -26,7 +26,8 @@
 //! # Gates
 //!
 //! None is left (WP13.1c-3b saved vision, the last): every world saves. [`SaveError::Unsupported`]
-//! stays for a section a later rule set adds before it is saved.
+//! stays for the targeting and crowd guards of `check_unsaved_sections` (which never refuse: their
+//! state is the entity columns) and for a section a later rule set adds before it is saved.
 //!
 //! # Guards
 //!
@@ -1986,7 +1987,8 @@ impl World {
     /// [`World::restore`] onto a fresh world built from the same match and assets.
     ///
     /// No section is gated since WP13.1c-3b: every world saves. [`SaveError::Unsupported`] is kept
-    /// for the targeting and crowd guards, which never refuse (their state is the entity columns).
+    /// for the targeting and crowd guards, which never refuse (their state is the entity columns),
+    /// and for a section a later rule set adds before it is saved.
     pub fn save(&self) -> Result<Vec<u8>, SaveError> {
         // Guard: every field is named. A new field fails to compile until it is saved, rebuilt or
         // gated here.
