@@ -212,7 +212,11 @@ fn send(w: &mut World, tick: u64, player: PlayerId, c: Command) {
 /// Slots: 0 anchor P0, 1 refinery P0, 2 factory P0, 3 silo P0, 4 anchor P1, 5 plant P1, 6 refinery
 /// P1, 7..=9 harvesters P0, 10 harvester P1; then the hut P0 builds (11) and what comes out.
 pub(super) fn economy() -> World {
-    let mut w = fresh();
+    economy_on(fresh())
+}
+
+/// [`economy`] on another fresh world of the same tables (one with repair rules, WP13.1c-3a).
+fn economy_on(mut w: World) -> World {
     let place = |kind, x, y, owner| Command::PlaceStructure {
         kind,
         cell: cell(x, y),
@@ -827,4 +831,86 @@ fn an_ore_version_at_its_maximum_restores_and_wraps() {
         back.step();
     }
     assert!(back.ore.as_ref().unwrap().version() < 1000);
+}
+
+/// Structures in sale against the economy bounds (`docs/rules/save.md`, the repair section): a
+/// structure being sold does not stand (`is_standing` is false), so it gives no power, no storage,
+/// no dock and builds nothing. Player 0 sells its refinery (one harvester docked, two queued), its
+/// factory (with a queue) and its silo at tick 300, player 1 its plant at 305; a refund lands in
+/// the store whatever the capacity, so the store holds more than it. Saved, restored and resaved
+/// after every tick from 295 to 380, going on with the restored world: every checksum is the
+/// uninterrupted run's. Asserts each state at the save tick that holds it.
+#[test]
+fn structures_in_sale_restore_after_every_tick() {
+    let rules = crate::repair::RepairRules {
+        hp_per_tick: 5,
+        full_cost_permille: 400,
+        sell_ticks: 40,
+        refund_permille: 700,
+    };
+    let fresh = || fresh().with_repair(rules).unwrap();
+    let build = || {
+        let mut w = economy_on(fresh());
+        for s in [1, 2, 3] {
+            let structure = EntityId::new(s, 0);
+            send(&mut w, 300, P0, Command::Sell { structure });
+        }
+        let structure = EntityId::new(5, 0);
+        send(&mut w, 305, P1, Command::Sell { structure });
+        w
+    };
+    let refinery = EntityId::new(1, 0);
+    let mut straight = build();
+    let want: Vec<u64> = (0..380).map(|_| straight.step().checksum).collect();
+    let mut w = build();
+    let (mut selling, mut refund) = (0u32, false);
+    let (mut credits, mut stores) = (0u64, [true, true]);
+    for (t, &sum) in want.iter().enumerate() {
+        assert_eq!(w.step().checksum, sum, "tick {t}");
+        if t >= 295 {
+            let c = w.save_contents();
+            selling = selling.max(c.selling);
+            match t {
+                // The save before the sale: the refinery has a harvester in its bay and two queued.
+                299 => {
+                    let d = w.dock_of(refinery).unwrap();
+                    assert!(d.holder.is_some() && d.queue.len() == 2, "{d:?}");
+                }
+                // The sale ordered in this step: the factory in sale keeps its queue.
+                300 => {
+                    assert_eq!(w.entities.sell_left[2], 40);
+                    assert!(
+                        !w.production_of(EntityId::new(2, 0))
+                            .unwrap()
+                            .queue
+                            .is_empty()
+                    );
+                    assert_eq!(w.dock_of(refinery), None);
+                }
+                // The power was counted at the start of this step, before the plant's sale.
+                305 => {
+                    assert_eq!(w.entities.sell_left[5], 40);
+                    assert!(w.power_of(P1).unwrap().made > 0);
+                }
+                _ => {}
+            }
+            // Above the capacity because of a refund, not only because the capacity went with
+            // the sale: a refinery or silo of player 0 went in this step and the store rose
+            // above the capacity (a delivery stops at the capacity; production only spends).
+            let now = [w.entities.alive[1], w.entities.alive[3]];
+            let went = (0..2).any(|k| stores[k] && !now[k]);
+            refund |= went && w.credits(P0) > credits && w.credits(P0) > w.storage_capacity(P0);
+            let bytes = w.save().unwrap();
+            let back = World::restore(fresh(), &bytes).unwrap();
+            assert_eq!(back.save().unwrap(), bytes, "tick {t}");
+            assert_eq!(settled(back.clone()), settled(w.clone()), "tick {t}");
+            w = back;
+        }
+        credits = w.credits(P0);
+        stores = [w.entities.alive[1], w.entities.alive[3]];
+    }
+    assert_eq!(selling, 4, "four structures in sale at once");
+    assert!(refund, "a store above its capacity through a refund");
+    // All four are gone by the end.
+    assert!((1..=3).all(|s| !w.entities.alive[s]) && !w.entities.alive[5]);
 }

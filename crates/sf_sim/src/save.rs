@@ -16,15 +16,15 @@
 //!   the weapon slots, the engagement memory and the kills, WP13.1c-1), `Q` the command queue, `X`
 //!   the projectiles and `D` the wrecks and the tally (WP13.1c-1), `P` the path service (WP13.1b),
 //!   `F` the flowfields, `M` the formations, then (WP13.1c-2) `O` the ore, `H` the harvesters,
-//!   docks and stores, `C` the money spent, `U` the factories and `I` the power totals, in that
-//!   order. The construction state (`build_left`) is a column of `E`.
+//!   docks and stores, `C` the money spent, `U` the factories and `I` the power totals, then
+//!   (WP13.1c-3a) `G` the match outcome, in that order. The construction state (`build_left`) and
+//!   the repair and sale state (`repairing`, `sell_left`, WP13.1c-3a) are columns of `E`.
 //!
 //! # Not yet saved
 //!
-//! Repair and sale, vision and the match outcome come in WP13.1c-3; until then [`World::save`]
-//! refuses, with [`SaveError::Unsupported`] naming the section, any world in which one of them
-//! holds something that is not its tick-0 state; the exact test per section is in
-//! `docs/rules/save.md`. A world that saves therefore restores whole.
+//! Vision comes in WP13.1c-3b; until then [`World::save`] refuses, with [`SaveError::Unsupported`]
+//! naming the section, any world in which it holds something that is not its tick-0 state; the
+//! exact test per section is in `docs/rules/save.md`. A world that saves therefore restores whole.
 //!
 //! # Guards
 //!
@@ -56,7 +56,7 @@ pub const MAGIC: [u8; 4] = *b"SFSV";
 
 /// The layout of the bytes after the magic. Raised whenever that layout changes; an older save is
 /// refused with [`SaveError::Version`] (no migration yet).
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
 
 const SECTION_WORLD: u8 = b'W';
 const SECTION_ENTITIES: u8 = b'E';
@@ -71,11 +71,12 @@ const SECTION_HARVEST: u8 = b'H';
 const SECTION_MONEY: u8 = b'C';
 const SECTION_PRODUCTION: u8 = b'U';
 const SECTION_POWER: u8 = b'I';
+const SECTION_OUTCOME: u8 = b'G';
 /// The sections of this format, in file order. `D` comes before `P`: the path service's restore
 /// check of the job's epoch counts the rubble of the last tick (WP13.1c-1). `O` comes before `H`:
 /// a harvester's claimed cell must be an ore field. The sections of a rule set the world does not
 /// have are empty (the rules digest says which it has).
-const SECTIONS: [u8; 13] = [
+const SECTIONS: [u8; 14] = [
     SECTION_WORLD,
     SECTION_ENTITIES,
     SECTION_QUEUE,
@@ -89,6 +90,7 @@ const SECTIONS: [u8; 13] = [
     SECTION_MONEY,
     SECTION_PRODUCTION,
     SECTION_POWER,
+    SECTION_OUTCOME,
 ];
 
 /// What a world holds of the sections WP13.1b saves: for tests that save in the middle of a run
@@ -181,10 +183,20 @@ pub struct SaveContents {
     pub unpowered: u32,
     /// Players with power totals.
     pub power_players: u32,
-    /// The last step's reports of construction, placement and production are not empty
-    /// (completions, stalled builds, refused placements and production commands, units put out):
-    /// derived, not saved.
+    /// The last step's reports of construction, placement, production and repair are not empty
+    /// (completions, stalled builds, refused placements, production and repair commands, units put
+    /// out, repairs waiting for money, sales finished): derived, not saved.
     pub economy_reports: bool,
+    /// Live structures being repaired (WP13.1c-3a).
+    pub repairing: u32,
+    /// Live structures being sold.
+    pub selling: u32,
+    /// The match has begun.
+    pub match_begun: bool,
+    /// Players defeated.
+    pub defeats: u32,
+    /// The match is decided (won or drawn).
+    pub decided: bool,
 }
 
 impl World {
@@ -310,12 +322,24 @@ impl World {
             economy_reports: !self.completions.is_empty()
                 || !self.stalled.is_empty()
                 || !self.placement.rejections.is_empty()
-                || p.is_some_and(|p| !p.rejections.is_empty() || !p.produced.is_empty()),
+                || p.is_some_and(|p| !p.rejections.is_empty() || !p.produced.is_empty())
+                || self.repair.as_deref().is_some_and(|r| {
+                    !r.rejections.is_empty() || !r.waiting.is_empty() || !r.sold.is_empty()
+                }),
+            repairing: (0..e.len())
+                .filter(|&i| e.alive[i] && e.repairing[i])
+                .count() as u32,
+            selling: (0..e.len())
+                .filter(|&i| e.alive[i] && e.sell_left[i] > 0)
+                .count() as u32,
+            match_begun: self.match_begun(),
+            defeats: self.defeats().len() as u32,
+            decided: self.match_result().is_some(),
             ..SaveContents::default()
         }
     }
 
-    /// The saved fields of the sections of WP13.1c-2 that hold something other than their default
+    /// The saved fields of the sections of WP13.1c-2 and WP13.1c-3a that hold something other than their default
     /// in this world, by name: the coverage record (a field no scenario ever saves non-default gets
     /// a targeted round trip of its own, `docs/rules/save.md`).
     #[doc(hidden)]
@@ -346,6 +370,20 @@ impl World {
             "build_left",
             (0..e.len()).any(|i| e.alive[i] && e.build_left[i] > 0),
         );
+        // WP13.1c-3a.
+        add(
+            &mut out,
+            "repairing",
+            (0..e.len()).any(|i| e.alive[i] && e.repairing[i]),
+        );
+        add(
+            &mut out,
+            "sell_left",
+            (0..e.len()).any(|i| e.alive[i] && e.sell_left[i] > 0),
+        );
+        if let Some(o) = self.outcome.as_deref() {
+            outcome::coverage(o, &mut out);
+        }
         if let Some(p) = self.production.as_deref() {
             for f in &p.factories {
                 add(&mut out, "factory", true);
@@ -1135,17 +1173,6 @@ fn get_member(r: &mut ByteReader<'_>) -> SaveResult<Member> {
     })
 }
 
-/// Refuses a world in which a column of a section this format does not save yet holds anything
-/// that a freshly spawned (or freed) entity does not.
-fn check_unsaved_columns(e: &Entities) -> SaveResult<()> {
-    for i in 0..e.len() {
-        if e.repairing[i] || e.sell_left[i] != 0 {
-            return Err(SaveError::Unsupported("repair"));
-        }
-    }
-    Ok(())
-}
-
 /// The weapon slots of a unit (WP13.1c-1): per slot the reload count and the shots left of a
 /// burst. Destructured without `..`.
 fn put_weapon(w: &mut ByteWriter, state: &WeaponState) {
@@ -1312,8 +1339,7 @@ impl Combat<'_> {
 }
 
 fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
-    // Guard: every column is named. A new column fails to compile until it is saved, derived or
-    // gated in `check_unsaved_columns`.
+    // Guard: every column is named. A new column fails to compile until it is saved or derived.
     let Entities {
         generation,
         alive,
@@ -1353,11 +1379,10 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         kills,
         // Saved (WP13.1c-2): the construction ticks left.
         build_left,
-        // Gated (repair, WP13.1c-3): false and zero.
-        repairing: _,
-        sell_left: _,
+        // Saved (WP13.1c-3a): the repair flag and the sale countdown.
+        repairing,
+        sell_left,
     } = e;
-    check_unsaved_columns(e)?;
     w.usize(e.len())?;
     for i in 0..e.len() {
         w.u32(generation[i]);
@@ -1393,6 +1418,8 @@ fn save_entities(w: &mut ByteWriter, e: &Entities) -> SaveResult<()> {
         put_engage(w, &eng[i]);
         w.u16(kills[i]);
         w.u32(build_left[i]);
+        w.bool(repairing[i]);
+        w.u32(sell_left[i]);
     }
     Ok(())
 }
@@ -1422,6 +1449,7 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
         aim: world.targeting.config.filter(|_| !world.arsenal.is_empty()),
         destruction: world.destruction.config.is_some(),
     };
+    let sell_ticks = world.repair.as_ref().map(|r| r.rules.sell_ticks);
     let e = &mut world.entities;
     for i in 0..n {
         e.push_free_slot();
@@ -1564,6 +1592,32 @@ fn restore_entities(r: &mut ByteReader<'_>, world: &mut World) -> SaveResult<()>
                 "a construction the construction stage never leaves",
             ));
         }
+        // Repair and sale (WP13.1c-3a, `docs/rules/save.md`). Both start only through
+        // `repair_target` (`repair_command`, `sell_command`): a live table structure (`def`, a
+        // cell) of a world with repair rules, complete, not being sold, standing. Nothing makes a
+        // structure incomplete again, so `build_left` is zero while either runs. The hit points may
+        // be zero: in a world without destruction a shot of the same tick (or of a later one, for
+        // a sale) takes them there and nothing removes the structure.
+        e.repairing[i] = r.bool()?;
+        e.sell_left[i] = r.u32()?;
+        let target = sell_ticks.is_some()
+            && e.def[i] != NO_DEF
+            && e.cell[i] != NO_CELL
+            && e.build_left[i] == 0;
+        // `repair_command` sets the flag only below full hit points of a kind that can be damaged;
+        // `repair_step` clears it when it reaches them, and nothing else raises hit points.
+        if e.repairing[i] && !(target && stats.is_some_and(|s| e.hp[i] < s.hp)) {
+            return Err(SaveError::Corrupt("a repair the repair stage never leaves"));
+        }
+        // `sell_command` sets `sell_ticks` and clears the flag (and `repair_command` refuses a
+        // structure being sold); `advance_repair_sell` counts down at the start of the next step
+        // and removes the structure at zero. A sale ordered in the step before the save is still
+        // at `sell_ticks`.
+        if e.sell_left[i] != 0
+            && !(target && !e.repairing[i] && sell_ticks.is_some_and(|most| e.sell_left[i] <= most))
+        {
+            return Err(SaveError::Corrupt("a sale the repair stage never leaves"));
+        }
     }
     Ok(())
 }
@@ -1682,7 +1736,9 @@ fn check_unsaved_sections(w: &World) -> SaveResult<()> {
         let crate::repair::RepairSell {
             // Rules: in the rules digest.
             rules: _,
-            // Reports for the host: not hashed, and no step reads them.
+            // Reports for the host: not hashed, and no step reads them. `rejections` is cleared at
+            // the start of `step`, `waiting` and `sold` at the start of `advance_repair_sell`,
+            // before anything in the step writes or reads them; the state is the entity columns.
             rejections: _,
             waiting: _,
             sold: _,
@@ -1697,9 +1753,7 @@ fn check_unsaved_sections(w: &World) -> SaveResult<()> {
     if w.vision.is_some() {
         return Err(SaveError::Unsupported("vision"));
     }
-    if w.outcome.is_some() {
-        return Err(SaveError::Unsupported("outcome"));
-    }
+    // The outcome is saved (WP13.1c-3a, section `G`); its fields are named in `outcome::save`.
     Ok(())
 }
 
@@ -1707,9 +1761,9 @@ impl World {
     /// A digest of the rules the world was made with: the configuration, the terrain and every
     /// table and setting the checksum hashes as rules. Two worlds built from the same match and
     /// assets have the same digest; a save only restores onto a world with the digest it was made
-    /// with. The path, flowfield, replan, formation and turning settings (WP13.1b) are in it; the
-    /// numbers of the rule sets WP13.1c saves (and the AI profiles, WP13.1d) join it with them, and
-    /// a world with those rules does not save yet.
+    /// with. The path, flowfield, replan, formation and turning settings (WP13.1b) are in it, and
+    /// the numbers of the rule sets WP13.1c saves; the vision numbers (WP13.1c-3b) and the AI
+    /// profiles (WP13.1d) join it with them, and a world with vision rules does not save yet.
     pub fn rules_digest(&self) -> u64 {
         let mut h = Fnv1a64::new();
         h.write_bytes(b"sf-rules-1");
@@ -1836,20 +1890,33 @@ impl World {
         }
         match &self.repair {
             Some(rs) => {
-                let r = rs.rules;
+                // Destructured without `..`: a new repair rule fails to compile until it is hashed.
+                let crate::repair::RepairRules {
+                    hp_per_tick,
+                    full_cost_permille,
+                    sell_ticks,
+                    refund_permille,
+                } = rs.rules;
                 h.write_u8(1);
-                h.write_u32(u32::from(r.hp_per_tick));
-                h.write_u32(r.full_cost_permille);
-                h.write_u32(r.sell_ticks);
-                h.write_u32(r.refund_permille);
+                h.write_u32(u32::from(hp_per_tick));
+                h.write_u32(full_cost_permille);
+                h.write_u32(sell_ticks);
+                h.write_u32(refund_permille);
             }
             None => h.write_u8(0),
         }
-        // Which of the two other optional rule sets the world has: a world with either does not
-        // save yet (vision, match); their numbers join in WP13.1c-3 (next).
-        for present in [self.vision.is_some(), self.outcome.is_some()] {
-            h.write_u8(u8::from(present));
+        // The match rules (WP13.1c-3a): the number of players and each player, ascending
+        // (`Outcome::write_rules`).
+        match self.outcome.as_deref() {
+            Some(o) => {
+                h.write_u8(1);
+                o.write_rules(&mut h);
+            }
+            None => h.write_u8(0),
         }
+        // Whether the world has vision rules: a world with them does not save yet; their numbers
+        // join in WP13.1c-3b.
+        h.write_u8(u8::from(self.vision.is_some()));
         h.finish()
     }
 
@@ -1906,9 +1973,11 @@ impl World {
             power,
             // Rules and the reports of the last tick; the state is the entity columns.
             repair: _,
-            // Gated.
+            // Gated (WP13.1c-3b).
             vision: _,
-            outcome: _,
+            // Saved in section `G` (WP13.1c-3a); the players are rules. Fields named in
+            // `outcome::save`.
+            outcome,
             // Rules (who is which faction) and the report of the last tick.
             placement: _,
             // A report of the last tick: `advance_construction` clears it before anything in the
@@ -1968,6 +2037,10 @@ impl World {
         })?;
         w.section(SECTION_POWER, |s| match power {
             Some(p) => economy::save_power(s, p),
+            None => Ok(()),
+        })?;
+        w.section(SECTION_OUTCOME, |s| match outcome.as_deref() {
+            Some(o) => outcome::save(s, o),
             None => Ok(()),
         })?;
         Ok(w.finish())
@@ -2090,6 +2163,11 @@ impl World {
             economy::restore_power(&mut s, p)?;
         }
         s.end()?;
+        let mut s = r.section(SECTION_OUTCOME)?;
+        if let Some(o) = world.outcome.as_deref_mut() {
+            outcome::restore(&mut s, o, tick)?;
+        }
+        s.end()?;
         r.end()?;
 
         // The free list: distinct free slots, and every free slot not on it retired for good.
@@ -2161,6 +2239,11 @@ mod path_tests;
 mod combat_tests;
 
 mod economy;
+
+mod outcome;
+
+#[cfg(test)]
+mod outcome_tests;
 
 #[cfg(test)]
 mod economy_tests;

@@ -69,9 +69,16 @@ pub const FREE_ITEM: Claim = ("a free unit queued", |c| c.free_items > 0);
 pub const POWER: Claim = ("power totals", |c| c.power_players > 0);
 pub const POWER_LOW: Claim = ("a player short of power", |c| c.power_low > 0);
 pub const UNPOWERED: Claim = ("defences without power", |c| c.unpowered > 0);
-pub const ECONOMY_REPORTS: Claim = ("reports of construction, placement or production", |c| {
-    c.economy_reports
-});
+pub const ECONOMY_REPORTS: Claim = (
+    "reports of construction, placement, production or repair",
+    |c| c.economy_reports,
+);
+// WP13.1c-3a.
+pub const REPAIRING: Claim = ("a structure being repaired", |c| c.repairing > 0);
+pub const SELLING: Claim = ("a structure being sold", |c| c.selling > 0);
+pub const MATCH_BEGUN: Claim = ("a match that has begun", |c| c.match_begun);
+pub const DEFEAT: Claim = ("a defeated player", |c| c.defeats > 0);
+pub const DECIDED: Claim = ("a decided match", |c| c.decided);
 
 /// The claims whose state is a report of the last tick: derived, empty in a restored world, so
 /// asserted in the saved world only.
@@ -92,8 +99,9 @@ pub fn run_through_saves_until(
     run_through_saves_covered(name, every, until, claims, &mut BTreeSet::new())
 }
 
-/// [`run_through_saves_until`], adding to `covered` the saved fields of WP13.1c-2 that are not at
-/// their default at a save tick (`World::save_coverage`): the coverage record.
+/// [`run_through_saves_until`], adding to `covered` the saved fields of WP13.1c-2 and WP13.1c-3a
+/// that are not at their default at a save tick (`World::save_coverage`): the coverage record. Any
+/// refused save fails the run (since WP13.1c-3a there is no allowed refusal left).
 pub fn run_through_saves_covered(
     name: &str,
     every: u64,
@@ -101,30 +109,27 @@ pub fn run_through_saves_covered(
     claims: &[Claim],
     covered: &mut BTreeSet<&'static str>,
 ) -> Result<u64, SaveError> {
-    let mut gated = Gated::default();
-    run_through_saves_gated(name, every, until, claims, covered, &mut gated)
+    run_through_saves_from(name, every, 0, until, claims, covered)
 }
 
-/// The saves [`run_through_saves_gated`] may meet refused: `allowed` is the one refusal that skips
-/// a save tick instead of failing the run; the run saves besides after each tick of `extra`. The
-/// ticks whose save was refused with `allowed` end up in `refused`.
-#[derive(Default)]
+/// A save after every tick from `from` to `until` (and the claim saves), then on to the end.
 #[allow(dead_code)]
-pub struct Gated {
-    pub allowed: Option<SaveError>,
-    pub extra: Vec<u64>,
-    pub refused: Vec<u64>,
+pub fn run_through_saves_window(
+    name: &str,
+    from: u64,
+    until: u64,
+    claims: &[Claim],
+) -> Result<u64, SaveError> {
+    run_through_saves_from(name, 1, from, until, claims, &mut BTreeSet::new())
 }
 
-/// [`run_through_saves_covered`] with the gates of `gated`: a save refused with exactly
-/// `gated.allowed` is noted and the run goes on with the world it has; any other refusal fails it.
-pub fn run_through_saves_gated(
+fn run_through_saves_from(
     name: &str,
     every: u64,
+    from: u64,
     until: u64,
     claims: &[Claim],
     covered: &mut BTreeSet<&'static str>,
-    gated: &mut Gated,
 ) -> Result<u64, SaveError> {
     let scenario = Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap();
     assert!(scenario.ais.is_empty(), "{name}: no AI here (WP13.1d)");
@@ -148,17 +153,10 @@ pub fn run_through_saves_gated(
                 due.push(k);
             }
         }
-        if done > until || (done % every != 0 && due.is_empty() && !gated.extra.contains(&done)) {
+        if done > until || ((done < from || done % every != 0) && due.is_empty()) {
             continue;
         }
-        let bytes = match world.save() {
-            Ok(bytes) => bytes,
-            Err(e) if gated.allowed.as_ref() == Some(&e) => {
-                gated.refused.push(done);
-                continue;
-            }
-            Err(e) => return Err(e),
-        };
+        let bytes = world.save()?;
         covered.extend(world.save_coverage());
         let back: World = World::restore((*fresh).clone(), &bytes)
             .unwrap_or_else(|e| panic!("{name}: restore after tick {done}: {e}"));
