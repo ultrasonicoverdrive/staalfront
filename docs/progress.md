@@ -3984,8 +3984,8 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   Xvfb prints "1 computer player(s) at the level easy|hard". The menu picture was taken with `ai_level: Some("hard")` in the settings.
 * **Not done / gaps.** Nobody has played the levels yet (that is what this is for). A `--record` names the match file but not the
   level (a replay does not run the AIs, so it does not matter there). The level cannot be changed from the pause menu (Main menu,
-  then the button). No "unfair" level. The menu was not clicked through in a real window: the state machine and the runner's
-  `apply_to_game` are tested, the button's picture is taken from the real game, the click path is not run with real X events
-  (`scripts/menus_e2e.py` was not extended).
-* **Pins.** None moved: the whole workspace test run passes (the `golden.rs` and `assets/scenarios/*.expected` checks included) and the
-  release `--expect` run of the CI scenarios is in the PR.
+  then the button). No "unfair" level. The menu was clicked through in a real window: `scripts/menus_e2e.py` (button positions from
+  the layout rule, six start-menu buttons, new check that the Computer level is saved at once) ran under Xvfb with real X events,
+  29 of 29 checks passed (24-11-2026, fix round 0; again in fix round 1, 25-11-2026).
+* **Pins.** None moved: the `golden.rs` and `assets/scenarios/*.expected` checks pass in the workspace test run of fix round 1
+  (25-11-2026, local and CI) and the release `--expect` run of the CI scenarios is in the PR.

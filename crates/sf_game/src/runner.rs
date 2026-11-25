@@ -771,7 +771,10 @@ impl Runner {
         // only for the scene as it is: a match against the computer is the one the options hold already,
         // at the level asked for, or it is built.
         let same_ai = match ai {
-            None => self.options.ai_level.is_none(),
+            // The plain match is the default match file: a pristine named file (`--match m1_ai`) is not it.
+            None => {
+                self.options.ai_level.is_none() && !matches!(self.options.match_file, Some(Some(_)))
+            }
             Some(level) => {
                 self.options.match_file
                     == Some(Some(crate::ai_level::AiLevels::embedded().ai_match_path()))
@@ -1098,8 +1101,6 @@ impl Runner {
             .set_owner_dots(crate::palette::minimap_dots(choice));
     }
 
-    /// A setting changed in the menu: apply it to the window, the engine or the picture, and write the
-    /// settings.
     /// A change that needs no window or engine: written to the settings file at once, `true` when
     /// `change` was one (the AI level, WP9.4c: it is only read when a match starts).
     fn apply_change_without_window(&mut self, change: Change) -> bool {
@@ -1111,6 +1112,8 @@ impl Runner {
         true
     }
 
+    /// A setting changed in the menu: apply it to the window, the engine or the picture, and write the
+    /// settings.
     fn apply_change(&mut self, ctx: &mut Context, change: Change) {
         use crate::settings::WindowMode;
         if self.apply_change_without_window(change) {
@@ -4456,11 +4459,28 @@ mod tests {
         );
         // The plain match has no computer player; the match against the computer has one.
         assert_eq!(thinks_after("--menu start --match", "easy"), easy);
+        // The plain match with a level given still has no computer player: it is not the match asked for.
+        assert_eq!(thinks_after("--menu start --match --ai easy", "easy"), easy);
         // The same match at the same level is reused, and plays that level.
         assert_eq!(
             thinks_after("--menu start --match m1_ai --ai easy", "easy"),
             easy
         );
+    }
+
+    /// WP9.4c: a pristine named match file (`m1_ai`, with its computer player) is not the plain match:
+    /// "Match" builds the default match file with no computer player.
+    #[test]
+    fn a_pristine_named_match_file_is_not_reused_for_the_plain_match() {
+        let mut r = runner("--menu start --match m1_ai");
+        assert!(r.pristine);
+        r.apply_to_game(vec![Outcome::StartMatch]);
+        assert_eq!(
+            (r.options.match_file.clone(), r.options.ai_level.clone()),
+            (Some(None), None)
+        );
+        run_ticks(&r, 200);
+        assert_eq!(r.sim.counters().thinks, 0);
     }
 
     /// WP9.4c: the level chosen in the start menu is written to the settings file at once.
