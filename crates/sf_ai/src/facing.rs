@@ -22,10 +22,13 @@ pub fn centre(c: Cell) -> (i64, i64) {
     (2 * i64::from(c.x) + 1, 2 * i64::from(c.y) + 1)
 }
 
-/// The start site of the AI itself and the direction to its enemy, in doubled coordinates.
+/// The direction from the AI's start site to its enemy's, and the point the offsets of [`Facing::rank`] are taken
+/// from, in doubled coordinates.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Facing {
-    /// The AI's own start site (the centre of its cell).
+    /// The middle of the map. It is the one point a half turn of the map leaves where it is, so ranks taken from it
+    /// are the same for the two players of a symmetric map; a start site is a cell of its anchor's footprint, not
+    /// its middle, and would not be.
     pub origin: (i64, i64),
     /// From the origin to the target: the nearest start site of another player (the lowest player id among equal
     /// distances), or the middle of the map when there is no other site. Never `(0, 0)`.
@@ -53,11 +56,14 @@ impl Facing {
             .min_by_key(|&p| dist(p)) // the first of equal distances: ascending player id
             .unwrap_or((i64::from(map.0), i64::from(map.1)));
         let dir = (target.0 - own.0, target.1 - own.1);
-        (dir != (0, 0)).then_some(Facing { origin: own, dir })
+        (dir != (0, 0)).then_some(Facing {
+            origin: (i64::from(map.0), i64::from(map.1)),
+            dir,
+        })
     }
 
     /// The order of a doubled point: first the one farthest toward the enemy (largest `dot` of its offset from the
-    /// origin with `dir`), then the one nearest to the line to the enemy (smallest `|cross|`), then by the sign of
+    /// middle of the map with `dir`), then the one nearest to the line to the enemy (smallest `|cross|`), then by the sign of
     /// `cross`. `dot` and `cross` do not change when the whole situation is turned half a turn, and the map from
     /// a point to `(dot, cross)` is one-to-one while `dir` is not zero, so two different points never rank
     /// equal. (`-dot` is returned so that smaller sorts first.)
@@ -67,17 +73,6 @@ impl Facing {
         let cross = self.dir.0 * vy - self.dir.1 * vx;
         (-dot, cross.abs(), cross)
     }
-
-    /// The target the direction points at: a doubled point.
-    pub fn target(&self) -> (i64, i64) {
-        (self.origin.0 + self.dir.0, self.origin.1 + self.dir.1)
-    }
-}
-
-/// The squared distance between two doubled points.
-pub fn dist2(a: (i64, i64), b: (i64, i64)) -> i64 {
-    let (dx, dy) = (a.0 - b.0, a.1 - b.1);
-    dx * dx + dy * dy
 }
 
 /// The cell that holds the doubled coordinate `p` on one axis. An odd `p` is inside one cell. An even `p` is a
@@ -153,11 +148,11 @@ pub fn ring_cells(first: (i64, i64), ring: i64, facing: Option<&Facing>) -> Vec<
 /// The four quarter centres of a map in the order the scout visits them after the start sites. Without a
 /// `facing` the old order: north-west, north-east, south-west, south-east, at `size * 1/4` and `size * 3/4`. With
 /// one the centres sit at `size / 4` and `size - 1 - size / 4` (the same cells when the size is a multiple of four,
-/// minus one at the far side, so that a half turn maps the set onto itself) and are taken nearest first to
-/// `from`, the last site leg (the start site of the AI itself when it has none), ties by [`Facing::rank`].
-pub fn quarters(map: (u32, u32), facing: Option<(&Facing, (i64, i64))>) -> Vec<Cell> {
+/// minus one at the far side, so that a half turn maps the set onto itself) and are taken in the order of
+/// [`Facing::rank`]: the quarter toward the enemy first, then the two beside it, the AI's own last.
+pub fn quarters(map: (u32, u32), facing: Option<&Facing>) -> Vec<Cell> {
     let (w, h) = map;
-    let Some((f, from)) = facing else {
+    let Some(f) = facing else {
         return [(1, 1), (3, 1), (1, 3), (3, 3)]
             .iter()
             .map(|&(qx, qy)| Cell::new(w * qx / 4, h * qy / 4))
@@ -174,7 +169,7 @@ pub fn quarters(map: (u32, u32), facing: Option<(&Facing, (i64, i64))>) -> Vec<C
         .iter()
         .map(|&(qx, qy)| Cell::new(at(qx, w), at(qy, h)))
         .collect();
-    cells.sort_by_key(|&c| (dist2(centre(c), from), f.rank(centre(c))));
+    cells.sort_by_key(|&c| f.rank(centre(c)));
     cells
 }
 

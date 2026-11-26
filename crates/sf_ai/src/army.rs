@@ -1454,19 +1454,14 @@ pub fn waypoints(state: &AiState, obs: &Observation) -> Vec<Cell> {
         .filter(|(p, _)| *p != state.player)
         .map(|&(_, c)| c)
         .collect();
-    // WP9.6a: with `scout_facing` the quarters come nearest first to the last site leg (to the AI's own site when
-    // there is none), not north-west first.
+    // WP9.6a: with `scout_facing` the quarters come toward the enemy first, not north-west first.
     let facing = state
         .profile
         .army
         .scout_facing
         .then(|| Facing::of(state, obs.map))
         .flatten();
-    let from = legs.last().map(|&c| facing::centre(c));
-    legs.extend(facing::quarters(
-        obs.map,
-        facing.as_ref().map(|f| (f, from.unwrap_or(f.origin))),
-    ));
+    legs.extend(facing::quarters(obs.map, facing.as_ref()));
     legs
 }
 

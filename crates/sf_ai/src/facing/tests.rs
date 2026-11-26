@@ -49,9 +49,14 @@ fn both() -> (Facing, Facing) {
 #[test]
 fn the_facing_of_the_two_seats_is_a_half_turn_of_each_other() {
     let (a, b) = both();
-    assert_eq!(a.origin, (25, 137));
     assert_eq!(a.dir, (2 * 83 + 1 - 25, 2 * 27 + 1 - 137));
-    assert_eq!(b.origin, turn2(a.origin));
+    assert_eq!(a.origin, (i64::from(W), i64::from(H)));
+    assert_eq!(b.origin, a.origin);
+    assert_eq!(
+        turn2(a.origin),
+        a.origin,
+        "the middle of the map is the fixed point"
+    );
     assert_eq!(b.dir, (-a.dir.0, -a.dir.1));
 }
 
@@ -173,10 +178,8 @@ fn the_quarters_in_the_old_order_and_the_facing_order_turn_with_the_map() {
         ]
     );
     let (a, b) = both();
-    let from_a = centre(sites()[1].1);
-    let from_b = centre(sites()[0].1);
-    let qa = quarters((W, H), Some((&a, from_a)));
-    let qb = quarters((W, H), Some((&b, from_b)));
+    let qa = quarters((W, H), Some(&a));
+    let qb = quarters((W, H), Some(&b));
     let turned: Vec<Cell> = qa.iter().map(|&c| turn(c)).collect();
     assert_eq!(turned, qb);
     // The four distinct quarters, the one of the enemy (north-east) first, the one of the AI (south-west) last.
