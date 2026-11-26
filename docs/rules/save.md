@@ -539,12 +539,12 @@ every 97th byte of `E`; each restored world steps four ticks). A sample, not a p
 | unpowered defences | derived inside the step from the totals |
 | occupancy | derived: rebuilt from the structures as since WP13.1a (a structure under construction occupies its cells, so the same rebuild covers it) |
 
-**Host side, lost for one tick after a load (for WP13.1e):** the reports above start empty in a
+**Host side, lost for one tick after a load (for WP13.1e-2/3):** the reports above start empty in a
 restored world. A host that shows "structure completed", "unit ready", "build stalled: no money" or a
 refusal of the last tick before the load does not show it again after the load. Nothing in the
 simulation reads them across a tick.
 
-**Host side, the ore caches (for WP13.1e):** the ore `version` says "equal versions mean equal
+**Host side, the ore caches (for WP13.1e-2/3):** the ore `version` says "equal versions mean equal
 amounts" only within one run. After a load in a running host the restored version can equal the one
 the host cached (`SimSnapshot.ore_version` in `crates/sf_game/src/sim_snapshot.rs`, `OreView.version`
 in `ore_view.rs`) while the amounts differ. On a load the host must reset both: `OreView::forget`,
@@ -711,7 +711,7 @@ capacity that went with the sale (the store is above the capacity from tick 300 
 refund): a refinery or silo of player 0 went in that step and the store rose above the capacity
 (a delivery stops at the capacity, production only spends).
 
-**Host side, lost for one tick after a load (for WP13.1e):** `repair_status` reads `waiting`, so a
+**Host side, lost for one tick after a load (for WP13.1e-2/3):** `repair_status` reads `waiting`, so a
 structure that waited for money in the tick before the load shows `Repairing` instead of
 `WaitingForMoney` until the next step; `sales()` is empty until the next step; the repair refusals
 start empty.
@@ -854,7 +854,7 @@ round trips at each tick); `a_stamp_the_cap_refused_round_trips` (65,536 units o
 last is refused, the round trip keeps it refused, and after a unit goes it gets its disc in the
 restored world exactly as in the original).
 
-**Host side, for WP13.1e (reset on load, not fixed here):** the game's fog caches compare a
+**Host side, for WP13.1e-2/3 (reset on load, not fixed here):** the game's fog caches compare a
 version. `SimSnapshot` copies the fog bitsets only when `World::fog_version` changes
 (`sf_game/src/sim_snapshot.rs`, `fog_version`), and `FogApplied` (`sf_game/src/fog_view.rs`) keeps what
 the fog view last applied. A loaded world can have the same version number as the cached one with
@@ -1031,7 +1031,8 @@ exists (the strike may be dissolved before its reinforcements notice).
 
 Save point: the AI state is saved at a tick after the arrivals of that tick are scheduled and before the
 AIs think, that is right before the AIs think ahead of `World::step` (`sf_game` `sim_thread.rs`). The
-headless runner's `run_hooked` puts its hook there.
+headless runner's `run_hooked` puts its hook there, and since WP13.1e-1 so does `run_saving`, the one save
+point of world, AIs and command log together ("The save file" below).
 
 Guard 1: `AiState::save` destructures `AiState` (and `Known`, `Group`, `Directive`) without `..`. A field
 added by a later phase-9 work package is a compile error there until it is saved or named as derived
@@ -1045,6 +1046,109 @@ tick of `ai_raid`, at the single ticks 101, 1009, 2503 and 4001 of `ai_raid`, an
 `ai_raid_guard` and `ai_bounce`; every check above with the value at its bound passing and one past it
 refused with its message. The world is not saved in these tests (WP13.1c is not done): it runs on.
 
+## The save file (WP13.1e-1)
+
+The world and the AIs save themselves; the **save file** is the container the host writes around them:
+`tools/sf_headless/src/savefile.rs`, in the `sf_headless` library because `sf_game` already depends on it
+(as for the record format), so the headless runner and the game share one definition. Little-endian,
+`ByteWriter`/`ByteReader` sections (a tag byte, a `u32` length, the body), FNV-1a 64 from `sf_math`; no
+serde, no new dependency, nothing in it iterates a map, so the bytes are the same on every machine
+(`the_save_file_of_ai_raid_at_tick_970_is_pinned` runs on Linux and Windows in CI).
+
+```rust
+savefile::write(identity: &Identity, world: &World, ais: &[Ai], log: &[LoggedCommand]) -> Result<Vec<u8>, SaveFileError>
+savefile::read_header(bytes: &[u8]) -> Result<Header, SaveFileError>
+savefile::load(bytes: &[u8], expected: &Identity, fresh: World, fresh_ais: Vec<Ai>) -> Result<Loaded, SaveFileError>
+```
+
+| Part | Content |
+|---|---|
+| magic | `SFSG` (not the world's `SFSV`: a bare world save is not a save file) |
+| version | `u32` container version, **1** |
+| section `I` | kind `u8` (0 a scenario of `sf_headless`, also a recorded game; 1 a match of `sf_game`); name (text: the scenario's display name, or the match path for a match); AI level (flag, then text: the `--ai` level of a match; for a scenario the profile file of each AI ascending by player, joined by `,`); seed `u64`; cells `u32` `u32`; speed `i64` (raw `WorldConfig::speed`); local player `u8`; then copies for a clear message before anything is built: world format `u32` (`FORMAT_VERSION`), AI format `u32` (`AI_FORMAT_VERSION`), rules digest `u64`, tick `u64`, world checksum `u64` |
+| section `W` | the bytes of `World::save`, whole |
+| section `A` | count `u8`, then per AI ascending by player: player `u8`, the bytes of `Ai::save` (a `u32` length in front) |
+| section `L` | count `u32`, then per command: `arrived` `u64`, `effective` `u64`, player `u8`, the command (`save::write_command`, tags pinned above) |
+| section `H` | host version `u32` (**1**), then a byte run: host state, **empty in version 1** (reserved for 13.1e-3: ghosts, camera) |
+| trailer | `u64` FNV-1a 64 over every byte before it |
+
+Text is a `u32` length and UTF-8 bytes. The kind, the section tags and the versions are pinned by
+`the_numbers_of_the_layout_are_pinned` (unit test in `savefile.rs`) and
+`the_layout_is_magic_version_five_sections_and_a_hash`.
+
+**Read order** (all-or-nothing: nothing comes back unless every step passed):
+
+1. Shorter than magic, version and trailer: `Truncated`. The hash over everything before the trailer must
+   be the trailer, else `Damaged` (so any cut and any flipped bit is refused before a byte is parsed). Then
+   the magic (`BadMagic`) and the container version (`Version { what: "save file" }`).
+2. Section `I` only (`read_header`): the host decides from it what to build. Another world or AI format is
+   refused there (`Version { what: "world" | "AI" }`), before any world is built.
+3. `load`: the saved identity against the one the host would build (`expected`, `Identity::of_scenario` for
+   a scenario): the first field that differs is named in `OtherMatch` (kind of game, match, AI level, seed,
+   map size, speed, local player), then the rules digest against the fresh world's (`OtherMatch("rules or
+   assets")`).
+4. `World::restore` onto `fresh` (`World(SaveError)`); the restored tick and checksum must be the copies in
+   `I` (`Inconsistent`).
+5. Section `A`: as many AIs as `fresh_ais` (`OtherMatch("number of AIs")`), the same players in the same order
+   (`OtherMatch("AI players")`), each `Ai::restore` against the **restored** world (`Ai(player, SaveError)`).
+6. Section `L`: every command readable, `arrived <= effective`, `arrived <=` the save tick, ascending by
+   `arrived` (each its own `Log` message).
+7. Section `H`: host version 1 (`Version { what: "host" }`); its bytes are handed back.
+8. Nothing between the last section and the trailer (`TrailingBytes`); a section with bytes left over or the
+   wrong tag is `Malformed` (only a hand-made file with a matching hash gets there).
+
+The hash is integrity, not security: a hand-made file with a right hash reaches the checks of the world and
+the AI, which never panic but are not all tight (13.1h).
+
+**The save point.** One for all three: at tick T, after the commands that arrived at T are scheduled and
+before any AI thinks at T (`run.rs`: `Arrivals::schedule_due_logged`, then the hook, then the thinks, then
+`World::step`). The world then holds the arrivals of T as pending commands, the log holds them too, and
+the AI commands of T are in neither. `run::run_saving` hands a hook a `SavePoint` (`&mut` world, AIs and
+log) there, which may replace all three; `run::run_hooked` is that hook with `&World`.
+
+**The command log** is every command handed to the world after its start world: the arrivals of a recorded
+game and the AIs' commands (`arrived = effective =` the tick they think at). What the start world schedules
+itself is not in it: the scenario's spawns and timed commands, or a match's starting objects (the identity
+names the match, which makes them). So a replay (WP13.2) is: build the start world (`Scenario::build_world`),
+schedule each logged command when the world has run its `arrived` ticks, step. `run::replay_log` does that
+and reaches the checksum the save stores (`the_log_of_an_ai_scenario_replays_to_the_saved_checksum`,
+`a_recorded_game_round_trips_through_its_saves`). The sender's `requested` tick of the game's log is
+diagnostic and not stored.
+
+**Host state.** What a host keeps outside world and AIs and how it comes back after a load:
+
+| State | After a load |
+|---|---|
+| the command log | from section `L` |
+| the arrivals cursor of a recorded game | `Arrivals::skip_to(T)` passes over every recorded command that arrived by T: they are in the world already (without it they run twice; `run::resume` does it) |
+| the AIs' think phase | none to keep: `due` is a function of tick, player, interval and stagger |
+| a fresh world for a recorded game | `Scenario::build_fresh_world` (since WP13.1e-1: the game's world before its starting objects and its first tick) |
+| the reports of the last tick, the game's view caches (ore, fog, ghosts), selection, camera, announcer | not in the file: 13.1e-2/3 (the lists in the WP13.1c paragraphs "Host side" above) |
+
+**Tests** (`tools/sf_headless/tests/save_game.rs`):
+
+* Every CI scenario (one test each, the list checked against `ci.yml` by
+  `every_ci_scenario_has_its_save_file_test`): a save file every 97 ticks at the save point, loaded onto
+  `build_fresh_world` and `Scenario::ais`, the run going on with the loaded world, AIs and log. At each save
+  the loaded checksum, AIs (`PartialEq`) and log equal the live ones, the save holds as many AIs as the
+  scenario (one in each of the 15 `ai_*` scenarios, counted per save), and the file written from what was
+  loaded is the file. The final checksum is the `.expected` pin; for the `ai_*` scenarios the AI digests,
+  the AI commands and the log equal the run without saves.
+* `two_ais_round_trip_through_their_saves`: `ai_raid` with a second AI for player 1 (no CI scenario has
+  two), every 97 ticks, ending where the run without saves ends.
+* `the_first_ticks_of_ai_raid_load_after_every_tick` (every build): a save file at every tick up to 200, then
+  every 97, to the pin. `every_tick_ai_raid` (`#[ignore]`, release): at every one of the 5599 save points
+  to the pin.
+* A recorded game of `m1_duel` (both seats the shipped AIs, recorded in the test, with commands delayed past
+  the save points) through save files every 97 ticks, its log replayed, and resumed from tick 970 with
+  `run::resume` to the recording's checksum.
+* `ai_raid_resumed_from_a_save_file_ends_on_its_pin`; the pinned file (`ai_raid` at tick 970: 55,296
+  bytes, FNV-1a 64 of the whole file `0xfac0_fae0_a97b_7248`; it moves with every world or AI format
+  change and every new AI state field, and re-pinning is part of that WP).
+* Every cut length and every single-bit flip of a two-AI save refused without a panic (`Truncated` or
+  `Damaged`); flips in `I`, `A`, `L` and `H` of a re-hashed (hand-made) file load or are refused, never panic;
+  each refusal above with its message.
+
 ## The test world
 
 WP13.1a's tests build their own world (no CI scenario saved then): a 64x48 open map with five wanderers, four
@@ -1052,5 +1156,5 @@ units (two with a turret) on move, guard and queued orders, a legacy structure a
 three deaths with a slot reused, and pending commands of every variant from three players, one with
 a sender's sequence number. WP13.1b adds a walled 96x64 map with the smallest path budget (512): twelve foot soldiers in one
 group order (a flowfield and a formation), six trucks that turn in arcs on their own routes, three
-structures placed one at a time and one taken away (`save/path_tests.rs`). WP13.1e runs every CI
-scenario through save and load once every section saves.
+structures placed one at a time and one taken away (`save/path_tests.rs`). WP13.1e-1 runs every CI
+scenario through the save file ("The save file").
