@@ -113,13 +113,7 @@ impl Identity {
                 .collect::<Vec<_>>()
                 .join(",")
         });
-        Identity::of(
-            SaveKind::Scenario,
-            scenario.display_name(),
-            level,
-            0,
-            world,
-        )
+        Identity::of(SaveKind::Scenario, scenario.display_name(), level, 0, world)
     }
 }
 
@@ -203,7 +197,9 @@ impl fmt::Display for SaveFileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SaveFileError::Truncated => write!(f, "the save file is too short"),
-            SaveFileError::Damaged => write!(f, "the save file is damaged (its hash does not match)"),
+            SaveFileError::Damaged => {
+                write!(f, "the save file is damaged (its hash does not match)")
+            }
             SaveFileError::BadMagic => write!(f, "not a save file"),
             SaveFileError::Version { what, found, reads } => {
                 write!(f, "{what} format {found}, this build reads {reads}")
@@ -260,7 +256,9 @@ pub fn write(
     log: &[LoggedCommand],
 ) -> Result<Vec<u8>, SaveFileError> {
     if ais.windows(2).any(|p| p[0].player() >= p[1].player()) {
-        return Err(SaveFileError::Malformed("the AIs are not ascending by player"));
+        return Err(SaveFileError::Malformed(
+            "the AIs are not ascending by player",
+        ));
     }
     let n_ais = u8::try_from(ais.len()).map_err(|_| SaveFileError::Malformed("too many AIs"))?;
     let world_bytes = world.save().map_err(SaveFileError::World)?;
@@ -483,7 +481,10 @@ pub fn load(
         if arrived > header.tick {
             return Err(SaveFileError::Log("a command arrived after the save"));
         }
-        if log.last().is_some_and(|l: &LoggedCommand| l.arrived > arrived) {
+        if log
+            .last()
+            .is_some_and(|l: &LoggedCommand| l.arrived > arrived)
+        {
             return Err(SaveFileError::Log(
                 "the commands are not in the order they arrived",
             ));
@@ -541,7 +542,10 @@ mod tests {
     #[test]
     fn short_and_strange_bytes_are_refused() {
         assert_eq!(read_header(&[]), Err(SaveFileError::Truncated));
-        assert_eq!(read_header(&[0; MIN_LEN - 1]), Err(SaveFileError::Truncated));
+        assert_eq!(
+            read_header(&[0; MIN_LEN - 1]),
+            Err(SaveFileError::Truncated)
+        );
         assert_eq!(read_header(&[0; MIN_LEN]), Err(SaveFileError::Damaged));
         // A valid hash over a body without the magic.
         let mut b = b"SFSVxxxx".to_vec();
