@@ -875,3 +875,41 @@ fn the_numbers_of_wp9_3e_1_are_off_when_left_out_checked_and_need_staging() {
     ))
     .unwrap();
 }
+
+/// WP9.6a: the three direction-free switches read as off when left out (every shipped level and every frozen
+/// profile), read as written when set, and `facing_on` is the army half of them.
+#[test]
+fn the_direction_free_switches_are_off_when_left_out_and_read_as_written() {
+    for text in [
+        include_str!("../../../../assets/ai/normal.ron"),
+        include_str!("../../../../assets/ai/easy.ron"),
+        include_str!("../../../../assets/ai/hard.ron"),
+        include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_vs_passive_defs/normal.ron"),
+    ] {
+        let p = AiProfile::from_ron(text).unwrap();
+        assert!(!p.economy.placement_facing, "{}", p.name);
+        assert!(!p.army.gather_facing, "{}", p.name);
+        assert!(!p.army.scout_facing, "{}", p.name);
+        assert!(!p.army.facing_on());
+    }
+    let p = AiProfile::from_ron(&edited(
+        "max_queue: 2,",
+        "max_queue: 2, placement_facing: true,",
+    ))
+    .unwrap();
+    assert!(p.economy.placement_facing);
+    assert!(!p.army.facing_on());
+    let p = AiProfile::from_ron(&edited(
+        "harvester_threat: false,",
+        "harvester_threat: false, gather_facing: true,",
+    ))
+    .unwrap();
+    assert!((p.army.gather_facing, p.army.scout_facing) == (true, false) && p.army.facing_on());
+    let p = AiProfile::from_ron(&edited(
+        "harvester_threat: false,",
+        "harvester_threat: false, scout_facing: true,",
+    ))
+    .unwrap();
+    assert!((p.army.gather_facing, p.army.scout_facing) == (false, true) && p.army.facing_on());
+}

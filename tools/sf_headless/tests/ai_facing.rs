@@ -123,7 +123,10 @@ fn plain_kinds(world: &World) -> Vec<Kind> {
 }
 
 /// The answer of `placement::search` for each plain kind, for both players.
-fn placements(r: &Rig) -> Vec<(Kind, Option<Cell>, Option<Cell>, (u32, u32))> {
+/// `(kind, player 0's cell, player 1's cell, footprint)`.
+type Placed = (Kind, Option<Cell>, Option<Cell>, (u32, u32));
+
+fn placements(r: &Rig) -> Vec<Placed> {
     let o0 = Observation::build(&r.world, P0, &BTreeMap::new());
     let o1 = Observation::build(&r.world, P1, &BTreeMap::new());
     let mut l0 = Lens::new(&r.world, P0);
