@@ -28,6 +28,7 @@ pub mod base;
 pub mod budget;
 pub mod counter;
 pub mod economy;
+pub mod facing;
 pub mod memory;
 pub mod observe;
 pub mod placement;

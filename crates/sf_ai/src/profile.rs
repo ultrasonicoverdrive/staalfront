@@ -153,6 +153,13 @@ impl Profile {
             h.write_u8(a.march_break_radius);
             h.write_u8(u8::from(a.stage_search));
         }
+        // The switches of WP9.6a, only when one is on (all off keeps the digest).
+        if e.placement_facing || a.facing_on() {
+            h.write_u8(0x98);
+            h.write_u8(u8::from(e.placement_facing));
+            h.write_u8(u8::from(a.gather_facing));
+            h.write_u8(u8::from(a.scout_facing));
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
