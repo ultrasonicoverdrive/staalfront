@@ -13,7 +13,8 @@ game runs), `sf_ui` (`Ui::set_input`, `Ui::block_rect`) and `sf_render` (`Style:
 ## What the player gets
 
 * **The start menu** when `sf_game` starts with no flag that names what to run: **Match** (the M1 match,
-  `assets/matches/m1.ron`), **Sandbox**, **Settings**, **Quit**. Behind it stands the sandbox, held at its first tick.
+  `assets/matches/m1.ron`, a static opponent), **Match against the computer** (`m1_ai`, WP9.4c), **Computer level: Normal**
+  (a button that cycles Easy, Normal, Hard), **Sandbox**, **Settings**, **Quit**. Behind it stands the sandbox, held at its first tick.
 * **The pause menu** on **Esc** in the sandbox or the match: **Resume**, **Restart**, **Settings**, **Main menu**, **Quit**.
   The simulation takes no tick while it is open.
 * **After the match is decided** (the Victory, Defeat or Draw banner of `match.md`) two buttons stand under the banner,
@@ -83,6 +84,19 @@ ticks equals the uninterrupted run's**. The runner's own wiring (`Outcome::Pause
 `pausing_holds_the_sim_and_resuming_goes_on_where_it_was`, which compares the checksum at the same tick of a straight run and
 a paused one on a real `Runner` (sandbox).
 
+## The computer's level (WP9.4c)
+
+The level button of the start menu (`Item::CycleAiLevel`) goes to the next level of `assets/config/ai_levels.ron` on each click,
+wraps from the last to the first, and is saved at once (`Change::AiLevel`: written to the settings file, nothing else to
+apply). The words are `menu_look.ron` (`start_ai_match`, `ai_level` with a `{level}` place, `ai_level_names`); `MenuLook::check`
+refuses a file whose names are not exactly the shipped levels. `Item::StartAiMatch` closes the menu and gives
+`Outcome::StartAiMatch { level }` with the level the button showed; the runner plays `m1_ai` at that level
+(`Runner::begin(Some(Scene::Match), Some(level))`, the same path `--match m1_ai --ai LEVEL` takes through `match_scene`). A scene
+nobody has played is reused only when it is already that match at that level. The settings field is `ai_level` (absent =
+default Normal; an unknown name reads as Normal). Rules and the command line: `ai.md`, "Choosing the level in the game".
+Tests: `the_ai_level_is_chosen_in_the_start_menu_and_carried_by_the_outcome_that_starts_the_match`,
+`the_start_menu_starts_the_match_against_the_computer_at_the_chosen_level`; picture: `docs/screenshots/wp9.4c/`.
+
 ## Restart and the choice of a scene
 
 **Restart** builds the world again from the same setup (the same match file or the same sandbox with the same flags, so the
@@ -121,11 +135,17 @@ While a menu is open **no click, key or wheel reaches the map, the sidebar, the 
   not play the click sound for a click on the map. The one thing left alone is the **T** test-sound key and the F1 panels
   (they are debug tools).
 * The sim is held while a menu is open, so nothing moves behind it either.
+* **A low window** (WP9.4c fix round 0): when the button column of the start or pause menu does not fit between the margins
+  (six buttons are about 700 px at UI scale 2), the buttons and their gaps shrink together until it does, so Quit never ends
+  below the window edge; a menu that fits is laid out as before (`the_start_menu_fits_a_low_window_at_every_scale`, down to
+  800 x 480 at every UI scale).
 
 Checked on a real window (`scripts/menus_e2e.py`, Xvfb and lavapipe, real X events): with no menu open **B** gives the build line
 and a click on the first tile of the sidebar gives the sidebar line (the controls); with the pause menu open the same keys,
 **Ctrl+1**, clicks on the map and clicks on the sidebar produce **no** such line and no tick. With the gating taken out of
-`render` the check fails ("13 of 14 checks passed": the build and group lines appear).
+`render` the check fails ("13 of 14 checks passed": the build and group lines appear). Last run 24-11-2026 (WP9.4c fix round 0):
+29 of 29 checks passed, with the start menu's six buttons (the script places them from the layout rule, `button_y`) and the
+new check that the Computer level button is in the settings file at once.
 
 ## Settings file
 
@@ -146,7 +166,7 @@ file on every system (the tests and the screenshots use it) (`the_settings_file_
 * **Writing** goes to a file beside the target that is renamed over it, so a crash cannot leave half a file; a write that fails
   is said once and never stops the game (`a_write_that_fails_is_said_once_and_does_not_stop_anything`). The round trip is
   `a_saved_file_reads_back_the_same_and_the_directory_is_made`.
-* **Defaults** are `menu_look.ron` `defaults` (windowed, no frame cap, vsync on, UI scale 1.0, standard colours, no key changed).
+* **Defaults** are `menu_look.ron` `defaults` (windowed, no frame cap, vsync on, UI scale 1.0, standard colours, no key changed) and, for the computer's level (WP9.4c), `ai_levels.ron` `default` (Normal) while `ai_level` is absent.
 * **Who reads it.** The engine demo and any `--bench` run never read or write it; a `--shots` run only through
   `STAALFRONT_SETTINGS` (so a screenshot does not depend on who took it); every other run uses the user's file
   (`which_runs_read_the_users_settings_file`, `the_demo_and_the_benchmark_ignore_the_settings`).
@@ -316,7 +336,7 @@ generator is the cost; the match map is loaded, not generated).
 
 * The unit tests named above; `tests/menu_screenshot.rs` through the real renderer (the dim and the buttons' colours at the
   layout's positions, the banner with its two buttons under it, both palettes' swatches in the choice); the real game on a
-  software adapter for every picture in `docs/screenshots/wp11.5a/`; `scripts/menus_e2e.py` (26 checks, real X events).
+  software adapter for every picture in `docs/screenshots/wp11.5a/`; `scripts/menus_e2e.py` (29 checks, real X events, last run 24-11-2026 on the six-button start menu of WP9.4c).
 * **Mutations** (a scratch edit, the test that fails, reverted): the menu closes instead of going back from the settings
   (`esc_goes_back_one_screen_at_a_time...`, `the_tabs_switch_the_page...`); Esc while a key is awaited also leaves the page
   (`esc_while_a_key_is_awaited...`); the conflict check removed (`a_key_another_action_has_is_refused...`,

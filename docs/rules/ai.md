@@ -1743,10 +1743,47 @@ Hard with `harvesters_per_refinery` 2 instead of 3 (every other number as hard; 
   not in a scenario: the goal list has one.
 * `refused` after a sent build only matters when the mask cannot see why the simulation said no; the one test of it is the unit that
   drives off (above).
-* Difficulty levels (WP9.4) and the "unfair" level and its two cheats. AI-vs-AI exists since WP9.5a (below); the tuning it measures is WP9.5b.
+* The "unfair" level and its two cheats (the levels easy, normal and hard are playable since WP9.4c). AI-vs-AI exists since WP9.5a (below); the tuning it measures is WP9.5b.
 * The AI state is plain data but is not saved anywhere (WP13.1).
 * A shuffled spawn order test (the iteration-order check of the memo) is not built: the AI iterates `BTreeMap`s and ascending vectors only, and the
   determinism script forbids hash collections, but no test shuffles.
+
+## Choosing the level in the game (WP9.4c, 23-11-2026)
+
+**What it is.** The three shipped profiles of "Difficulty levels (WP9.4a)" can be played from the game. UI and wiring only:
+nothing in `crates/sf_sim` or `crates/sf_ai` changed, no number of any profile changed, no sim pin moved.
+
+* **Which profiles are levels: one place.** `assets/config/ai_levels.ron` (`sf_game::ai_level::AiLevels`, compiled in, checked when
+  it parses): `levels: ["easy", "normal", "hard"]` (the order the menu cycles them) and `default: "normal"`. A level is the file
+  name of a profile under `assets/ai/` without `.ron`. The command line, the start menu and `matchplay` all ask this list; the
+  words the player reads for them ("Easy", "Normal", "Hard") are `words.ai_level_names` in `menu_look.ron`, which is checked
+  to name exactly these levels. The same file names the match of the start menu's **Match against the computer**
+  (`ai_match: "m1_ai"`). At startup `sf_game::ai_refusal` refuses, with exit code 2 and before a window, a level whose
+  `assets/ai/<level>.ron` is missing (`AiLevels::check_profiles`), as it refuses a bad `--ai`.
+* **Command line.** `sf_game --match m1_ai --ai hard` (`easy`, `normal`, `hard`): every computer player of the match plays
+  `assets/ai/hard.ron` instead of the profile the match file names (`matchplay::with_level` rewrites only the profile name
+  of each `Controller::Ai` seat; the seed, the objects and the human seat stay). The console says `match m1_ai: 1 computer
+  player(s) at the level hard`. **Refused, with exit code 2 and nothing started:** `--ai` without `--match` ("--ai needs --match"),
+  `--ai` without a level, and a level that is not shipped ("--ai brutal: unknown level, the shipped levels are easy, normal,
+  hard"). Without `--ai` nothing changes. A match with no computer player (`--match --ai hard`, the static `m1`) plays on and
+  says on stderr that the level changes nothing. With `--replay` the AIs stay silent as before, so the level has no effect.
+  A `--record` of such a match names the match file only, not the level: replaying it feeds the recorded commands, the AI's
+  included, so the level does not matter there.
+* **Start menu.** The start menu had no match against the computer (its **Match** is `m1`, a static opponent), so two entries
+  were added there: **Match against the computer** (plays `m1_ai`, `ai_match` in `ai_levels.ron`, at the level shown) and **Computer
+  level: Normal**, a button that cycles to the next level on each click and is saved in the settings file (`ai_level`, absent
+  = the default; a saved name that is no longer shipped reads as the default). Restart keeps the level; the plain **Match**
+  has no computer player and no level.
+* **How to start each level.** `sf_game --match m1_ai --ai easy`, `--ai normal`, `--ai hard`; or `sf_game`, click **Computer
+  level** until it says the level, click **Match against the computer**.
+* Not done: the "unfair" level, tuning, a level for `sf_headless` (it has `tournament --profiles A,B`), a level in the pause
+  menu (the level is chosen before the match; to change it, go to the Main menu).
+
+Tests: `ai_level::tests` (the shipped list pinned, every level is a profile file, cycling, a broken list refused),
+`matchplay::tests::a_chosen_level_is_the_profile_of_every_computer_seat`, `args::tests::ai_sets_the_level_of_a_match_and_is_refused_otherwise`,
+`menu::tests::the_ai_level_is_chosen_in_the_start_menu_and_carried_by_the_outcome_that_starts_the_match`,
+`runner::tests::ai_level_puts_the_shipped_profile_on_the_computer_player` and
+`the_start_menu_starts_the_match_against_the_computer_at_the_chosen_level`, `menu_look::tests` (the words pinned and checked).
 
 ## In the game (WP9.1d)
 

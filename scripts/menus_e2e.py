@@ -13,7 +13,7 @@ never the real one):
 * scenario 1, "playthrough": Esc opens the pause menu and the sim stops; keys, clicks and the sidebar
   under the menu do nothing (with controls that show the same keys and clicks do reach the game while
   no menu is open); Resume and Esc go on; Restart builds the match again with a young clock; Main
-  menu holds the sim; Quit ends the program.
+  menu holds the sim; the start menu's Computer level is saved at once (WP9.4c); Quit ends the program.
 * scenario 2, "settings": a key is rebound in the settings screen (the new key works, the old one
   does not, the settings file has it), graphics and accessibility choices are written, and a second
   start with that file reads it back without a warning and the rebound key still works.
@@ -33,6 +33,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = []
+
+# The start menu (WP9.4c: six buttons) and the pause menu (five), as `menu_view::layout` places them at UI
+# scale 1.0 in a 1280 x 720 window: a panel of pad 18 + title 36 + gap 8 + n buttons of 38 with gaps of 8 +
+# pad 18, centred in the window.
+START_MENU = ["Match", "Match against the computer", "Computer level", "Sandbox", "Settings", "Quit"]
+PAUSE_MENU = ["Resume", "Restart", "Settings", "Main menu", "Quit"]
+
+
+def button_y(menu, name):
+    """The y of the middle of the button `name` of `menu` (one of the lists above)."""
+    n = len(menu)
+    top = (720 - (18 + 36 + 8 + n * 46 - 8 + 18)) // 2
+    return top + 18 + 36 + 8 + menu.index(name) * 46 + 19
 
 x11 = ctypes.CDLL("libX11.so.6")
 xtst = ctypes.CDLL("libXtst.so.6")
@@ -266,7 +279,7 @@ def playthrough(display, binary, settings):
         check("and still no tick", game.total_ticks() == t2)
 
         # Resume is the first button of the pause menu.
-        game.click(640, 290, 1)
+        game.click(640, button_y(PAUSE_MENU, "Resume"), 1)
         check("Resume lets the sim go on", game.wait_ticks_above(t2))
         m = game.mark()
         game.key("b")
@@ -287,7 +300,7 @@ def playthrough(display, binary, settings):
         before = game.total_ticks()
         game.key("Escape")
         game.wait_settled()  # the menu is open when the sim is held
-        game.click(640, 336, 1)
+        game.click(640, button_y(PAUSE_MENU, "Restart"), 1)
         game.wait_for(r"(?s)(match m1: .*){%d}" % (matches + 1), 30)
         # The first report of the new game: its total is below the old one.
         end = time.time() + 30
@@ -297,14 +310,19 @@ def playthrough(display, binary, settings):
         check("Restart builds the match again", game.count(r"match m1: ") == matches + 1)
         check("and the new game's clock is young", 0 <= after < before, f"{before} -> {after}")
 
-        # Main menu is the fourth button; the start menu's Quit the fourth.
+        # Main menu is the fourth button of the pause menu; the start menu's Quit its sixth.
         game.key("Escape")
         game.wait_settled()
-        game.click(640, 428, 1)
+        game.click(640, button_y(PAUSE_MENU, "Main menu"), 1)
         held = game.wait_settled()
         time.sleep(2.5)
         check("the main menu holds the sim", game.total_ticks() == held)
-        game.click(640, 451, 1)
+        # WP9.4c: the level button cycles normal -> hard and the choice is in the settings file at once.
+        game.click(640, button_y(START_MENU, "Computer level"), 1)
+        time.sleep(1.0)
+        saved = settings.read_text() if settings.exists() else ""
+        check("the computer level is saved at once", '"hard"' in saved, saved[-200:])
+        game.click(640, button_y(START_MENU, "Quit"), 1)
         ended = False
         for _ in range(20):
             if game.proc.poll() is not None:
@@ -329,7 +347,7 @@ def settings_scenario(display, binary, settings):
 
         # Esc, Settings (third button), the key list shows: rebind "Choose structure" (B) to N.
         game.key("Escape")
-        game.click(640, 383, 1)
+        game.click(640, button_y(PAUSE_MENU, "Settings"), 1)
         game.click(872, 177, 1)  # the key button of Choose structure
         game.key("n")
         check("the settings file is written on the change", settings.exists())

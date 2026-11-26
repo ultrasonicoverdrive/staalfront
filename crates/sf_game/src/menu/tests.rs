@@ -43,7 +43,7 @@ fn click(m: &mut Menu, item: Item) -> Vec<Outcome> {
 }
 
 #[test]
-fn the_start_menu_offers_match_sandbox_settings_and_quit_in_that_order() {
+fn the_start_menu_offers_the_matches_the_ai_level_sandbox_settings_and_quit_in_that_order() {
     let mut m = menu();
     assert!(!m.is_open() && m.model(fit()).is_none());
     m.open_start();
@@ -52,12 +52,21 @@ fn the_start_menu_offers_match_sandbox_settings_and_quit_in_that_order() {
     assert_eq!(model.title, "Staalfront");
     assert_eq!(
         texts(&model.buttons),
-        ["Match", "Sandbox", "Settings", "Quit"]
+        [
+            "Match",
+            "Match against the computer",
+            "Computer level: Normal",
+            "Sandbox",
+            "Settings",
+            "Quit"
+        ]
     );
     assert_eq!(
         items(&model.buttons),
         [
             Item::StartMatch,
+            Item::StartAiMatch,
+            Item::CycleAiLevel,
             Item::StartSandbox,
             Item::OpenSettings,
             Item::Quit
@@ -167,6 +176,10 @@ fn every_button_of_the_pause_and_start_menus_does_what_it_says() {
         (vec![Outcome::StartMatch], vec![])
     );
     assert_eq!(
+        outcome(true, Item::StartAiMatch),
+        (vec![Outcome::StartAiMatch { level: "normal" }], vec![])
+    );
+    assert_eq!(
         outcome(true, Item::StartSandbox),
         (vec![Outcome::StartSandbox], vec![])
     );
@@ -189,6 +202,8 @@ fn with_no_menu_open_only_restart_and_main_menu_answer() {
         Item::Resume,
         Item::Quit,
         Item::StartMatch,
+        Item::StartAiMatch,
+        Item::CycleAiLevel,
         Item::StartSandbox,
         Item::OpenSettings,
         Item::SetVsync(false),
@@ -903,5 +918,60 @@ fn a_reloaded_input_ron_drops_the_overrides_it_now_clashes_with() {
     assert_eq!(
         m.shipped().for_action(Action::OrderStop),
         edited.for_action(Action::OrderStop)
+    );
+}
+
+/// WP9.4c: the level of the computer opponent. The start menu shows it (Normal until the player chooses),
+/// a click on its button goes to the next one and wraps round, the change is a setting to save, and the
+/// outcome that starts the match against the computer carries the level that was showing.
+#[test]
+fn the_ai_level_is_chosen_in_the_start_menu_and_carried_by_the_outcome_that_starts_the_match() {
+    let mut m = menu();
+    m.open_start();
+    let shown = |m: &Menu| {
+        let model = model(m);
+        let c = model
+            .buttons
+            .iter()
+            .find(|c| c.item == Item::CycleAiLevel)
+            .expect("the level button");
+        c.text.clone()
+    };
+    assert_eq!(shown(&m), "Computer level: Normal");
+    assert_eq!(m.settings().ai_level, None);
+    for (word, saved) in [
+        ("Hard", "hard"),
+        ("Easy", "easy"),
+        ("Normal", "normal"),
+        ("Hard", "hard"),
+    ] {
+        assert_eq!(
+            click(&mut m, Item::CycleAiLevel),
+            [Outcome::Changed(Change::AiLevel)]
+        );
+        assert_eq!(shown(&m), format!("Computer level: {word}"));
+        assert_eq!(m.settings().ai_level.as_deref(), Some(saved));
+        assert_eq!(m.screen(), Some(Screen::Start), "the menu stays open");
+    }
+    assert_eq!(
+        click(&mut m, Item::StartAiMatch),
+        [Outcome::StartAiMatch { level: "hard" }]
+    );
+    // The plain match carries no level.
+    m.open_start();
+    assert_eq!(click(&mut m, Item::StartMatch), [Outcome::StartMatch]);
+    // A saved level that is not shipped (a settings file of another version) shows and plays as Normal.
+    let mut odd = Menu::new(
+        Settings {
+            ai_level: Some("brutal".into()),
+            ..Settings::default()
+        },
+        Bindings::builtin(),
+    );
+    odd.open_start();
+    assert_eq!(shown(&odd), "Computer level: Normal");
+    assert_eq!(
+        click(&mut odd, Item::StartAiMatch),
+        [Outcome::StartAiMatch { level: "normal" }]
     );
 }

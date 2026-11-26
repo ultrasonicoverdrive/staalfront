@@ -157,11 +157,26 @@ pub fn layout(
     match model.kind {
         Kind::Buttons => {
             let w = px(look.button.width_px, scale).min(inner_w);
-            let h = px(look.button.height_px, scale);
+            let (mut h, mut step) = (px(look.button.height_px, scale), gap);
+            // A window too low for the column (six buttons at a large UI scale): the buttons and the
+            // gaps between them shrink together until the panel fits between the margins, so the last
+            // button (Quit) never ends below the window edge. A menu that fits is not touched.
+            let n = model.buttons.len() as f32;
+            if n > 0.0 {
+                let room = screen.h - 2.0 * px(p.margin_px, scale) - y - pad;
+                let need = n * h + (n - 1.0) * gap;
+                if need > room && room > 0.0 {
+                    let k = room / need;
+                    h = (h * k).floor().max(1.0);
+                    step = (gap * k).floor();
+                }
+            }
             for _ in &model.buttons {
                 buttons.push(Rect::new(x0 + (inner_w - w) * 0.5, y, w, h));
-                y += h + gap;
+                y += h + step;
             }
+            // The panel ends one plain gap under the last button, as before.
+            y += gap - step;
         }
         Kind::Settings => {
             let tab_h = px(look.tab.height_px, scale);

@@ -24,8 +24,10 @@ scripts/check-sim-determinism.sh   # rejects f32/f64/HashMap/HashSet in sf_sim
 
 ## Controls (`sf_game`)
 
-`cargo run -p sf_game` opens the start menu (Match, Sandbox, Settings, Quit; WP11.5a,
-`docs/rules/menus.md`); any flag that names a run (`--sandbox`, `--match`, `--shots`, ...)
+`cargo run -p sf_game` opens the start menu (Match, Match against the computer, Computer level,
+Sandbox, Settings, Quit; WP11.5a and WP9.4c, `docs/rules/menus.md`). To play against the computer at a
+level from the command line: `cargo run -p sf_game -- --match m1_ai --ai easy` (levels `easy`, `normal`,
+`hard`, from `assets/config/ai_levels.ron`; `docs/rules/ai.md`); any flag that names a run (`--sandbox`, `--match`, `--shots`, ...)
 skips it. The sandbox is units and structures of three sides on a generated map. Every key
 and button is an action in `assets/config/input.ron`; the player rebinds keys in
 **Settings > Keys** (kept in the user's settings file, never in `input.ron`, which also

@@ -15,6 +15,7 @@ use sf_data::match_def::{Controller, MatchDef};
 use sf_data::units::UnitDefs;
 use sf_sim::{PlayerId, World};
 
+use crate::ai_level::AiLevels;
 use crate::{playfield, sandbox};
 
 /// The match file `--match` starts without a name, relative to the assets directory.
@@ -130,10 +131,57 @@ pub fn configure(world: World, def: &MatchDef, defs: &UnitDefs) -> Result<World,
 /// definitions, and every AI is told the start sites of the match). The profile is read from `<assets>/ai/<profile>.ron`; a profile that is not there, or does not fit, is an
 /// error that names the player and the profile. The random seed of an AI is the match's `seed`.
 pub fn ais(def: &MatchDef, defs: &UnitDefs, assets: &Path) -> Result<Vec<sf_ai::Ai>, String> {
-    sf_ai::match_ais(def, defs, def.seed, &|profile| {
-        let file = assets.join("ai").join(format!("{profile}.ron"));
-        std::fs::read_to_string(&file).map_err(|e| format!("cannot read {}: {e}", file.display()))
-    })
+    ais_reading(def, defs, &|profile| read_profile(assets, profile))
+}
+
+/// The text of the profile `assets/ai/<profile>.ron`.
+fn read_profile(assets: &Path, profile: &str) -> Result<String, String> {
+    let file = assets.join("ai").join(format!("{profile}.ron"));
+    std::fs::read_to_string(&file).map_err(|e| format!("cannot read {}: {e}", file.display()))
+}
+
+/// [`ais`] with the profile text read by `read` (the tests ask which profiles were wanted).
+fn ais_reading(
+    def: &MatchDef,
+    defs: &UnitDefs,
+    read: &dyn Fn(&str) -> Result<String, String>,
+) -> Result<Vec<sf_ai::Ai>, String> {
+    sf_ai::match_ais(def, defs, def.seed, read)
+}
+
+/// `def` with every computer seat playing the shipped level `level` (WP9.4c, `--ai <level>` and the start
+/// menu's level) instead of the profile the match file names; the seats that are not computers are as they
+/// were. `level` must be one of [`AiLevels`], else the message names the shipped ones and nothing starts.
+/// Only the profile name changes: the match file, its seed and its objects are the same, so the world is the
+/// one the file makes and the level's own numbers are the whole difference.
+pub fn with_level(def: &MatchDef, level: &str) -> Result<MatchDef, String> {
+    let levels = AiLevels::embedded();
+    let Some(level) = levels.find(level) else {
+        return Err(format!(
+            "unknown AI level \"{level}\": the shipped levels are {}",
+            levels.list_text()
+        ));
+    };
+    let mut def = def.clone();
+    for p in &mut def.players {
+        if let Controller::Ai { profile } = &mut p.controller {
+            *profile = level.to_owned();
+        }
+    }
+    Ok(def)
+}
+
+/// [`ais`] for a match played at `level` (`None`: the profiles the match file names).
+pub fn ais_at_level(
+    def: &MatchDef,
+    level: Option<&str>,
+    defs: &UnitDefs,
+    assets: &Path,
+) -> Result<Vec<sf_ai::Ai>, String> {
+    match level {
+        None => ais(def, defs, assets),
+        Some(level) => ais(&with_level(def, level)?, defs, assets),
+    }
 }
 
 /// What [`schedule`] did.
@@ -257,6 +305,87 @@ mod tests {
             made.iter().map(|a| a.player().0).collect::<Vec<_>>(),
             [0, 1]
         );
+    }
+
+    /// WP9.4c: a chosen level puts its shipped profile on every computer seat, for each of the three levels
+    /// (the profile files are asked for by name, and the AIs made from them differ); the seats that are not
+    /// computers and everything else in the file stay; without a level the match file's profile stays.
+    #[test]
+    fn a_chosen_level_is_the_profile_of_every_computer_seat() {
+        let defs = UnitDefs::embedded();
+        let profile_of = |def: &MatchDef| -> Vec<(u8, Option<String>)> {
+            def.players
+                .iter()
+                .map(|p| match &p.controller {
+                    Controller::Ai { profile } => (p.id, Some(profile.clone())),
+                    Controller::Standard => (p.id, None),
+                })
+                .collect()
+        };
+        let ai = MatchDef::embedded_ai();
+        // Without a level the file's own profile stays.
+        assert_eq!(profile_of(&ai), [(0, None), (1, Some("normal".to_owned()))]);
+        let asked = std::cell::RefCell::new(Vec::new());
+        let reading = |def: &MatchDef| {
+            asked.borrow_mut().clear();
+            ais_reading(def, &defs, &|name| {
+                asked.borrow_mut().push(name.to_owned());
+                read_profile(&assets(), name)
+            })
+            .unwrap()
+        };
+        reading(&ai);
+        assert_eq!(*asked.borrow(), ["normal"]);
+        let mut digests = Vec::new();
+        for level in &AiLevels::embedded().levels {
+            let at = with_level(&ai, level).unwrap();
+            assert_eq!(
+                profile_of(&at),
+                [(0, None), (1, Some(level.clone()))],
+                "{level}"
+            );
+            // Only the profile name differs from the file.
+            let mut back = at.clone();
+            if let Controller::Ai { profile } = &mut back.players[1].controller {
+                "normal".clone_into(profile);
+            }
+            assert_eq!(back, ai, "{level}");
+            // The loader reads that level's file for the seat, and the AI made is the level's.
+            let made = reading(&at);
+            assert_eq!(
+                asked.borrow().as_slice(),
+                std::slice::from_ref(level),
+                "{level}"
+            );
+            assert_eq!(made.len(), 1);
+            digests.push(made[0].digest());
+            // `ais_at_level` is the same path.
+            let direct = ais_at_level(&ai, Some(level), &defs, &assets()).unwrap();
+            assert_eq!(direct[0].digest(), made[0].digest(), "{level}");
+        }
+        // Easy, normal and hard are three different AIs.
+        assert_eq!(digests.len(), 3);
+        assert!(digests[0] != digests[1] && digests[1] != digests[2] && digests[0] != digests[2]);
+        // `normal` as a level is the file's own profile.
+        let plain = ais_at_level(&ai, None, &defs, &assets()).unwrap();
+        assert_eq!(plain[0].digest(), digests[1]);
+        // Both seats of the duel take the level.
+        let duel = load(&file_path(Some(Path::new("m1_duel")), &assets())).unwrap();
+        let hard = with_level(&duel, "hard").unwrap();
+        assert_eq!(
+            profile_of(&hard),
+            [(0, Some("hard".to_owned())), (1, Some("hard".to_owned()))]
+        );
+        // A match with no computer seat is unchanged.
+        let m1 = MatchDef::embedded();
+        assert_eq!(with_level(&m1, "hard").unwrap(), m1);
+        // An unknown level is refused and names the shipped ones.
+        let e = with_level(&ai, "brutal").unwrap_err();
+        assert!(
+            e.contains("brutal") && e.contains("easy, normal, hard"),
+            "{e}"
+        );
+        assert!(ais_at_level(&ai, Some("brutal"), &defs, &assets()).is_err());
     }
 
     /// WP9.5a: the tournament plays at the walking speed of the game; its constant is the game's own.

@@ -189,6 +189,42 @@ fn every_screen_fits_the_window_at_every_scale_the_settings_offer() {
     }
 }
 
+/// WP9.4c: the start menu has six buttons (about 700 px at UI scale 2). In a window lower than that the
+/// buttons shrink so every one, Quit last, stays inside the window; where it fits nothing changes.
+#[test]
+fn the_start_menu_fits_a_low_window_at_every_scale() {
+    let l = look();
+    for (w, h) in [(1280u32, 720u32), (1024, 600), (800, 480)] {
+        for &scale in &l.ui_scales {
+            let mut m = menu();
+            m.open_start();
+            let win = screen(w, h);
+            let model = m.model(fit(win, scale, l)).unwrap();
+            let lay = layout(&model, l, win, scale, &measure(scale));
+            assert_eq!(lay.buttons.len(), 6);
+            for b in &lay.buttons {
+                assert!(inside(win, *b), "{w}x{h} scale {scale}: {b:?}");
+                assert!(inside(lay.panel, *b), "{w}x{h} scale {scale}: {b:?}");
+            }
+            for pair in lay.buttons.windows(2) {
+                assert!(!overlap(pair[0], pair[1]), "{w}x{h} scale {scale}");
+            }
+        }
+    }
+    // Where it fits, the buttons keep their full height.
+    let mut m = menu();
+    m.open_start();
+    let win = screen(1920, 1080);
+    let lay = layout(
+        &m.model(fit(win, 2.0, l)).unwrap(),
+        l,
+        win,
+        2.0,
+        &measure(2.0),
+    );
+    assert_eq!(lay.buttons[0].h, px(l.button.height_px, 2.0));
+}
+
 #[test]
 fn the_panel_is_centred() {
     let l = look();

@@ -92,6 +92,10 @@ fn the_defaults_are_the_shipped_ones_and_need_no_changes() {
     assert_eq!((d.frame_cap, d.vsync, d.ui_scale), (None, true, 1.0));
     assert_eq!(d.palette, PaletteChoice::Standard);
     assert!(d.keys.is_empty());
+    assert_eq!(
+        d.ai_level, None,
+        "no AI level chosen: the default of ai_levels.ron stands"
+    );
     let mut again = d.clone();
     assert!(again.sanitize(&shipped()).is_empty());
     assert_eq!(again, d);
@@ -117,6 +121,7 @@ fn a_saved_file_reads_back_the_same_and_the_directory_is_made() {
             ra_enabled: Some(true),
             ra_path: Some("/games/ra".into()),
         },
+        ai_level: Some("hard".into()),
         ..Settings::default()
     };
     s.rebind(&shipped(), Action::OrderStop, KeyCode::KeyV)

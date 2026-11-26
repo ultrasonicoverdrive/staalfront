@@ -10,6 +10,7 @@
 use sf_engine::winit::keyboard::KeyCode;
 use sf_engine::{Action, Bindings};
 
+use crate::ai_level::AiLevels;
 use crate::menu_look::{MenuLook, fill};
 use crate::palette::Palette;
 use crate::settings::{
@@ -49,6 +50,10 @@ pub enum Item {
     /// A label that does nothing (a page counter, the fixed menu key).
     Noop,
     StartMatch,
+    /// The match against the computer opponent, at the level the menu shows (WP9.4c).
+    StartAiMatch,
+    /// The next level of the computer opponent, wrapping round (WP9.4c).
+    CycleAiLevel,
     StartSandbox,
     Resume,
     Restart,
@@ -100,6 +105,8 @@ pub enum Change {
     Volume(Volume),
     /// The original Red Alert audio switch.
     RaAudio,
+    /// The level of the computer opponent (WP9.4c): only saved, nothing is applied until a match starts.
+    AiLevel,
 }
 
 /// What the game has to do.
@@ -113,6 +120,11 @@ pub enum Outcome {
     Restart,
     /// Play the M1 match from the start.
     StartMatch,
+    /// Play the match against the computer opponent from the start, at this level, a profile name of
+    /// `ai_levels.ron` (WP9.4c).
+    StartAiMatch {
+        level: &'static str,
+    },
     /// Play the sandbox from the start.
     StartSandbox,
     /// The start menu is open over the game; hold the simulation.
@@ -549,6 +561,17 @@ impl Menu {
                 self.close();
                 vec![Outcome::StartMatch]
             }
+            Item::StartAiMatch => {
+                self.close();
+                vec![Outcome::StartAiMatch {
+                    level: self.ai_level(),
+                }]
+            }
+            Item::CycleAiLevel => {
+                let next = AiLevels::embedded().next_after(self.ai_level()).to_owned();
+                self.settings.ai_level = Some(next);
+                vec![Outcome::Changed(Change::AiLevel)]
+            }
             Item::StartSandbox => {
                 self.close();
                 vec![Outcome::StartSandbox]
@@ -652,6 +675,14 @@ impl Menu {
         }
     }
 
+    /// The level the computer opponent plays at: the player's choice, the default when none was made or
+    /// the saved one is no longer shipped. Always one of `ai_levels.ron`, as a `'static` name the
+    /// outcome can carry.
+    pub fn ai_level(&self) -> &'static str {
+        let levels = AiLevels::embedded();
+        levels.or_default(self.settings.ai_level.as_deref())
+    }
+
     /// The label of `action` in the key list, or its name when it is not there.
     fn action_label(&self, action: Action) -> String {
         self.look
@@ -671,6 +702,14 @@ impl Menu {
                 &words.game_title,
                 vec![
                     Control::new(&words.start_match, Item::StartMatch),
+                    Control::new(&words.start_ai_match, Item::StartAiMatch),
+                    Control::new(
+                        fill(
+                            &words.ai_level,
+                            &[("level", words.ai_level_name(self.ai_level()))],
+                        ),
+                        Item::CycleAiLevel,
+                    ),
                     Control::new(&words.start_sandbox, Item::StartSandbox),
                     Control::new(&words.settings, Item::OpenSettings),
                     Control::new(&words.quit, Item::Quit),
