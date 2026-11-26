@@ -622,7 +622,7 @@ fn every_bit_flip_is_refused() {
         }
     }
     let (mut refused, mut passed) = (0, 0);
-    for tag in [b'I', b'A', b'L', b'H'] {
+    for tag in *b"IALH" {
         let len = sections(&bytes)
             .iter()
             .find(|s| s.0 == tag)
@@ -642,6 +642,8 @@ fn every_bit_flip_is_refused() {
     eprintln!("hand-made flips: {refused} refused, {passed} loaded");
     assert!(refused > 0);
 }
+
+type IdentityChange = fn(&mut Identity);
 
 fn refused(scenario: &Scenario, bytes: &[u8]) -> SaveFileError {
     load_of(scenario, bytes).unwrap_err()
@@ -670,7 +672,7 @@ fn a_save_of_another_game_is_refused_with_its_message() {
     // Another identity field each.
     let fresh = scenario.build_fresh_world().unwrap();
     let base = Identity::of_scenario(&scenario, &fresh);
-    let cases: [(fn(&mut Identity), &str); 5] = [
+    let cases: [(IdentityChange, &str); 5] = [
         (|i| i.kind = savefile::SaveKind::Match, "kind of game"),
         (|i| i.cells.0 += 1, "map size"),
         (|i| i.speed_raw += 1, "speed"),
