@@ -3945,6 +3945,27 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   factory finishing with `comes_with` and production with vision round trip at every tick in every
   build, and the footprint checks have edge cases that a check on the anchor alone fails.
 
+### WP13.1e-1 notes: the save file and the headless world + AI round trip (26-11-2026)
+
+* **Built** (`tools/sf_headless/src/savefile.rs`): the save file `SFSG` version 1: sections `I` (identity and
+  copies of the formats, rules digest, tick, checksum), `W` (`World::save`), `A` (each `Ai::save`, ascending by
+  player), `L` (the command log), `H` (host, empty), FNV-1a 64 trailer; `write`, `read_header`, `load`
+  (all-or-nothing, one `SaveFileError`). Layout, read order and refusals: `docs/rules/save.md`, "The save file".
+* **Headless plumbing** (`run.rs`, `scenario.rs`): `run_saving` with a `SavePoint` (`&mut` world, AIs, log) at
+  the one save point (after the arrivals of the tick, before the thinks); `Finished::log`; `resume` from a
+  loaded save; `replay_log`; `Arrivals::schedule_due_logged` and `skip_to`; `build_fresh_world` for a recorded
+  game (the game's world before its starting objects and first tick).
+* **Tests** (`tests/save_game.rs`): all 49 CI scenarios through save files every 97 ticks, world and AIs
+  continuing to the pin (the 15 `ai_*` with their AI in every save, AI digests, commands and log equal to the
+  run without saves); a two-AI variant of `ai_raid`; `ai_raid` at every tick in release (5599 saves, 243 s on
+  the container, load 6-7) and its first 200 ticks in every build; a recorded `m1_duel` game through saves,
+  replayed and resumed; the log replayed to the saved checksum; the pinned file (`ai_raid` at 970: 55,296
+  bytes, hash `0xfac0_fae0_a97b_7248`); every truncation and bit flip refused; every refusal with its message.
+* No pin moved; `sf_sim`, `sf_game`, the AI profiles and the tournament are untouched.
+* **Left for 13.1e-2/3**: the sim thread's save message and restored spawn, the command log always on in a
+  match, the runner, file I/O and the view caches. **For 13.1h**: the hash is not security; a hand-made file
+  with a right hash reaches the world and AI checks.
+
 ### WP13.1c-3a notes: saving repair, sale and the match outcome (23-11-2026)
 
 * The entity columns `repairing` and `sell_left` join section `E`, and a new section `G` holds the

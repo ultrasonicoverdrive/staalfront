@@ -631,18 +631,60 @@ pub struct Arrivals<'a> {
 impl Arrivals<'_> {
     /// Schedules the commands that arrive now; returns how many.
     pub fn schedule_due(&mut self, world: &mut World) -> Result<usize, ScenarioError> {
+        self.schedule(world, None)
+    }
+
+    /// [`Arrivals::schedule_due`], and each command scheduled is added to `log` (the command log of
+    /// a save file, WP13.1e-1) with the tick it arrived and the tick it runs at.
+    pub fn schedule_due_logged(
+        &mut self,
+        world: &mut World,
+        log: &mut Vec<crate::savefile::LoggedCommand>,
+    ) -> Result<usize, ScenarioError> {
+        self.schedule(world, Some(log))
+    }
+
+    fn schedule(
+        &mut self,
+        world: &mut World,
+        mut log: Option<&mut Vec<crate::savefile::LoggedCommand>>,
+    ) -> Result<usize, ScenarioError> {
         let now = world.tick().0;
         let mut n = 0;
         while let Some(c) = self.list.get(self.next)
             && c.arrived <= now
         {
+            let command = c.command.to_command();
+            if let Some(log) = log.as_deref_mut() {
+                log.push(crate::savefile::LoggedCommand {
+                    arrived: Tick(c.arrived),
+                    effective: Tick(c.tick),
+                    player: PlayerId(c.player),
+                    command: command.clone(),
+                });
+            }
             world
-                .schedule(Tick(c.tick), PlayerId(c.player), c.command.to_command())
+                .schedule(Tick(c.tick), PlayerId(c.player), command)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
             self.next += 1;
             n += 1;
         }
         Ok(n)
+    }
+
+    /// Passes over every command that arrived by `tick` without scheduling it, and returns how many:
+    /// after a world saved at `tick` is loaded (WP13.1e-1) those commands are already in it (the
+    /// save point comes after the arrivals of its tick), and scheduling them again would run them
+    /// twice.
+    pub fn skip_to(&mut self, tick: Tick) -> usize {
+        let mut n = 0;
+        while let Some(c) = self.list.get(self.next)
+            && c.arrived <= tick.0
+        {
+            self.next += 1;
+            n += 1;
+        }
+        n
     }
 
     /// Commands not yet handed to a world.
@@ -1816,16 +1858,10 @@ impl Scenario {
     }
 
     /// The world [`Scenario::build_world`] makes before anything is scheduled: the rules, the
-    /// map and the tables, no entity and no command. What a save is restored onto
-    /// (`World::restore`, WP13.1b). Not for a recorded game (`game`), whose world is made with
-    /// its starting objects.
+    /// map and the tables, no entity and no command, at tick 0. What a save is restored onto
+    /// (`World::restore`, WP13.1b). For a recorded game (`game`) it is the game's world before its
+    /// starting objects are scheduled and its first tick is run (WP13.1e-1).
     pub fn build_fresh_world(&self) -> Result<World, ScenarioError> {
-        if self.game.is_some() {
-            return Err(ScenarioError::Invalid {
-                path: None,
-                problems: vec!["game: a recorded game has no fresh world to restore onto".into()],
-            });
-        }
         self.build(false)
     }
 
@@ -1858,12 +1894,12 @@ impl Scenario {
                     ],
                 });
             };
-            return game::build_game_world(
-                self.seed,
-                (self.map.width, self.map.height),
-                game,
-                loaded,
-            );
+            let cells = (self.map.width, self.map.height);
+            return if schedule {
+                game::build_game_world(self.seed, cells, game, loaded)
+            } else {
+                game::build_fresh_game_world(self.seed, cells, game, loaded)
+            };
         }
         let config = WorldConfig::new(self.seed).with_map_size(self.map.width, self.map.height);
         let mut world = match &self.terrain {
