@@ -72,6 +72,32 @@ pub fn write(
     Ok(n)
 }
 
+/// The commands of a game record (`--record`) that come after a save of that game (WP13.1e-2,
+/// `docs/rules/save.md` "Resuming a game record"): the record's first commands must be the save's log (section
+/// `L`), one for one, and what follows them is still to be fed. A game record is resumed by this **count**, never
+/// by the save tick (`Arrivals::skip_to`): in the game a command can arrive at the save tick after the save was
+/// taken, and it is then in the record but not in the save. Refused when the record does not begin with the log.
+pub fn commands_after_save<'a>(
+    recorded: &'a [RecordedCommand],
+    saved: &[sf_headless::savefile::LoggedCommand],
+) -> Result<&'a [RecordedCommand], String> {
+    if recorded.len() < saved.len() {
+        return Err(format!(
+            "the record holds {} commands, the save {}",
+            recorded.len(),
+            saved.len()
+        ));
+    }
+    for (i, (r, s)) in recorded.iter().zip(saved).enumerate() {
+        if *r != RecordedCommand::new(s.arrived, s.effective, s.player, &s.command) {
+            return Err(format!(
+                "command {i} of the record is not command {i} of the save"
+            ));
+        }
+    }
+    Ok(&recorded[saved.len()..])
+}
+
 /// Where the record of a game that a restart ended goes: `FILE` with `.restartN` before the extension.
 pub fn restart_path(path: &Path, n: u32) -> PathBuf {
     let stem = path
