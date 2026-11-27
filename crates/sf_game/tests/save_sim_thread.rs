@@ -197,13 +197,20 @@ fn an_ai_match_saved_and_loaded_plays_on_tick_for_tick() {
 fn commands_before_the_save_are_in_it_commands_after_it_are_not() {
     let file = match_file("m1_ai");
     let (at, end) = (500, 900);
-    let mut sim = spawn(&file);
-    step_to(&sim, at);
+    // The tick before the save is slow, so the save and the command after it are both waiting in the channel
+    // while it runs: the order of the messages alone puts the command after the save.
+    let (world, ais, _) = game(&file);
+    let slow = SimConfig {
+        hitch: Some((at - 1, Duration::from_millis(300))),
+        ..config()
+    };
+    let mut sim = SimHandle::spawn_with_ais(world, slow, ais).unwrap();
+    step_to(&sim, at - 1);
     let before = Command::Stop { ids: Vec::new() };
     let after = Command::Stop { ids: Vec::new() };
     sim.send_at(Tick(at + 2), PlayerId(0), before.clone());
+    sim.advance(1);
     let request = sim.request_save();
-    // Sent while the save is asked for, before its answer is read: still after it.
     sim.send_at(Tick(at + 3), PlayerId(0), after.clone());
     let parts = request.wait(WAIT).unwrap();
     assert_eq!(parts.tick, Tick(at));
@@ -213,7 +220,11 @@ fn commands_before_the_save_are_in_it_commands_after_it_are_not() {
         .filter(|c| c.player == PlayerId(0))
         .map(|c| (c.arrived.0, c.effective.0))
         .collect();
-    assert_eq!(human, [(at, at + 2)], "the command before the save, only");
+    assert_eq!(
+        human,
+        [(at - 1, at + 2)],
+        "the command before the save, only"
+    );
     let loaded = load(&file, &file_of(&file, &parts));
     let pending: Vec<_> = loaded
         .world
@@ -243,7 +254,7 @@ fn commands_before_the_save_are_in_it_commands_after_it_are_not() {
         .filter(|c| c.player == PlayerId(0))
         .map(|c| (c.arrived.0, c.effective.0))
         .collect();
-    assert_eq!(human, [(at, at + 2), (at, at + 3)]);
+    assert_eq!(human, [(at - 1, at + 2), (at, at + 3)]);
 }
 
 /// The full command log is kept by a match that can be saved, without `--record`: the same log as with it.
