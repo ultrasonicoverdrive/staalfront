@@ -260,12 +260,46 @@ pub fn write(
             "the AIs are not ascending by player",
         ));
     }
-    let n_ais = u8::try_from(ais.len()).map_err(|_| SaveFileError::Malformed("too many AIs"))?;
     let world_bytes = world.save().map_err(SaveFileError::World)?;
     let mut ai_bytes = Vec::with_capacity(ais.len());
     for ai in ais {
-        ai_bytes.push(ai.save().map_err(|e| SaveFileError::Ai(ai.player(), e))?);
+        ai_bytes.push((
+            ai.player(),
+            ai.save().map_err(|e| SaveFileError::Ai(ai.player(), e))?,
+        ));
     }
+    write_bytes(
+        identity,
+        world.rules_digest(),
+        world.tick(),
+        world.checksum(),
+        &world_bytes,
+        &ai_bytes,
+        log,
+    )
+}
+
+/// The save file from parts that were saved already (WP13.1e-2: the game's sim thread saves the world and the
+/// AIs at its save point and hands the bytes over, `sf_game::sim_thread::SaveParts`): `rules_digest`, `tick` and
+/// `checksum` are the saved world's, `world_bytes` its `World::save` bytes, `ai_bytes` each AI's `Ai::save` bytes
+/// ascending by player. The same bytes as [`write`] for the same game: [`write`] is this function on the live
+/// world and AIs.
+pub fn write_bytes(
+    identity: &Identity,
+    rules_digest: u64,
+    tick: Tick,
+    checksum: u64,
+    world_bytes: &[u8],
+    ai_bytes: &[(PlayerId, Vec<u8>)],
+    log: &[LoggedCommand],
+) -> Result<Vec<u8>, SaveFileError> {
+    if ai_bytes.windows(2).any(|p| p[0].0 >= p[1].0) {
+        return Err(SaveFileError::Malformed(
+            "the AIs are not ascending by player",
+        ));
+    }
+    let n_ais =
+        u8::try_from(ai_bytes.len()).map_err(|_| SaveFileError::Malformed("too many AIs"))?;
     let mut w = ByteWriter::new();
     w.raw(&MAGIC);
     w.u32(CONTAINER_VERSION);
@@ -283,19 +317,19 @@ pub fn write(
         s.u8(identity.local_player);
         s.u32(FORMAT_VERSION);
         s.u32(sf_ai::AI_FORMAT_VERSION);
-        s.u64(world.rules_digest());
-        s.u64(world.tick().0);
-        s.u64(world.checksum());
+        s.u64(rules_digest);
+        s.u64(tick.0);
+        s.u64(checksum);
         Ok(())
     })?;
     w.section(WORLD, |s| -> Result<(), SaveFileError> {
-        s.raw(&world_bytes);
+        s.raw(world_bytes);
         Ok(())
     })?;
     w.section(AIS, |s| -> Result<(), SaveFileError> {
         s.u8(n_ais);
-        for (ai, bytes) in ais.iter().zip(&ai_bytes) {
-            s.u8(ai.player().0);
+        for (player, bytes) in ai_bytes {
+            s.u8(player.0);
             s.bytes(bytes)?;
         }
         Ok(())

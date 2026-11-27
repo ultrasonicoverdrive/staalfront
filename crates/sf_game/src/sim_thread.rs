@@ -36,8 +36,17 @@
 //! game keeps this log, one entry only for a command that was moved, so it is
 //! cheap and bounded). The full command log ([`SimConfig::record_commands`],
 //! every command with the tick it ran at, so that a run can be replayed) is
-//! off in the game, where it would grow with the length of the session, and on
-//! in the tests.
+//! on in every match since WP13.1e-2 ([`SimConfig::saves`]: a save needs it; it
+//! grows with the session, measured in `docs/rules/save.md`), with `--record`,
+//! and in the tests; off in the sandbox, the crowd and a `--replay`.
+//!
+//! # Saving (WP13.1e-2)
+//!
+//! [`SimHandle::save`] is a message like a command: the thread answers it
+//! between two ticks (the world after tick N, before the thinks of N + 1, the
+//! save point of `docs/rules/save.md`) with [`SaveParts`]: the world's and the
+//! AIs' save bytes and the log. [`SimHandle::spawn_restored`] starts a thread
+//! on a loaded game with the loaded log in front of its own.
 //!
 //! # Time, and what happens when the sim is slow
 //!
@@ -106,12 +115,15 @@
 //! panicked is joined too, reported by [`SimExit::panicked`], and the main
 //! loop notices it through [`SimHandle::is_running`].
 
+use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use sf_headless::savefile;
+use sf_sim::save::SaveError;
 use sf_sim::{Command, PlacementRejection, PlayerId, TICK_MILLIS, Tick, World};
 
 use crate::fx_events::{self, FxEvent, FxQueue};
@@ -203,6 +215,11 @@ pub struct SimConfig {
     pub think_hitch: Option<(u64, Duration)>,
     /// Keep every command with the tick it really ran at ([`SimExit::commands`]).
     pub record_commands: bool,
+    /// The thread holds a match that can be saved (WP13.1e-2, [`SimHandle::save`]): it keeps the full command log
+    /// as `record_commands` does, because a save needs it. Off, a save is refused with
+    /// [`SimSaveError::NotAMatch`]. The runner sets it for a match that no `--replay` feeds
+    /// (`runner::scene_sim_config`).
+    pub saves: bool,
 }
 
 impl SimConfig {
@@ -219,7 +236,13 @@ impl SimConfig {
             panic_at: None,
             think_hitch: None,
             record_commands: false,
+            saves: false,
         }
+    }
+
+    /// The full command log is kept: for `--record` and for a match that can be saved.
+    pub fn keeps_log(&self) -> bool {
+        self.record_commands || self.saves
     }
 
     /// Stepped by hand with [`SimHandle::advance`].
@@ -256,13 +279,111 @@ pub struct LoggedCommand {
     pub command: Command,
 }
 
+impl LoggedCommand {
+    /// The command as a save file holds it (section `L`): the sender's `requested` tick is diagnostic and dropped.
+    pub fn to_saved(&self) -> savefile::LoggedCommand {
+        savefile::LoggedCommand {
+            arrived: self.arrived,
+            effective: self.effective,
+            player: self.player,
+            command: self.command.clone(),
+        }
+    }
+
+    /// A command of a loaded save's log: the file does not hold `requested`, so it is `effective`.
+    pub fn from_saved(saved: savefile::LoggedCommand) -> LoggedCommand {
+        LoggedCommand {
+            requested: saved.effective,
+            effective: saved.effective,
+            arrived: saved.arrived,
+            player: saved.player,
+            command: saved.command,
+        }
+    }
+}
+
+/// What the sim thread hands over for a save (WP13.1e-2, [`SimHandle::save`]): the world and the AIs saved at
+/// the save point, and the command log since tick 0. The main thread adds the identity and builds the file with
+/// `sf_headless::savefile::write_bytes`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SaveParts {
+    /// The ticks the world had run at the save.
+    pub tick: Tick,
+    /// `World::checksum` at the save.
+    pub checksum: u64,
+    /// `World::rules_digest` (section `I` holds it; the main thread has no world to ask).
+    pub rules_digest: u64,
+    /// The bytes of `World::save`.
+    pub world: Vec<u8>,
+    /// The bytes of `Ai::save` of each computer opponent, ascending by player.
+    pub ais: Vec<(PlayerId, Vec<u8>)>,
+    /// Every command handed to the world since tick 0 (of a restored thread: the loaded log first), in order.
+    pub log: Vec<savefile::LoggedCommand>,
+    /// How long the world and AI saves took on the sim thread (the conversion of the log included): the
+    /// pause the save puts between two ticks.
+    pub took: Duration,
+}
+
+/// Why a save gave no [`SaveParts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SimSaveError {
+    /// The thread holds no match ([`SimConfig::saves`] is off: the sandbox, the crowd, a `--replay`).
+    NotAMatch,
+    /// `World::save` refused.
+    World(SaveError),
+    /// `Ai::save` of this player refused.
+    Ai(PlayerId, SaveError),
+    /// The thread has ended (stopped or panicked) before it answered.
+    Stopped,
+    /// No answer within the time given.
+    Timeout,
+}
+
+impl fmt::Display for SimSaveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimSaveError::NotAMatch => write!(f, "only a match can be saved"),
+            SimSaveError::World(e) => write!(f, "the world cannot be saved: {e}"),
+            SimSaveError::Ai(player, e) => {
+                write!(f, "the AI of player {} cannot be saved: {e}", player.0)
+            }
+            SimSaveError::Stopped => write!(f, "the simulation has stopped"),
+            SimSaveError::Timeout => write!(f, "the simulation did not answer in time"),
+        }
+    }
+}
+
+impl std::error::Error for SimSaveError {}
+
+/// A save that was asked for ([`SimHandle::request_save`]) and is answered between two ticks.
+pub struct SaveRequest {
+    rx: Receiver<Result<SaveParts, SimSaveError>>,
+}
+
+impl SaveRequest {
+    /// Waits at most `timeout` for the answer. A thread that has ended gives [`SimSaveError::Stopped`], never a
+    /// hang.
+    pub fn wait(self, timeout: Duration) -> Result<SaveParts, SimSaveError> {
+        match self.rx.recv_timeout(timeout) {
+            Ok(answer) => answer,
+            Err(RecvTimeoutError::Timeout) => Err(SimSaveError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Err(SimSaveError::Stopped),
+        }
+    }
+}
+
 /// What the sim thread leaves behind when it ends.
 #[derive(Clone, Debug, Default)]
 pub struct SimExit {
     /// Ticks the world had run.
     pub ticks: u64,
-    /// The checksum after every tick, from the world's history.
+    /// The checksum after every tick since [`SimExit::checksums_start`], from the world's history: entry `k` is
+    /// the checksum right after tick `checksums_start + k` ran.
     pub checksums: Vec<u64>,
+    /// The tick of the first entry of `checksums` (`World::checksum_history_start`): 0, except for a thread made
+    /// with [`SimHandle::spawn_restored`], whose history begins at the save tick. Read the history through
+    /// [`SimExit::checksum_after`].
+    pub checksums_start: Tick,
     /// The commands in the order they ran, when
     /// [`SimConfig::record_commands`] asked for them.
     pub commands: Vec<LoggedCommand>,
@@ -270,6 +391,15 @@ pub struct SimExit {
     pub panicked: bool,
     /// What the thread panicked with (the panic's message), when it did.
     pub panic_message: Option<String>,
+}
+
+impl SimExit {
+    /// The checksum right after tick `tick` ran, if the history holds it (not before
+    /// [`SimExit::checksums_start`]).
+    pub fn checksum_after(&self, tick: Tick) -> Option<u64> {
+        let k = tick.0.checked_sub(self.checksums_start.0)?;
+        self.checksums.get(usize::try_from(k).ok()?).copied()
+    }
 }
 
 /// Counters of the sim thread, readable at any time.
@@ -320,6 +450,8 @@ enum Msg {
     Pause(bool),
     /// The placement question to answer in every snapshot from now on (WP6.2), or none.
     Ghost(Option<GhostQuery>),
+    /// Save the world and the AIs now, between two ticks (WP13.1e-2, [`SimHandle::request_save`]).
+    Save(Sender<Result<SaveParts, SimSaveError>>),
     Shutdown,
 }
 
@@ -388,7 +520,32 @@ impl SimHandle {
     pub fn spawn_with_ais(
         world: World,
         config: SimConfig,
+        ais: Vec<sf_ai::Ai>,
+    ) -> std::io::Result<SimHandle> {
+        SimHandle::spawn_inner(world, config, ais, Vec::new())
+    }
+
+    /// Like [`SimHandle::spawn_with_ais`] for a game loaded from a save file (WP13.1e-2): `world` and `ais` are
+    /// the restored ones (`sf_headless::savefile::load`) and `log` the loaded command log, which the thread's log
+    /// starts with, so that the log of the thread (the next save, `--record`) is the full log since tick 0
+    /// (`requested` of a loaded command is its `effective` tick). Every cache of the thread and every snapshot
+    /// buffer starts blank, as for a new game: the first snapshot is filled from the loaded world. The
+    /// checksum history of [`SimExit`] begins at the save tick ([`SimExit::checksums_start`]).
+    pub fn spawn_restored(
+        world: World,
+        config: SimConfig,
+        ais: Vec<sf_ai::Ai>,
+        log: Vec<savefile::LoggedCommand>,
+    ) -> std::io::Result<SimHandle> {
+        let log = log.into_iter().map(LoggedCommand::from_saved).collect();
+        SimHandle::spawn_inner(world, config, ais, log)
+    }
+
+    fn spawn_inner(
+        world: World,
+        config: SimConfig,
         mut ais: Vec<sf_ai::Ai>,
+        log: Vec<LoggedCommand>,
     ) -> std::io::Result<SimHandle> {
         ais.sort_by_key(sf_ai::Ai::player);
         let statics = Statics::new(&world);
@@ -430,7 +587,7 @@ impl SimHandle {
             statics,
             retired: Vec::new(),
             ghost: None,
-            log: Vec::new(),
+            log,
             last_step: Duration::ZERO,
             fx_scratch: Vec::with_capacity(256),
             ais,
@@ -495,6 +652,27 @@ impl SimHandle {
     /// that is reused.
     pub fn drain_fx(&self, out: &mut Vec<FxEvent>) {
         lock(&self.shared.fx).drain_into(out);
+    }
+
+    /// Asks for a save (WP13.1e-2, `docs/rules/save.md` "The save point in the game"). The thread answers between
+    /// two ticks, in order with the messages sent before: after the step of tick N and before the thinks of
+    /// N + 1, held or not, and whatever paces it. Commands sent before this call are in the save (its world's
+    /// queue and its log); commands sent after it are in neither. The answer is read with [`SaveRequest::wait`],
+    /// so the caller may go on (send commands, draw) meanwhile.
+    pub fn request_save(&self) -> SaveRequest {
+        let (reply, rx) = mpsc::channel();
+        // A dead thread drops the message, and with it `reply`: the wait then says `Stopped`.
+        let _ = self.tx.send(Msg::Save(reply));
+        SaveRequest { rx }
+    }
+
+    /// [`SimHandle::request_save`] and [`SaveRequest::wait`] in one: the parts of a save, or why there are none
+    /// (a thread that has ended or does not answer within `timeout` is an error, never a hang).
+    pub fn save(&self, timeout: Duration) -> Result<SaveParts, SimSaveError> {
+        if self.join.is_none() {
+            return Err(SimSaveError::Stopped);
+        }
+        self.request_save().wait(timeout)
     }
 
     /// Starts the clock of a thread made with [`SimConfig::start_paused`].
@@ -703,6 +881,7 @@ impl Sim {
         SimExit {
             ticks: self.world.tick().0,
             checksums: self.world.checksum_history().to_vec(),
+            checksums_start: self.world.checksum_history_start(),
             commands: std::mem::take(&mut self.log),
             panicked: false,
             panic_message: None,
@@ -854,9 +1033,38 @@ impl Sim {
                     self.publish(Instant::now(), Duration::ZERO);
                 }
             }
+            Msg::Save(reply) => {
+                // Asked for nothing more than an answer: a caller that stopped waiting is no error here.
+                let _ = reply.send(self.save_parts());
+            }
             Msg::Shutdown => return Flow::Stop,
         }
         Flow::Go
+    }
+
+    /// The save of the game as it stands (WP13.1e-2). Called only from [`Sim::handle`], so only between two
+    /// steps: the world after tick N, the AIs before their thinks of N + 1 (the save point of `save.md`).
+    fn save_parts(&self) -> Result<SaveParts, SimSaveError> {
+        if !self.config.saves {
+            return Err(SimSaveError::NotAMatch);
+        }
+        let began = Instant::now();
+        let world = self.world.save().map_err(SimSaveError::World)?;
+        let mut ais = Vec::with_capacity(self.ais.len());
+        for ai in &self.ais {
+            let bytes = ai.save().map_err(|e| SimSaveError::Ai(ai.player(), e))?;
+            ais.push((ai.player(), bytes));
+        }
+        let log = self.log.iter().map(LoggedCommand::to_saved).collect();
+        Ok(SaveParts {
+            tick: self.world.tick(),
+            checksum: self.world.checksum(),
+            rules_digest: self.world.rules_digest(),
+            world,
+            ais,
+            log,
+            took: began.elapsed(),
+        })
     }
 
     fn schedule(&mut self, tick: Tick, player: PlayerId, command: Command) {
@@ -866,7 +1074,8 @@ impl Sim {
         if moved {
             self.shared.late_commands.fetch_add(1, Ordering::Relaxed);
         }
-        let logged = (self.config.record_commands || moved).then(|| command.clone());
+        let keep = self.config.keeps_log();
+        let logged = (keep || moved).then(|| command.clone());
         match self.world.schedule(effective, player, command) {
             Ok(()) => {
                 if let Some(command) = logged {
@@ -888,7 +1097,7 @@ impl Sim {
                         }
                         kept.push(entry.clone());
                     }
-                    if self.config.record_commands {
+                    if keep {
                         self.log.push(entry);
                     }
                 }
