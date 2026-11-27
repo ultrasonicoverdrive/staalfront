@@ -1700,7 +1700,116 @@ Hard with `harvesters_per_refinery` 2 instead of 3 (every other number as hard; 
 * The escalation of hard (250 / 8000) was measured to do nothing for the mean in WP9.3a-1; it is in hard because the memo has it and was not tested alone here.
 * Time split: see the progress entry.
 
+## Direction-free rules (WP9.6a, 26-11-2026)
+
+**What it is.** Three profile switches, **off by default and off in every shipped profile** (`normal`, `easy`, `hard` and every frozen profile read as before; no pin moved), each of which makes one AI rule that used the compass depend on where the enemy is. Built from the diagnosis of 23/24-11-2026 (read-only, `onderzoeker`): the north-east/south-west bias of `m1_duel` is not in the map data (ore, paths, first refinery tick and first delivery are equal for both sites) but in three rules that break ties by compass direction. Nothing is turned on here: WP9.6b decides, from the measurement below.
+
+The form is shared (`crates/sf_ai/src/facing.rs`, integers only, doubled coordinates: the centre of cell `(x, y)` is `(2x + 1, 2y + 1)`, the middle of the map is `(width, height)`). A `Facing` is the direction `dir` from the AI's own start site to the nearest start site of another player (the middle of the map when there is none), and the **middle of the map as origin**. `Facing::rank(p)` of a point is `(-dot, |cross|, cross)` of its offset from the origin with `dir`: farthest toward the enemy first, then nearest to the line to the enemy, then by side. The map `p -> (dot, cross)` is one-to-one while `dir` is not zero, so two cells never rank equal and no `(y, x)` tail is needed. A half turn of the map about its middle maps the origin onto itself and `dir` onto `-dir`, so `rank` is **the same number for a cell and for its half-turned cell as seen by the other player**. The origin is the middle of the map and not the start site because a start site is the anchor's top-left cell, and a 4 x 4 anchor's top-left cell is not the half turn of the other anchor's (the sites differ by 3 cells there); a rank taken from it would not be exact. `dir` is a difference of two sites of the same kind, so it is exactly negated.
+
+| Switch | Where | Off (today) | On |
+|---|---|---|---|
+| `economy.placement_facing` | `placement.rs` `search`, `sort_candidates` | candidates `(score, y, x)`: equal scores go north, then west | `(score, rank of the footprint's middle)`: equal scores go toward the enemy, then nearest the line to it, then by side |
+| `army.gather_facing` | `army.rs` `find_gather`, `facing::gather_point`, `facing::ring_cells` | the point `gather_distance` cells from the anchor's middle toward the map middle is `mid + step` in integer cells (rounds toward the north-west); the ring cells in `(y, x)` order | the same point worked out in doubled coordinates and rounded **toward the anchor** (so it turns with the map), the ring cells in rank order: the free cell facing the enemy first |
+| `army.scout_facing` | `army.rs` `waypoints`, `facing::quarters` | quarters at `size/4` and `3*size/4`, order north-west, north-east, south-west, south-east | quarters at `size/4` and `size - 1 - size/4` (a half turn maps the set onto itself), order by rank: the quarter toward the enemy first, the two beside it (the side by `cross`), the AI's own last. The site legs before them are unchanged |
+
+Why these forms. *Toward the enemy* is the one choice that needs no compass and no extra number; the alternative *by distance from own base* is symmetric too, but ties between cells at equal distance from the base would still need a side rule, and `rank` has one built in. The scout orders the quarters by `rank` and not by distance from the enemy site because a distance from the site cell is not exact under a half turn (the site is a cell of a 4 x 4 anchor). The gather ring order matters only when the point itself is not free (a blocking cell, a refinery gap); the rounding of the point itself matters every time (the old point is one cell off between the two sites on a symmetric map, see the test). Digest: `Profile::digest` writes tag `0x98` and the three flags only when one is on; all off keeps every digest (`profile::tests::the_direction_free_switches_of_wp9_6a_are_hashed_only_when_on_and_pinned_as_literals` pins the four literals for placement only, gather only, scout only and all three; the profile format test `the_direction_free_switches_are_off_when_left_out_and_read_as_written` reads every shipped level and two frozen profiles as off).
+
+Not touched, on purpose: `exit_side` in `assets/config/unit_defs.ron` (east for the refinery and the factories, for both players and for the human) and the seat order inside a tick (`crates/sf_sim/src/command.rs`). Both stay direction-dependent and show in the measurement below.
+
+### Tests
+
+* `crates/sf_ai/src/facing/tests.rs` (9): the facing of the two seats are half turns of each other and the middle is the fixed point; no site or a target on it is no facing; **the rank of every cell of a 96 x 96 map equals the rank of its half-turned cell for the other seat and never ties** (9,216 cells); the gather point of the half-turned anchor is the half turn of the point for footprints 2..5 x 2..5, 60 anchors and 12 distances; the rings 0..10 and the 8 * ring cells of each ring, mapped by the half turn; the quarters; the candidates of a footprint, all at equal score, sort onto each other, and a lower score still wins.
+* `tools/sf_headless/tests/ai_facing.rs` (6), on the **production functions** `placement::search`, `army::ensure_gather` and `army::waypoints` over a world a half turn maps onto itself (the scenario `ai_scout` with every cell open ground except a few walls set the same way round, one Meridian construction centre at (12, 68) and one at (80, 24), one tick played): with the switch on, player 1's answer is the half turn of player 0's (the plain-kind placement, the gather cell with a 3 x 3 wall on the point so that the search goes out to ring 2, the four quarter legs); with the switch off the same test shows the compass bias (the control that proves the mirror test can fail: placement (9, 68) against the half turn (17, 69) of (77, 24); gather (25, 63) against (71, 33) whose half turn is (70, 32); the quarters are the same four cells in the same order for both players).
+* `sf_data` `ai_profile` test and the digest test above.
+
+### Mutations (each switch ignored in its own code path, in place, reverted)
+
+| Mutation | Test that fails |
+|---|---|
+| `placement.rs`: `let facing = (e.placement_facing && false)...` | `the_placement_of_player_1_is_the_half_turn_of_player_0s_with_the_switch_on` |
+| `army.rs` `find_gather`: `(gather_facing && false)` | `the_gather_cell_of_player_1_is_the_half_turn_of_player_0s_with_the_switch_on` |
+| `army.rs` `waypoints`: `(scout_facing && false)` | `the_scout_legs_of_player_1_are_the_half_turn_of_player_0s_with_the_switch_on` |
+| `facing.rs` `rank`: `(-dot, 0, 0)` | `the_rank_of_a_point_is_the_same_after_a_half_turn_and_never_ties`, `the_rank_prefers_the_cell_toward_the_enemy` |
+| `profile.rs` digest: the scout flag written as 0 | `the_direction_free_switches_of_wp9_6a_are_hashed_only_when_on_and_pinned_as_literals` |
+
+### Measurement
+
+**Setup.** Release build of the PR head (`sf_headless tournament`), `m1_duel` (SW anchor (12, 68), NE anchor at (72, 14) on `m1`), **mirror games: both seats run the same profile** (`--profiles X,X`), cap 60,000 ticks, **1,600 games per row** (a multiple of 8, so the 8-cycle of factions and start sites is complete: 400 games per seating), seed 458,758, the same seed for every row. Columns: wins by the player standing on the south-west (SW) and north-east (NE) site, undecided games (capped or draw: not a win for either), the **NE share of the decided games with a 95 % Wilson interval** (50 % is fair), the share won by seat 0 (the sim lets seat 0's commands run first in a tick: `crates/sf_sim/src/command.rs`), and the wins split by site and seat. The base row of normal reproduces the diagnosis (NE 52.8 %, SW 738 : NE 825 here against 923 : 1,033 in 2,000 games then). The profiles of the rows are the shipped file with the switches added: `placement_facing: true,` after `max_queue:` and `gather_facing: true, scout_facing: true,` after `harvester_threat: false,` (`normal_p`, `_g`, `_s`, `_pg`, `_ps`, `_gs`, `_pgs`, built by a `sed` over the shipped file in a scratch asset directory; no profile file is added to the repository). **Control: the symmetric map** (the diagnosis's 180° copy): the south-west half of `m1`'s terrain copied, half-turned, onto the north-east half (all but 2 of its 9,216 cells equal their half turn) and the NE anchor moved to (80, 24), the exact half turn of (12, 68); it is a scratch copy, not committed. On it the two sites are equal by construction, so a rule that is truly direction-free must give 50 % there. The extra tables were measured with the same tool.
+
+**Normal on `m1`** (the real map).
+
+| row | games | SW : NE wins | undecided | NE share of decided, % [95 %] | seat 0 share, % [95 %] | wins from the SW site (as seat 0 / seat 1), from the NE site (as seat 0 / seat 1) |
+|---|---|---|---|---|---|---|
+| normal (all off = shipped) | 1600 | 738 : 825 | 37 | **52.8** [50.3, 55.2] | 48.9 [46.4, 51.4] | 360 / 378, 404 / 421 |
+| + placement | 1600 | 321 : 1262 | 17 | **79.7** [77.7, 81.6] | 49.0 [46.5, 51.4] | 154 / 167, 621 / 641 |
+| + gather | 1600 | 737 : 835 | 28 | **53.1** [50.6, 55.6] | 46.8 [44.3, 49.2] | 340 / 397, 395 / 440 |
+| + scout | 1600 | 924 : 621 | 55 | **40.2** [37.8, 42.7] | 50.0 [47.5, 52.5] | 462 / 462, 310 / 311 |
+| + placement + gather | 1600 | 399 : 1188 | 13 | **74.9** [72.7, 76.9] | 51.5 [49.1, 54.0] | 211 / 188, 607 / 581 |
+| + placement + scout | 1600 | 587 : 974 | 39 | **62.4** [60.0, 64.8] | 50.6 [48.1, 53.1] | 298 / 289, 492 / 482 |
+| + gather + scout | 1600 | 943 : 605 | 52 | **39.1** [36.7, 41.5] | 47.0 [44.5, 49.5] | 446 / 497, 281 / 324 |
+| + all three | 1600 | 576 : 995 | 29 | **63.3** [60.9, 65.7] | 52.9 [50.4, 55.4] | 311 / 265, 520 / 475 |
+
+**Hard and easy on `m1`.**
+
+| row | games | SW : NE wins | undecided | NE share of decided, % [95 %] | seat 0 share, % [95 %] | wins from the SW site (as seat 0 / seat 1), from the NE site (as seat 0 / seat 1) |
+|---|---|---|---|---|---|---|
+| hard (shipped) | 1600 | 638 : 932 | 30 | **59.4** [56.9, 61.8] | 61.4 [59.0, 63.8] | 410 / 228, 554 / 378 |
+| + placement | 1600 | 12 : 1588 | 0 | **99.2** [98.7, 99.6] | 49.6 [47.2, 52.1] | 3 / 9, 791 / 797 |
+| + gather | 1600 | 620 : 937 | 43 | **60.2** [57.7, 62.6] | 60.7 [58.2, 63.1] | 395 / 225, 550 / 387 |
+| + scout | 1600 | 1060 : 530 | 10 | **33.3** [31.1, 35.7] | 52.0 [49.6, 54.5] | 545 / 515, 282 / 248 |
+| + all three | 1600 | 65 : 1533 | 2 | **95.9** [94.8, 96.8] | 49.2 [46.8, 51.7] | 27 / 38, 760 / 773 |
+
+| row | games | SW : NE wins | undecided | NE share of decided, % [95 %] | seat 0 share, % [95 %] | wins from the SW site (as seat 0 / seat 1), from the NE site (as seat 0 / seat 1) |
+|---|---|---|---|---|---|---|
+| easy (shipped) | 1600 | 341 : 565 | 694 | **62.4** [59.2, 65.5] | 59.4 [56.2, 62.5] | 222 / 119, 316 / 249 |
+| + all three | 1600 | 58 : 655 | 887 | **91.9** [89.6, 93.7] | 50.6 [47.0, 54.3] | 34 / 24, 327 / 328 |
+
+**Control: the symmetric map** (the two sites are equal by construction).
+
+| row | games | SW : NE wins | undecided | NE share of decided, % [95 %] | seat 0 share, % [95 %] | wins from the SW site (as seat 0 / seat 1), from the NE site (as seat 0 / seat 1) |
+|---|---|---|---|---|---|---|
+| normal (all off) | 1600 | 1048 : 465 | 87 | **30.7** [28.5, 33.1] | 47.7 [45.2, 50.2] | 503 / 545, 219 / 246 |
+| + placement | 1600 | 1169 : 399 | 32 | **25.4** [23.4, 27.7] | 52.0 [49.6, 54.5] | 600 / 569, 216 / 183 |
+| + gather | 1600 | 376 : 1140 | 84 | **75.2** [73.0, 77.3] | 48.2 [45.6, 50.7] | 174 / 202, 556 / 584 |
+| + scout | 1600 | 230 : 1305 | 65 | **85.0** [83.1, 86.7] | 50.2 [47.7, 52.7] | 116 / 114, 655 / 650 |
+| + all three | 1600 | 787 : 803 | 10 | **50.5** [48.0, 53.0] | 50.1 [47.6, 52.5] | 395 / 392, 401 / 402 |
+| hard (all off) | 1600 | 859 : 722 | 19 | **45.7** [43.2, 48.1] | 51.5 [49.0, 53.9] | 442 / 417, 372 / 350 |
+| hard + all three | 1600 | 396 : 1204 | 0 | **75.2** [73.1, 77.3] | 62.8 [60.4, 65.1] | 300 / 96, 704 / 500 |
+
+**What decides the rest: the exit side.** The one direction rule left in the data is `exit_side: PosX` of the refinery and the factories in `assets/config/unit_defs.ron` (east for both players; out of scope, it also holds for the human). To see what it does, the same symmetric-map games were run with a scratch copy of `unit_defs.ron` in which every `PosX` is `NegX` (west), nothing else changed:
+
+| row | games | SW : NE wins | undecided | NE share of decided, % [95 %] | seat 0 share, % [95 %] | wins from the SW site (as seat 0 / seat 1), from the NE site (as seat 0 / seat 1) |
+|---|---|---|---|---|---|---|
+| hard (all off), exit side west | 1600 | 1598 : 2 | 0 | **0.1** [0.0, 0.5] | 50.0 [47.6, 52.4] | 799 / 799, 1 / 1 |
+| hard + all three, exit side west | 1600 | 596 : 1003 | 1 | **62.7** [60.3, 65.1] | 52.5 [50.0, 54.9] | 318 / 278, 521 / 482 |
+| normal (all off), exit side west | 1600 | 721 : 729 | 150 | **50.3** [47.7, 52.8] | 47.3 [44.8, 49.9] | 340 / 381, 346 / 383 |
+| normal + all three, exit side west | 1600 | 935 : 641 | 24 | **40.7** [38.3, 43.1] | 54.8 [52.4, 57.3] | 505 / 430, 359 / 282 |
+
+**What the numbers say.**
+
+* **Each switch is exact on its own, but no switch is fair on its own.** On the symmetric map `gather` alone moves the NE share of normal from 30.7 % to 75.2 % and `scout` alone to 85.0 %; `placement` alone barely moves it (25.4 %). The three compass rules partly cancelled each other in the old code, so removing one exposes the others. **All three together give a fair normal on the symmetric map: SW 787 : NE 803, NE 50.5 % [48.0, 53.0], seat 0 50.1 %, and 10 undecided games against 87** (the old rules: NE 30.7 % [28.5, 33.1]). That is the demonstration that the switches do what they were built for.
+* **On the real `m1` they do not fix the bias.** Normal with all three: NE 63.3 % [60.9, 65.7] against 52.8 % for the shipped profile; `placement` alone 79.7 %, `scout` alone 40.2 % (SW 59.8 %). The shipped normal's 52.8 % is a near-cancellation of the compass rules on this particular terrain; `m1` itself is not symmetric (paths 14.7 / 17.7 against 16.3 / 16.5 cells), so a direction-free AI is not expected to give 50 % there.
+* **Hard and easy are far from fair with the switches on**, on `m1` (hard NE 95.9 %, `placement` alone 99.2 %, easy NE 91.9 % with 887 of 1,600 games undecided) and on the symmetric map (hard NE 75.2 % with seat 0 at 62.8 %). Hard builds two structures at once and keeps three harvesters per refinery, so the structures' exits matter more.
+* **The exit side is the largest direction rule left.** Turning every east exit to west on the symmetric map moves hard (all switches off) from NE 45.7 % to NE **0.1 %** (SW 1,598 : 2) and hard with all three from 75.2 % to 62.7 %, normal (all off) from NE 30.7 % to 50.3 % [47.7, 52.8] and normal with all three from 50.5 % to 40.7 %. A structure whose exit points toward the base's own side of the map and one whose exit points across the map are different games, whatever the AI's tie order is. **Seat order** is the other: in hard, seat 0 wins 61.4 % on `m1` with the switches off and 62.8 % on the symmetric map with all three on (the 8-cycle cancels it in the site totals, it is visible in the seat split).
+
+**What WP9.6b should do (a recommendation; nothing is changed here).**
+
+1. **No switch alone, ever.** Each one alone swings the site balance by 20 to 45 points either way on the symmetric map. If any is turned on, all three go on together.
+2. **Do not turn the three on for `m1` yet.** Together they make normal fair on a symmetric map and unfair (NE 63.3 %) on `m1`, and they make hard and easy much worse on both. The measurement points at `exit_side` (a rule of the unit definitions that also holds for the human player, so it needs Tijmen: for example an exit side relative to the enemy direction, chosen when the structure is placed) and the seat order in a tick (`command.rs`, a sim rule, also Tijmen) as the next two things. After those are decided, re-run this table.
+3. **Judge fairness on a symmetric map, not on `m1` alone.** A committed symmetric map (with its licence line in `assets/LICENSES.md`) is the control this WP only had as a scratch copy; 9.6b should add it, because on `m1` a direction-free AI cannot show 50 %.
+4. The level tuning (hard 99.3 % against normal) and 9.4b stay parked until then.
+
+**Not done / gaps (written down, not hidden).**
+
+* The mirror tests place only the **power plant** through the production search: the other kinds (radar, towers and the rest) cannot be placed in the half-turn world (they need prerequisites it does not have), and a refinery or factory has an exit side that is not half-turn symmetric on purpose. The ordering function `placement::sort_candidates` that every kind goes through is covered for any footprint by the unit test; the other arms of the score (refinery to ore, defence to the enemy site) are not run through `search` in a mirror.
+* `gather_facing` and `scout_facing` were tested with one blocked 3 x 3 patch (gather) and the four quarter cells (scout), not with every blocking pattern.
+* With more than two players `Facing::of` picks the nearest other start site, the lowest player id among equals; the quarter order and the ring order then use that one direction. Not tested beyond the duel.
+* The symmetric map and the exit-west copy of the definitions are scratch copies; they are described here, not stored (the numbers cannot be re-run from the repository alone).
+* Not measured: the switches in pairs on hard and easy, the 'away from the enemy' sign of the tie rule, other maps (there is no second map with a match file), other seeds.
+
 ## Not done
+
+* **WP9.6a gaps.** The three direction-free switches are built and off; the measurement does not support turning them on yet (see "Direction-free rules (WP9.6a)": fair on a symmetric map only all three together, not fair on `m1`, hard and easy worse, `exit_side` and the seat order still direction-dependent). The mirror tests cover the power plant through `placement::search`, not every kind.
 
 * **WP9.3b-0 gaps.** No launch-timing row ships ("Launch timing (WP9.3b-0)"); `assets/ai/normal.ron` is unchanged. Not traced: why every later launch loses from the SW site, why `stage_distance` 26 is `stage_distance` 0 from SW, why seat 1 wins 60 % of the games against the control's own copy. WP9.3b-1 (focus fire, target classes) is not built: the trace shows 0.1 % of the clash shots at unarmed targets (control mirror) and a first launcher whose wave arrives thinner and more strung out; the march leash (cohesion) is the candidate to re-measure.
 * **WP9.3c gaps.** The computer builds no defence ("Defence lock (WP9.3c)"); the seat difference of the shipped row (85 wins as seat 1, 61 as seat 0 on seeds 458,758 / 777 / 888; on the held-out seed 999 it does not show: 25 as seat 0, 23 as seat 1) and why the radar costs the NE site so much are not traced; a human player's view of an AI without towers is untested. Tower, weapon and unit numbers are Tijmen's decision and were not touched. WP9.3a-2 (retreat) is parked; if the AI needs defences again, the next build is an economy-first target rule (WP9.3d).
