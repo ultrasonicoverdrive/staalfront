@@ -1143,7 +1143,8 @@ an error, never a hang.
 
 **The command log is on in every match.** `SimConfig::saves` marks a thread that holds a match that can be saved;
 it keeps the full log as `record_commands` does (`SimConfig::keeps_log`). The runner sets it for the match scene
-without `--replay` (`runner::scene_sim_config`, also for a scene begun from the menu); the sandbox, the crowd and
+without `--replay` (`runner::scene_sim_config` in `Runner::with_sim`, so also for a scene begun from the menu;
+`a_runner_match_keeps_its_log_and_saves_a_sandbox_refuses` goes through a `Runner`); the sandbox, the crowd and
 a match fed by `--replay` keep their log as before and refuse a save. `--record` output is unchanged: the log was
 already complete with it, and `record_commands` still follows `--record` alone. Its size, measured on `m1_duel`
 (the computer against the computer, 36,000 ticks = 30 minutes of game time, release,
@@ -1162,16 +1163,33 @@ The checksum history of a restored thread begins at the save tick: `SimExit::che
 (`World::checksum_history_start`), read through `SimExit::checksum_after(tick)`. Every reader of
 `SimExit::checksums` in the repository is a test of a thread that ran from tick 0; the ones that index it by tick
 (`record_replay.rs`, `ai_in_game.rs`) assert `checksums_start == 0`. Lost until the first step after a load, by
-name (`LOST_UNTIL_THE_FIRST_STEP` in `crates/sf_game/tests/save_sim_thread.rs`): the snapshot's `checksum`
-(the last entry of the history, `None`), `stalled`, `deaths`, `sales`, repairs waiting for money, the handle's
-rejected builds and the effects events; everything else the first snapshot shows equals the last snapshot of the
-game that was saved, and after one step the reports are back.
+name (`LOST_UNTIL_THE_FIRST_STEP` in `crates/sf_game/tests/save_sim_thread.rs`, each one shown to have something
+at the save in a scripted `m1` game): the snapshot's `checksum` (the last entry of the history, `None`),
+`stalled`, `deaths`, repairs waiting for money (they read `Repairing`), the handle's rejected builds and the
+effects events; everything else the first snapshot shows equals the last snapshot of the game that was saved
+(the test's `kept` list; no name is in both), and after one step the reports are back. The snapshot's sales in
+progress are **kept**: `SimSnapshot::sales` reads the saved sale state (`sale_of`), not the world's report of
+the last tick that the WP13.1c-3a paragraph above says starts empty. The split is not checked against every
+field of `SimSnapshot` (its fields are private and a test cannot list them); a new report must be added to one
+of the two lists by hand.
+
+**For 13.1e-3, two things the main thread must know.** With the realtime clock a save can be ahead of
+`SimHandle::latest()`: the thread publishes a snapshot after a whole pass of ticks, and a save handled in the
+drain between two ticks of that pass sees a world the published snapshot does not show yet. So
+`SaveParts.tick` must not be paired with the snapshot the main thread holds (for the camera, the ghosts or a
+message); take what the host section needs from the parts or from a snapshot of that tick. And a restored
+thread starts `SimHandle::checkpoints()` (and the tick times, slow ticks, moved commands and counters) empty:
+they are diagnostics of this thread, not of the game.
 
 **Resuming a game record.** `skip_to` by tick is right for the headless runner, where every arrival of tick T is
 scheduled before the save point. In the game, commands keep arriving at tick T after a save is handled (between
 steps, the world still at T), so a game record (`--record`) is resumed from a save by the **count** of the save's
-log: `record::commands_after_save(recorded, log)` checks that the record begins with the log, one for one, and
-returns the rest (`the_record_of_a_loaded_game_replays_and_resumes_by_count`: a command that arrived at the save
+log: `record::commands_after_save(recorded, record_ticks, log)` checks that the record begins with the log, one
+for one, and returns the rest. A record leaves out the commands that arrived when its play had run its length or
+more (`record::render`: they change no checksum of it), so a record of a game that ended at the save tick lacks
+the commands of that tick that are in the save; only the part of the log that arrived before the record's end is
+looked for, and the answer is then empty
+(`a_record_that_ends_at_the_save_tick_resumes_with_nothing_left`) (`the_record_of_a_loaded_game_replays_and_resumes_by_count`: a command that arrived at the save
 tick after the save is in the rest; by tick it would be lost). The record of a game that was saved, loaded and
 played on replays in `sf_headless` to the game's checksum at every tick.
 
