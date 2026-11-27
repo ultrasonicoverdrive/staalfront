@@ -4048,3 +4048,10 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
 * **Pictures** in `docs/screenshots/wp11.6i/`. The PR waits for Tijmen's style check.
 * **Not done**: firing or other poses, the other infantry, GIF (no encoder in the workspace), shadow and
   team-colour shading (separate engine WP).
+* **Fix round 1** (before the first review): the further parts of a draw record moved to a side list
+  (record 48 bytes, main 64, inline for 8 parts would be 96); the walk state is reset when a slot gets a new
+  unit; the runner's frame time goes through `runner::unit_view` (pinned); joint-check near misses and
+  `MAX_PARTS` = 8 pinned; cadence 30° / 1.80 m (3.1 steps/s at 2.8 m/s, was 3.8); a release measurement
+  (`crates/sf_render/tests/walk_bench.rs`, ignored) of 200 moving units: 32.8 µs per frame build for v5
+  riflemen (1200 part instances) against 9.0 µs for v3 riflemen (200) and 15.1 µs for light tanks (600),
+  load average 6-9; in-game walk strips and labelled in-game shots, the far shot at zoom 0.94.

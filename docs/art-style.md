@@ -451,9 +451,9 @@ check; only the `rifleman` role points at them, every other figure stays set v3.
   turned (16 segments, smooth normals) and Veyran's are chamfered rings (faceted); boots, pouches,
   straps, backpack and rifle are boxes in both. LOD1 and LOD2 are plain boxes (LOD1 with a 4-sided
   helmet) and the same shapes for both factions; only colours and the helmet's place differ. Which
-  level the game draws: a figure of 1.8 m (diameter about 1.9 m) switches to LOD1 below 60 px and to
-  LOD2 below 30 px of projected size; at the default zoom (0.30, model scale about 1) it is near the
-  LOD1/LOD2 switch, so the round LOD0 shows only when zoomed in. Colours: Meridian olive jacket and helmet, sand
+  level the game draws (measured in M1, `docs/screenshots/wp11.6i/`): LOD0 at zoom 0.12, LOD1 at the
+  default zoom 0.30 (the 7 figures at LOD1, the tank and the centre at LOD0), LOD2 at zoom 0.94. So
+  the rounded Meridian shape shows only zoomed in; at the default zoom both factions are boxes. Colours: Meridian olive jacket and helmet, sand
   trousers and face, dark webbing; Veyran grey-blue uniform, gunmetal kit and helmet, metal face
   guard, the crimson accent as a small chest and helmet mark.
 - **Team colour**: the helmet's top patch and band, a pad on each shoulder, a chest panel. Top-down
