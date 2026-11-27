@@ -886,6 +886,9 @@ fn the_direction_free_switches_are_off_when_left_out_and_read_as_written() {
         include_str!("../../../../assets/ai/hard.ron"),
         include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron"),
         include_str!("../../../../assets/scenarios/ai_vs_passive_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_harvest_raid_defs/normal.ron"),
+        include_str!("../../../../assets/scenarios/ai_vs_passive_easy_defs/easy.ron"),
+        include_str!("../../../../assets/scenarios/ai_vs_passive_hard_defs/hard.ron"),
     ] {
         let p = AiProfile::from_ron(text).unwrap();
         assert!(!p.economy.placement_facing, "{}", p.name);

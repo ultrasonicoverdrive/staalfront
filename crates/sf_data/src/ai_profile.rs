@@ -293,8 +293,9 @@ pub struct ArmyRules {
     #[serde(default)]
     pub gather_facing: bool,
     /// WP9.6a, the scout's quarters relative to the enemy: after the start sites the four quarter centres are visited
-    /// nearest first to the last site leg (ties by their side of the line between the bases), instead of north-west,
-    /// north-east, south-west, south-east. Left out: false, off (the old order).
+    /// in the order of their rank toward the enemy (the quarter toward the enemy first, then the two beside it by their
+    /// side of the line between the bases, the AI's own last), instead of north-west, north-east, south-west,
+    /// south-east. Left out: false, off (the old order).
     #[serde(default)]
     pub scout_facing: bool,
 }
