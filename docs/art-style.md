@@ -432,3 +432,31 @@ budget (1500 / 500 / 150), the usual LOD, ground and checker rules.
   text): two models a row, each as blue 45 degrees, blue 80, red 45, red 80, in file-name order: cliff
   edge and fence; ore stage 1 and 2; ore stage 3 and 4; rock large and small; broadleaf and fallen
   broadleaf; wreck heavy and light vehicle; wreck medium vehicle and vessel.
+
+## 13. Figures (WP11.6i trial, Tijmen 27-11-2026)
+
+One rifleman per faction in style G (`tools/sf_model_gen/src/units_infantry.rs`,
+`assets/set_v5/{meridian,veyran}_rifleman.glb`) before the rest of the infantry, for Tijmen's style
+check; only the `rifleman` role points at them, every other figure stays set v3.
+
+- **Proportions**: about 7.5 heads, 1.82 m to the top of the helmet (set v3 rifleman 1.785 m, +2 %).
+  Hip 0.90 m, waist 0.96 m, shoulders 1.40 m, neck 1.45 m. Helmet and rifle about 20 % oversized
+  (helmet radius 156-162 mm, rifle 1.13 m), like the vehicle turrets, so they read at the far view.
+- **Detail as geometry**: helmet (Meridian round with goggles; Veyran angular with a visor slit),
+  belt, three pouches, Y-straps front and back, backpack with flap and rolled mat, boots with sole
+  and toe, knee pads (Veyran also a shin and chest plate), a rifle of stock, receiver, magazine,
+  handguard, barrel and sight. Carried in the right hand along +X (trail carry).
+- **Shape language**: Meridian limbs, torso and helmet are turned (16 segments in LOD0, smooth
+  normals); Veyran's are chamfered boxes (faceted). Colours: Meridian olive jacket and helmet, sand
+  trousers and face, dark webbing; Veyran grey-blue uniform, gunmetal kit and helmet, metal face
+  guard, the crimson accent as a small chest and helmet mark.
+- **Team colour**: the helmet's top patch and band, a pad on each shoulder, a chest panel. Top-down
+  share 24.0 / 24.5 / 23.8 % (Meridian) and 25.7 / 24.5 / 23.8 % (Veyran).
+- **Budget**: 1452 / 196 / 56 (Meridian), 1046 / 196 / 56 (Veyran) of 1500 / 250 / 60. LOD2 folds
+  the arms into the torso block; the arm nodes keep only their shoulder pad (the rifle in `arm_r`).
+- **Nodes at the joints**: the six figure nodes are the root's children like set v3, but each has
+  its origin at its joint (legs at the hip, arms at the shoulder, head at the neck, torso at the
+  waist; `units_infantry::JOINTS`), so the renderer can walk them (`crates/sf_render/src/walk.rs`,
+  `assets/config/figure_motion.ron`). The set v3 figures have every node at the model origin; the
+  loader's joint check (`glb::figure_joints`) leaves them as one body that does not walk.
+

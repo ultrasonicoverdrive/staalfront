@@ -212,6 +212,12 @@ impl PartAngles {
             walk: crate::walk::WalkPose::STAND,
         }
     }
+
+    /// The same angles with a figure's walk pose.
+    pub fn with_walk(mut self, walk: crate::walk::WalkPose) -> Self {
+        self.walk = walk;
+        self
+    }
 }
 
 /// The world matrices of the parts of a level: `unit` is the unit's model

@@ -71,7 +71,7 @@ fn the_figure_nodes_sit_at_their_joints_and_the_rifle_is_in_the_right_arm() {
             ("arm_r", [0, 1400, 220]),
         ]
     );
-    assert!(HIP_Y < WAIST_Y && WAIST_Y < SHOULDER_Y && SHOULDER_Y < NECK_Y);
+    const { assert!(HIP_Y < WAIST_Y && WAIST_Y < SHOULDER_Y && SHOULDER_Y < NECK_Y) };
     for (m, _) in figures() {
         let metal = sf_model_gen::palette::slot::METAL;
         for root in &m.lods {

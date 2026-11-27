@@ -273,8 +273,7 @@ fn the_trial_riflemen_load_as_figures_that_walk() {
             })
             .collect();
         let mut world = [Mat4::IDENTITY; MAX_PARTS];
-        let mut angles = PartAngles::default();
-        angles.walk = walk_pose(0.25, 1.0, &WalkConfig::embedded());
+        let angles = PartAngles::default().with_walk(walk_pose(0.25, 1.0, &WalkConfig::embedded()));
         pose_parts(Mat4::IDENTITY, &rig, angles, &mut world);
         // The left foot (0.9 m below the hip) is forward, the right one back, both on the ground.
         let foot_l = world[0].transform_point3(Vec3::new(0.0, -0.9, 0.0));
