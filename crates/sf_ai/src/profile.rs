@@ -153,6 +153,13 @@ impl Profile {
             h.write_u8(a.march_break_radius);
             h.write_u8(u8::from(a.stage_search));
         }
+        // The switches of WP9.6a, only when one is on (all off keeps the digest).
+        if e.placement_facing || a.facing_on() {
+            h.write_u8(0x98);
+            h.write_u8(u8::from(e.placement_facing));
+            h.write_u8(u8::from(a.gather_facing));
+            h.write_u8(u8::from(a.scout_facing));
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
@@ -375,6 +382,49 @@ mod tests {
         let mut h = base;
         h.army.harvester_threat = true;
         assert_ne!(h.digest(), d);
+    }
+
+    #[test]
+    fn the_direction_free_switches_of_wp9_6a_are_hashed_only_when_on_and_pinned_as_literals() {
+        // All off (the shipped profile): the digest is the one the shipped profile had before WP9.6a.
+        let off = resolved(Faction::Meridian);
+        assert!(!off.economy.placement_facing && !off.army.facing_on());
+        let d = off.digest();
+        let with = |p: bool, g: bool, s: bool| {
+            let mut x = off.clone();
+            x.economy.placement_facing = p;
+            x.army.gather_facing = g;
+            x.army.scout_facing = s;
+            x.digest()
+        };
+        assert_eq!(with(false, false, false), d);
+        // Every combination is its own digest, and none is the off one.
+        let all: Vec<u64> = (1..8)
+            .map(|m| with(m & 1 != 0, m & 2 != 0, m & 4 != 0))
+            .collect();
+        for (i, a) in all.iter().enumerate() {
+            assert_ne!(*a, d, "combination {}", i + 1);
+            for b in &all[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        // Literals: the tag (0x98) and the order placement, gather, scout are pinned.
+        assert_eq!(
+            with(true, false, false),
+            0x23b5_195d_1f96_7511,
+            "placement only"
+        );
+        assert_eq!(
+            with(false, true, false),
+            0x4a62_14b6_9da1_c793,
+            "gather only"
+        );
+        assert_eq!(
+            with(false, false, true),
+            0x3253_0246_7f2a_8a09,
+            "scout only"
+        );
+        assert_eq!(with(true, true, true), 0xc997_e618_552e_4b0f, "all three");
     }
 
     #[test]

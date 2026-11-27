@@ -38,6 +38,7 @@
 use sf_math::{Fx, Vec2};
 use sf_sim::{BuildingFunction, Cell, Command, EntityId, Kind, Order, gap};
 
+use crate::facing::{self, Facing};
 use crate::observe::{Lens, Observation, Own};
 use crate::placement;
 use crate::state::{AiState, Directive, GROUPS_MAX, Group, GroupStage, HpSeen, Posture};
@@ -1344,7 +1345,23 @@ fn find_gather(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Ce
     );
     let (dx, dy) = (w / 2 - mid.0, h / 2 - mid.1);
     let dist = i64::from(state.profile.army.gather_distance);
-    let first = if dx == 0 && dy == 0 {
+    // WP9.6a: with `gather_facing` the point is worked out so that it turns round with the map, and the cells of a
+    // ring are tried from the side that faces the enemy.
+    let facing = state
+        .profile
+        .army
+        .gather_facing
+        .then(|| Facing::of(state, obs.map))
+        .flatten();
+    let first = if facing.is_some()
+        && let Some(p) = facing::gather_point(
+            (i64::from(anchor.cell.x), i64::from(anchor.cell.y)),
+            (i64::from(fp.width), i64::from(fp.height)),
+            (w, h),
+            dist,
+        ) {
+        p
+    } else if dx == 0 && dy == 0 {
         mid
     } else if dx.abs() >= dy.abs() {
         (mid.0 + dx.signum() * dist, mid.1 + dy * dist / dx.abs())
@@ -1419,11 +1436,9 @@ fn find_gather(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Ce
         GATHER_RINGS_WIDE
     };
     for ring in 0..=rings {
-        for y in first.1 - ring..=first.1 + ring {
-            for x in first.0 - ring..=first.0 + ring {
-                if (x - first.0).abs().max((y - first.1).abs()) == ring && free(x, y) {
-                    return Some(Cell::new(x as u32, y as u32));
-                }
+        for (x, y) in facing::ring_cells(first, ring, facing.as_ref()) {
+            if free(x, y) {
+                return Some(Cell::new(x as u32, y as u32));
             }
         }
     }
@@ -1439,10 +1454,14 @@ pub fn waypoints(state: &AiState, obs: &Observation) -> Vec<Cell> {
         .filter(|(p, _)| *p != state.player)
         .map(|&(_, c)| c)
         .collect();
-    let (w, h) = obs.map;
-    for (qx, qy) in [(1, 1), (3, 1), (1, 3), (3, 3)] {
-        legs.push(Cell::new(w * qx / 4, h * qy / 4));
-    }
+    // WP9.6a: with `scout_facing` the quarters come toward the enemy first, not north-west first.
+    let facing = state
+        .profile
+        .army
+        .scout_facing
+        .then(|| Facing::of(state, obs.map))
+        .flatten();
+    legs.extend(facing::quarters(obs.map, facing.as_ref()));
     legs
 }
 

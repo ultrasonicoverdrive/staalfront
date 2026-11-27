@@ -24,6 +24,7 @@
 use sf_sim::{BuildingFunction, Cell, Footprint, Kind, Side, Tick, exit_cell, gap};
 
 use crate::base;
+use crate::facing::Facing;
 use crate::observe::{Lens, Observation};
 use crate::state::AiState;
 
@@ -154,6 +155,21 @@ fn nearest(from: (i64, i64), to: impl Iterator<Item = (i64, i64)>) -> Option<u64
         (dx * dx + dy * dy) as u64
     })
     .min()
+}
+
+/// The candidates `(score, y, x)` of a footprint of `(w, h)` cells in the order they are asked: lowest score first,
+/// equal scores by `(y, x)`, or, with a `facing` (`placement_facing`, WP9.6a), by [`Facing::rank`] of the middle of
+/// the footprint, which names no compass direction.
+pub fn sort_candidates(
+    candidates: &mut [(u64, i64, i64)],
+    (w, h): (i64, i64),
+    facing: Option<&Facing>,
+) {
+    match facing {
+        None => candidates.sort_unstable(),
+        Some(f) => candidates
+            .sort_unstable_by_key(|&(score, y, x)| (score, f.rank((2 * x + w, 2 * y + h)))),
+    }
 }
 
 /// A place for `kind`: the best visible candidate the simulation says yes to, or `None`. Refused previews
@@ -322,7 +338,11 @@ pub fn search(
             candidates.push((score, y, x));
         }
     }
-    candidates.sort_unstable();
+    let facing = e
+        .placement_facing
+        .then(|| Facing::of(state, obs.map))
+        .flatten();
+    sort_candidates(&mut candidates, (w, h), facing.as_ref());
 
     // The previews, best first.
     // The resumption: a search that used up its questions starts the next one after them, so a kind whose
