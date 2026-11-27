@@ -322,10 +322,7 @@ fn the_turret_and_barrel_transforms_chain() {
     // Turret yaw a quarter turn: the barrel swings from +X to +Z (the same
     // sense as the unit facing), the hull does not move.
     let quarter = std::f32::consts::FRAC_PI_2;
-    let yaw = PartAngles {
-        yaw: quarter,
-        pitch: 0.0,
-    };
+    let yaw = PartAngles::new(quarter, 0.0);
     pose_parts(Mat4::IDENTITY, parts, yaw, &mut world);
     assert!(
         close(at(&world), Vec3::new(0.0, 1.2, 1.1)),
@@ -334,10 +331,7 @@ fn the_turret_and_barrel_transforms_chain() {
     );
     assert_eq!(world[0], Mat4::IDENTITY);
     // Barrel pitch lifts the muzzle about the barrel pivot, turret stays.
-    let pitch = PartAngles {
-        yaw: 0.0,
-        pitch: quarter,
-    };
+    let pitch = PartAngles::new(0.0, quarter);
     pose_parts(Mat4::IDENTITY, parts, pitch, &mut world);
     assert!(
         close(at(&world), Vec3::new(0.3, 2.0, 0.0)),
@@ -431,10 +425,7 @@ fn a_childless_mesh_turret_or_barrel_is_a_part_with_its_joint() {
     pose_parts(
         Mat4::IDENTITY,
         rig,
-        PartAngles {
-            yaw: 0.0,
-            pitch: quarter,
-        },
+        PartAngles::new(0.0, quarter),
         &mut world,
     );
     assert!(close(
@@ -444,10 +435,7 @@ fn a_childless_mesh_turret_or_barrel_is_a_part_with_its_joint() {
     pose_parts(
         Mat4::IDENTITY,
         rig,
-        PartAngles {
-            yaw: quarter,
-            pitch: 0.0,
-        },
+        PartAngles::new(quarter, 0.0),
         &mut world,
     );
     assert!(close(
@@ -480,10 +468,7 @@ fn bounds_cover_the_finest_level_and_the_reach_any_pose() {
     let mut world = [Mat4::IDENTITY; MAX_PARTS];
     for i in 0..64 {
         let a = i as f32 * 0.3;
-        let angles = PartAngles {
-            yaw: a,
-            pitch: a * 0.7,
-        };
+        let angles = PartAngles::new(a, a * 0.7);
         pose_parts(Mat4::IDENTITY, parts, angles, &mut world);
         for (p, part) in model.levels[0].parts.iter().enumerate() {
             for v in &part.mesh.vertices {

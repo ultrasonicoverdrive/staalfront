@@ -65,6 +65,7 @@ use crate::pick::{
 };
 use crate::scene::{Instance, MeshKind};
 use crate::style::Style;
+use crate::walk::{WalkConfig, WalkState};
 
 /// Tile edge in metres; equals the terrain chunk size (32 terrain cells of
 /// 1 m, which is 8 gameplay cells of 4 m).
@@ -289,7 +290,12 @@ pub struct FrameView<'a> {
     /// The same for the structures (a motion [`Motion::with_structure`]); the units
     /// use [`FrameView::model_scale`].
     pub structure_scale: f32,
+    /// Seconds since the previous frame ([`FrameView::with_dt`]).
+    pub dt: f32,
 }
+
+/// The frame time a view has unless [`FrameView::with_dt`] says otherwise.
+pub const DEFAULT_FRAME_DT: f32 = 1.0 / 60.0;
 
 impl<'a> FrameView<'a> {
     /// Models only, all at their finest level: the view of WP1.6.
@@ -302,6 +308,7 @@ impl<'a> FrameView<'a> {
             ui_scale: 1.0,
             model_scale: 1.0,
             structure_scale: 1.0,
+            dt: DEFAULT_FRAME_DT,
         }
     }
 
@@ -321,6 +328,7 @@ impl<'a> FrameView<'a> {
             ui_scale,
             model_scale: 1.0,
             structure_scale: 1.0,
+            dt: DEFAULT_FRAME_DT,
         }
     }
 
@@ -337,6 +345,14 @@ impl<'a> FrameView<'a> {
     /// [`FrameView::with_model_scale`]); call it after that.
     pub fn with_structure_scale(mut self, scale: f32) -> Self {
         self.structure_scale = clean_scale(scale);
+        self
+    }
+
+    /// The same view `dt` seconds after the previous frame (default 1/60 s): the time a walking
+    /// figure takes to blend between standing and walking ([`crate::walk`]). Not the walk's
+    /// phase, which follows the distance travelled.
+    pub fn with_dt(mut self, dt: f32) -> Self {
+        self.dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
         self
     }
 
@@ -444,6 +460,11 @@ pub struct Instancer {
     icons: Vec<IconInstance>,
     /// Last level of each entity slot, for the hysteresis.
     lod_state: Vec<u8>,
+    /// The walk cycle of each entity slot (WP11.6i), parallel to `lod_state`; only figures that
+    /// walk ([`crate::model::ModelLods::walks`]) use theirs.
+    walk_state: Vec<WalkState>,
+    /// `assets/config/figure_motion.ron`.
+    walk_cfg: WalkConfig,
     /// Entities per mesh kind, counted when the tick is bucketed.
     total_per_mesh: [u32; MeshKind::ALL.len()],
     stats: InstanceStats,
@@ -517,10 +538,10 @@ pub fn aim_angles(x: f32, z: f32, steps: f32, aim: Option<[f32; 2]>) -> PartAngl
         return PartAngles::default();
     }
     let facing = steps * (TAU / 256.0);
-    PartAngles {
-        yaw: dz.atan2(dx) - facing,
-        pitch: (dx.hypot(dz) / 400.0).clamp(0.03, 0.35),
-    }
+    PartAngles::new(
+        dz.atan2(dx) - facing,
+        (dx.hypot(dz) / 400.0).clamp(0.03, 0.35),
+    )
 }
 
 impl Instancer {
@@ -553,6 +574,8 @@ impl Instancer {
             ground: (0.0, 0.0),
             icons: Vec::new(),
             lod_state: Vec::new(),
+            walk_state: Vec::new(),
+            walk_cfg: WalkConfig::embedded(),
             total_per_mesh: [0; MeshKind::ALL.len()],
             stats: InstanceStats::default(),
             frame: None,
@@ -561,6 +584,11 @@ impl Instancer {
             aim: None,
             slots_ascending: true,
         }
+    }
+
+    /// Use other walk settings (`figure_motion.ron`) from the next build on.
+    pub fn set_walk_config(&mut self, cfg: WalkConfig) {
+        self.walk_cfg = cfg;
     }
 
     /// The WP1.10 demo of the part hierarchy: every turret turns towards
@@ -573,13 +601,18 @@ impl Instancer {
     /// The turret yaw and barrel pitch a unit is drawn with at `alpha`: the simulated turret's if it has one,
     /// else the demo aim. The one place both the draw and [`Instancer::anchor_world`] get them from.
     fn joint_angles(&self, m: &Motion, at: [f32; 2], steps: f32, alpha: f32) -> PartAngles {
-        match m.turret_yaw(alpha) {
-            Some(yaw) => PartAngles {
-                yaw,
-                pitch: m.barrel_pitch,
-            },
+        let mut angles = match m.turret_yaw(alpha) {
+            Some(yaw) => PartAngles::new(yaw, m.barrel_pitch),
             None => aim_angles(at[0], at[1], steps, self.aim),
+        };
+        // A figure with its nodes at the joints walks (WP11.6i): the pose of its walk state, which
+        // `build_frame` advances once per frame before it draws.
+        if self.models.model(m.shape).walks()
+            && let Some(state) = self.walk_state.get(m.id.index() as usize)
+        {
+            angles.walk = state.pose(&self.walk_cfg);
         }
+        angles
     }
 
     /// The unit that was given slot `slot` (the index half of its [`UnitId`]) in the last
@@ -717,6 +750,7 @@ impl Instancer {
         self.lists = vec![Vec::new(); models.mesh_count()];
         self.icons.clear();
         self.lod_state.fill(NO_LEVEL);
+        self.walk_state.fill(WalkState::default());
         self.records.clear();
         self.visible_tiles.clear();
         self.frame = None;
@@ -818,6 +852,10 @@ impl Instancer {
         let wanted = (highest + 1).min(MAX_LOD_STATE);
         if self.lod_state.len() < wanted && !self.motions.is_empty() {
             self.lod_state.resize(wanted, NO_LEVEL);
+        }
+        if self.walk_state.len() < self.lod_state.len() {
+            self.walk_state
+                .resize(self.lod_state.len(), WalkState::default());
         }
         self.rebucket();
     }
@@ -979,6 +1017,12 @@ impl Instancer {
                         scaled(geom.scale, view.scale_for(m.structure)),
                     );
                     let parts = chain.parts(level);
+                    if chain.walks()
+                        && let Some(state) = self.walk_state.get_mut(m.id.index() as usize)
+                    {
+                        let k = geom.scale[0] * view.scale_for(m.structure);
+                        state.advance([x, z], k, view.dt, &self.walk_cfg);
+                    }
                     if parts.is_empty() {
                         let mesh = chain.level(level).mesh;
                         let list = &mut self.lists[mesh.index()];

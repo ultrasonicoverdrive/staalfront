@@ -38,6 +38,15 @@
 //! names. A part named `turret` turns about its local `+Y`, one named
 //! `barrel` tilts about its local `+Z` ([`Joint`]).
 //!
+//! # Figures that walk (WP11.6i)
+//! A level whose root carries the six figure nodes (`torso`, `head`, `arm_l`, `arm_r`, `leg_l`,
+//! `leg_r`) as childless mesh nodes **with their origins at the joints** keeps each of them as its
+//! own part with a [`Joint::Figure`], so the walk cycle ([`crate::walk`]) can turn a limb about its
+//! joint. The joint check ([`figure_joints`]): every one of the six has a translation, the legs'
+//! and arms' origins are above the ground and the arms' above the legs'. A figure whose nodes all
+//! sit at the model origin (the set v3 figures) fails it and is merged into one `body` as before:
+//! it does not walk.
+//!
 //! # Not supported (a clear [`GlbError`], never a panic)
 //! External or embedded-URI buffers (only the GLB `BIN` chunk), textures (the
 //! materials are colours only), skins, morph targets, animation clips,
@@ -52,7 +61,7 @@ use serde::Deserialize;
 
 use crate::mesh::{MeshData, Vertex};
 use crate::model::{
-    BUILTIN_MESHES, Joint, MAX_LODS, MAX_PARTS, MeshId, ModelBounds, ModelError, ModelLods,
+    BUILTIN_MESHES, Joint, Limb, MAX_LODS, MAX_PARTS, MeshId, ModelBounds, ModelError, ModelLods,
     ModelSet, PartAngles, RigAnchor, RigPart, pose_parts,
 };
 
@@ -425,7 +434,10 @@ pub fn load_glb(bytes: &[u8], axes: &AxisConvention) -> Result<LoadedModel, GlbE
 
     let mut levels = Vec::new();
     for (_, root) in &roots {
-        let mut level = Level::default();
+        let mut level = Level {
+            figure: figure_joints(root),
+            ..Level::default()
+        };
         level.enter(root, 0)?;
         let root_matrix = node_matrix(root);
         if root.mesh().is_some() {
@@ -473,6 +485,30 @@ fn missing(prim: &gltf::Primitive<'_>, semantic: gltf::Semantic, name: &str) -> 
     }
 }
 
+/// Whether a level root is a figure whose six nodes have their origins at the joints (see the
+/// module text): all six are childless mesh nodes directly under `root`, each with a non-zero
+/// translation, the legs' and arms' origins above the ground and the arms' above the legs'. The
+/// heights are read along the source's own `+Y` (every pack with figures has `up: PlusY`).
+pub fn figure_joints(root: &gltf::Node<'_>) -> bool {
+    let at = |name: &str| -> Option<[f32; 3]> {
+        root.children()
+            .find(|c| strip_lod_suffix(c.name().unwrap_or("")) == name)
+            .filter(|c| c.mesh().is_some() && c.children().next().is_none())
+            .map(|c| c.transform().decomposed().0)
+    };
+    let mut origins = [[0.0_f32; 3]; 6];
+    for (i, (name, _)) in Limb::NAMES.iter().enumerate() {
+        match at(name) {
+            Some(t) if t.iter().any(|c| c.abs() > 1e-4) => origins[i] = t,
+            _ => return false,
+        }
+    }
+    // NAMES order: torso, head, arm_l, arm_r, leg_l, leg_r.
+    let leg = origins[4][1].min(origins[5][1]);
+    let arm = origins[2][1].min(origins[3][1]);
+    leg > 0.0 && arm > leg
+}
+
 fn node_matrix(node: &gltf::Node<'_>) -> Mat4 {
     Mat4::from_cols_array_2d(&node.transform().matrix())
 }
@@ -486,6 +522,9 @@ struct Level {
     /// Nodes already met in this level: a node that is its own child, a
     /// cycle or a node used twice is refused instead of recursing forever.
     seen: std::collections::BTreeSet<usize>,
+    /// The level is a figure with its nodes at the joints ([`figure_joints`]): its six figure
+    /// nodes are parts with a [`Joint::Figure`].
+    figure: bool,
 }
 
 /// Deepest node hierarchy below a level root (the test pack needs 4).
@@ -594,6 +633,9 @@ impl Level {
         let joint = match name.as_str() {
             "turret" => Joint::Yaw,
             "barrel" => Joint::Pitch,
+            other if self.figure && parent.is_none() => {
+                Limb::of(other).map_or(Joint::Fixed, Joint::Figure)
+            }
             _ => Joint::Fixed,
         };
         self.parts.push(LoadedPart {
@@ -637,7 +679,8 @@ impl Level {
         // tilt on its own, and folding it into its parent would lose that.
         let is_part = node.mesh().is_none()
             || node.children().next().is_some()
-            || is_joint_name(strip_lod_suffix(node.name().unwrap_or("")));
+            || is_joint_name(strip_lod_suffix(node.name().unwrap_or("")))
+            || (self.figure && parent.is_none() && Limb::of(name).is_some());
         if is_part {
             let at = self.add_part(node, parent, to_parent)?;
             self.merge_node(node, at, Mat4::IDENTITY, blob)?;

@@ -29,6 +29,7 @@ pub mod shade;
 pub mod stages;
 pub mod units;
 pub mod units_artillery;
+pub mod units_infantry;
 pub mod units_transport;
 pub mod units_vessels;
 pub mod units_wheeled;

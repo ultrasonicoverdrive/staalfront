@@ -59,8 +59,9 @@ use crate::style::{LodSpec, Style};
 /// Most levels a chain can have (the stats keep a counter per level).
 pub const MAX_LODS: usize = 4;
 
-/// Most parts a level can have (hull, turret, barrel and one spare).
-pub const MAX_PARTS: usize = 4;
+/// Most parts a level can have: hull, turret, barrel and one spare, or the six nodes of a figure
+/// that walks (WP11.6i) and two spare.
+pub const MAX_PARTS: usize = 8;
 
 /// How a part moves relative to its parent, driven per instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,6 +74,49 @@ pub enum Joint {
     /// Tilts about its local `+Z` (a barrel). Positive angles lift the
     /// part's front (`+X`) towards `+Y`.
     Pitch,
+    /// A node of a figure that walks (WP11.6i, [`crate::walk`]): it turns about its local `+Z`
+    /// at its origin (the joint) by its limb's angle of [`PartAngles::walk`], and the whole
+    /// figure drops with the walk's bob.
+    Figure(Limb),
+}
+
+/// Which figure node a [`Joint::Figure`] part is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Limb {
+    Torso,
+    Head,
+    ArmL,
+    ArmR,
+    LegL,
+    LegR,
+}
+
+impl Limb {
+    /// The six figure nodes by their glTF names (`sf_asset_check`'s infantry nodes).
+    pub const NAMES: [(&'static str, Limb); 6] = [
+        ("torso", Limb::Torso),
+        ("head", Limb::Head),
+        ("arm_l", Limb::ArmL),
+        ("arm_r", Limb::ArmR),
+        ("leg_l", Limb::LegL),
+        ("leg_r", Limb::LegR),
+    ];
+
+    /// The limb of a node name, if it is one of the six.
+    pub fn of(name: &str) -> Option<Limb> {
+        Self::NAMES.iter().find(|n| n.0 == name).map(|n| n.1)
+    }
+
+    /// This limb's angle in `pose`, radians about its local `+Z`.
+    pub fn angle(self, pose: &crate::walk::WalkPose) -> f32 {
+        match self {
+            Limb::Torso | Limb::Head => -pose.lean,
+            Limb::ArmL => pose.arm_l,
+            Limb::ArmR => pose.arm_r,
+            Limb::LegL => pose.leg_l,
+            Limb::LegR => pose.leg_r,
+        }
+    }
 }
 
 /// One part of a level: its mesh, its parent (an earlier part, `None` = the
@@ -155,23 +199,57 @@ impl ModelBounds {
 pub struct PartAngles {
     pub yaw: f32,
     pub pitch: f32,
+    /// The walk pose of a figure's [`Joint::Figure`] parts (the stand pose by default).
+    pub walk: crate::walk::WalkPose,
+}
+
+impl PartAngles {
+    /// A turret yaw and a barrel pitch, the stand pose for any figure parts.
+    pub fn new(yaw: f32, pitch: f32) -> Self {
+        Self {
+            yaw,
+            pitch,
+            walk: crate::walk::WalkPose::STAND,
+        }
+    }
 }
 
 /// The world matrices of the parts of a level: `unit` is the unit's model
 /// matrix (position and facing), each part is `parent * rest * joint`.
 /// Writes `parts.len()` matrices into `out` (at most [`MAX_PARTS`]).
+///
+/// A figure's parts ([`Joint::Figure`]) turn at their joint by their limb's angle, and every part
+/// of the figure drops by the walk's bob ([`crate::walk::WalkPose::drop`], for the hip height of
+/// the `leg_l` part), so the forward foot stays on the ground. In the stand pose this is exactly
+/// `parent * rest`.
 pub fn pose_parts(unit: Mat4, parts: &[RigPart], angles: PartAngles, out: &mut [Mat4; MAX_PARTS]) {
+    let walking = angles.walk != crate::walk::WalkPose::STAND;
+    let bob = if walking {
+        parts
+            .iter()
+            .find(|p| p.joint == Joint::Figure(Limb::LegL))
+            .map_or(0.0, |p| angles.walk.drop(p.rest.w_axis.y))
+    } else {
+        0.0
+    };
     for (i, part) in parts.iter().enumerate().take(MAX_PARTS) {
         let joint = match part.joint {
             Joint::Fixed => Mat4::IDENTITY,
             // A positive yaw takes +X to +Z: a negative turn about +Y.
             Joint::Yaw => Mat4::from_rotation_y(-angles.yaw),
             Joint::Pitch => Mat4::from_rotation_z(angles.pitch),
+            Joint::Figure(_) if !walking => Mat4::IDENTITY,
+            Joint::Figure(limb) => Mat4::from_rotation_z(limb.angle(&angles.walk)),
         };
         let parent = part
             .parent
             .map_or(unit, |p| out[usize::from(p).min(i.saturating_sub(1))]);
-        out[i] = parent * part.rest * joint;
+        out[i] = match part.joint {
+            Joint::Figure(_) if walking && part.parent.is_none() => {
+                parent * Mat4::from_translation(Vec3::new(0.0, -bob, 0.0)) * part.rest * joint
+            }
+            _ => parent * part.rest * joint,
+        };
     }
 }
 
@@ -385,6 +463,14 @@ impl ModelLods {
             return &[];
         }
         &self.parts[usize::from(level).min(self.parts.len() - 1)]
+    }
+
+    /// Whether this is a figure that walks (WP11.6i): its finest level has [`Joint::Figure`]
+    /// parts, which the glb loader gives only to figure nodes at their joints.
+    pub fn walks(&self) -> bool {
+        self.parts
+            .first()
+            .is_some_and(|l| l.iter().any(|p| matches!(p.joint, Joint::Figure(_))))
     }
 
     /// The real extent of a model with parts; `None` = the placeholder shape

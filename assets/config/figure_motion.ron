@@ -1,0 +1,17 @@
+// The walk cycle of a figure (WP11.6i, crates/sf_render/src/walk.rs). Render only: nothing here
+// reaches the simulation. Applied only to figure models whose six nodes have their origins at the
+// joints (the glb loader checks it; the set v3 figures do not, and keep gliding).
+//
+// The phase of the cycle follows the distance a unit travels, one cycle per `stride_m` (two
+// steps), so the feet do not slide and a slower unit steps slower; `stride_m` belongs with
+// `leg_swing_deg`: 4 * hip * sin(swing) = 4 * 0.9 * sin(24°) = 1.46 m for the trial figure.
+// Wall time only blends between standing and walking (`blend_s`).
+(
+    leg_swing_deg: 24.0,       // each leg either way of upright, about the hip
+    arm_swing_deg: 20.0,       // the free arm, opposite to the leg on its side
+    rifle_arm_swing_deg: 5.0,  // the arm that carries the rifle swings little
+    lean_deg: 4.0,             // forward lean of torso and head at full walk
+    stride_m: 1.46,            // metres per cycle at true model size
+    blend_s: 0.25,             // seconds from standing to walking and back
+    max_step_m: 2.0,           // a longer jump per frame does not advance the phase
+)

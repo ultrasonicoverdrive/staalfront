@@ -189,7 +189,7 @@ fn a_turret_turned_64_steps_rotates_its_anchor_90_degrees_about_the_pivot() {
             Mat4::IDENTITY,
             chain.parts(0),
             chain.anchors(0),
-            PartAngles { yaw, pitch: 0.0 },
+            PartAngles::new(yaw, 0.0),
             "muzzle",
             n,
         )

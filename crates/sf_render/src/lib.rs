@@ -71,6 +71,7 @@ mod shader_watch;
 pub mod style;
 pub mod terrain;
 mod terrain_gpu;
+pub mod walk;
 pub mod zoom;
 pub use terrain_gpu::FogShading;
 pub mod terrain_look;
