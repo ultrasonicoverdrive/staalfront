@@ -4,14 +4,23 @@
 //
 // The phase of the cycle follows the distance a unit travels, one cycle per `stride_m` (two
 // steps), so the feet do not slide and a slower unit steps slower; `stride_m` belongs with
-// `leg_swing_deg`: 4 * hip * sin(swing) = 4 * 0.9 * sin(24°) = 1.46 m for the trial figure.
+// `leg_swing_deg`: 4 * hip * sin(swing) = 4 * 0.9 * sin(30°) = 1.80 m for the trial figure.
 // Wall time only blends between standing and walking (`blend_s`).
+//
+// Cadence (fix round 1): the rifleman moves 0.7 cells/s = 2.8 m/s, a jog. With 24° and 1.46 m it
+// took 3.8 steps/s and scurried; 30° and 1.80 m give 1.56 cycles/s = 3.1 steps/s, a jogging
+// cadence, at the cost of a deeper bob (0.9 * (1 - cos 30°) = 0.12 m). Drawn larger (far zoom) the
+// stride grows with the model, so the cadence drops with the drawn scale.
+//
+// `max_step_m`: a unit that moves more than this between two frames (2 m at true size) keeps its
+// phase. At 2.8 m/s that needs under 1.4 frames per second of game time, e.g. 4x fast-forward
+// below about 6 fps; the figure then stops stepping for those frames.
 (
-    leg_swing_deg: 24.0,       // each leg either way of upright, about the hip
-    arm_swing_deg: 20.0,       // the free arm, opposite to the leg on its side
+    leg_swing_deg: 30.0,       // each leg either way of upright, about the hip
+    arm_swing_deg: 24.0,       // the free arm, opposite to the leg on its side
     rifle_arm_swing_deg: 5.0,  // the arm that carries the rifle swings little
     lean_deg: 4.0,             // forward lean of torso and head at full walk
-    stride_m: 1.46,            // metres per cycle at true model size
+    stride_m: 1.80,            // metres per cycle at true model size
     blend_s: 0.25,             // seconds from standing to walking and back
     max_step_m: 2.0,           // a longer jump per frame does not advance the phase
 )

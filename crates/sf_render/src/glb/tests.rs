@@ -1067,3 +1067,96 @@ fn only_clean_scene_per_lod_files_are_accepted() {
         assert_eq!(model.levels.len(), 1, "{scenes}");
     }
 }
+
+/// A figure root with the six figure nodes at `at` (in `Limb::NAMES` order: torso, head, arm_l,
+/// arm_r, leg_l, leg_r), each a childless mesh node (WP11.6i).
+fn figure_scene(at: [[f32; 3]; 6]) -> Scene {
+    let quad = || {
+        writer::box_faces([0.0; 3], [0.1; 3], [0; 6])
+            .into_iter()
+            .next()
+            .unwrap()
+    };
+    let mut nodes = vec![writer::Node {
+        name: "man_LOD0".into(),
+        ..writer::Node::default()
+    }];
+    for (i, (name, _)) in Limb::NAMES.iter().enumerate() {
+        nodes.push(writer::Node {
+            name: (*name).into(),
+            translation: at[i],
+            prim: Some(quad()),
+            ..writer::Node::default()
+        });
+    }
+    nodes[0].children = (1..=6).collect();
+    Scene {
+        materials: vec![("steel".into(), writer::STEEL)],
+        nodes,
+        roots: vec![0],
+        version: "2.0".into(),
+        extra_json: String::new(),
+    }
+}
+
+fn walks(scene: &Scene) -> bool {
+    let m = load_glb(&writer::write(scene), &AxisConvention::ENGINE).unwrap();
+    m.levels[0]
+        .parts
+        .iter()
+        .any(|p| matches!(p.joint, Joint::Figure(_)))
+}
+
+/// The joint check (WP11.6i): only a figure whose nodes sit at plausible joints walks. Each
+/// near miss is one clause of [`figure_joints`].
+#[test]
+fn the_joint_check_takes_only_figures_with_their_nodes_at_the_joints() {
+    let good = [
+        [0.0, 0.96, 0.0],
+        [0.0, 1.45, 0.0],
+        [0.0, 1.4, -0.22],
+        [0.0, 1.4, 0.22],
+        [0.0, 0.9, -0.1],
+        [0.0, 0.9, 0.1],
+    ];
+    assert!(walks(&figure_scene(good)));
+    // Every node at the origin (the set v3 figures).
+    assert!(!walks(&figure_scene([[0.0; 3]; 6])));
+    // One node at the origin.
+    let mut one = good;
+    one[1] = [0.0; 3];
+    assert!(!walks(&figure_scene(one)));
+    // All moved sideways, hips on the ground (set v3 demolition team: all at z = -0.36).
+    assert!(!walks(&figure_scene([[0.0, 0.0, -0.36]; 6])));
+    // Arms at or below the hips.
+    let mut low = good;
+    low[2] = [0.0, 0.9, -0.22];
+    assert!(!walks(&figure_scene(low)));
+    let mut lower = good;
+    lower[3] = [0.0, 0.5, 0.22];
+    assert!(!walks(&figure_scene(lower)));
+}
+
+/// `MAX_PARTS` is 8 (WP11.6i, six figure nodes and two spare): eight parts load, nine are refused.
+#[test]
+fn a_level_takes_eight_parts_and_refuses_nine() {
+    assert_eq!(MAX_PARTS, 8);
+    let scene = |parts: usize| {
+        let mut s = mesh_turret_scene(true);
+        // Extra childless "turret" nodes under the hull, each a part of its own.
+        for i in 0..parts - 3 {
+            let mut n = s.nodes[3].clone();
+            n.name = "turret_LOD0".into();
+            n.children.clear();
+            n.translation = [i as f32, 1.0, 0.0];
+            s.nodes.push(n);
+            let at = s.nodes.len() - 1;
+            s.nodes[1].children.push(at);
+        }
+        s
+    };
+    let eight = load_glb(&writer::write(&scene(8)), &AxisConvention::ENGINE).unwrap();
+    assert_eq!(eight.levels[0].parts.len(), 8);
+    let nine = load_glb(&writer::write(&scene(9)), &AxisConvention::ENGINE).unwrap_err();
+    assert!(nine.to_string().contains("at most 8"), "{nine}");
+}

@@ -222,7 +222,8 @@ scene does not use them yet (Phase 12).
 
 Every vehicle and vessel role has a generated model (`tools/sf_model_gen/src/units*.rs`); the
 infantry is Tijmen's set v3 (WP11.6b put it back, it is far better than the set v4 figures), and
-only the Veyran heavy gun team, which had no good figure, is generated.
+only the Veyran heavy gun team, which had no good figure, is generated. Since WP11.6i the
+rifleman of both factions is generated too, as a trial (section 13); the other figures stay set v3.
 
 - **Both factions, one recipe, two outlines.** A role of both factions is one builder with a
   `Style` (`Round` or `Angular`): the same parts, the hull and turret outlines of the faction
@@ -446,8 +447,13 @@ check; only the `rifleman` role points at them, every other figure stays set v3.
   belt, three pouches, Y-straps front and back, backpack with flap and rolled mat, boots with sole
   and toe, knee pads (Veyran also a shin and chest plate), a rifle of stock, receiver, magazine,
   handguard, barrel and sight. Carried in the right hand along +X (trail carry).
-- **Shape language**: Meridian limbs, torso and helmet are turned (16 segments in LOD0, smooth
-  normals); Veyran's are chamfered boxes (faceted). Colours: Meridian olive jacket and helmet, sand
+- **Shape language**: only in LOD0. There Meridian's limbs, torso, belt, head and helmet are
+  turned (16 segments, smooth normals) and Veyran's are chamfered rings (faceted); boots, pouches,
+  straps, backpack and rifle are boxes in both. LOD1 and LOD2 are plain boxes (LOD1 with a 4-sided
+  helmet) and the same shapes for both factions; only colours and the helmet's place differ. Which
+  level the game draws: a figure of 1.8 m (diameter about 1.9 m) switches to LOD1 below 60 px and to
+  LOD2 below 30 px of projected size; at the default zoom (0.30, model scale about 1) it is near the
+  LOD1/LOD2 switch, so the round LOD0 shows only when zoomed in. Colours: Meridian olive jacket and helmet, sand
   trousers and face, dark webbing; Veyran grey-blue uniform, gunmetal kit and helmet, metal face
   guard, the crimson accent as a small chest and helmet mark.
 - **Team colour**: the helmet's top patch and band, a pad on each shoulder, a chest panel. Top-down

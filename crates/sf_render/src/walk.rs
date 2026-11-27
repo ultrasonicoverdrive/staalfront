@@ -172,20 +172,20 @@ mod tests {
     #[test]
     fn the_shipped_settings_are_pinned() {
         let c = cfg();
-        assert_eq!(c.leg_swing_deg, 24.0);
-        assert_eq!(c.arm_swing_deg, 20.0);
+        assert_eq!(c.leg_swing_deg, 30.0);
+        assert_eq!(c.arm_swing_deg, 24.0);
         assert_eq!(c.rifle_arm_swing_deg, 5.0);
         assert_eq!(c.lean_deg, 4.0);
-        assert_eq!(c.stride_m, 1.46);
+        assert_eq!(c.stride_m, 1.8);
         assert_eq!(c.blend_s, 0.25);
         assert_eq!(c.max_step_m, 2.0);
     }
 
     #[test]
     fn a_bad_setting_is_refused() {
-        let text = EMBEDDED_FIGURE_MOTION.replace("stride_m: 1.46", "stride_m: 0.0");
+        let text = EMBEDDED_FIGURE_MOTION.replace("stride_m: 1.80", "stride_m: 0.0");
         assert!(WalkConfig::from_ron(&text).is_err());
-        let text = EMBEDDED_FIGURE_MOTION.replace("leg_swing_deg: 24.0", "leg_swing_deg: 90.0");
+        let text = EMBEDDED_FIGURE_MOTION.replace("leg_swing_deg: 30.0", "leg_swing_deg: 90.0");
         assert!(WalkConfig::from_ron(&text).is_err());
     }
 
@@ -257,11 +257,11 @@ mod tests {
             );
         }
         let quarter = walk_pose(0.25, 1.0, &c);
-        assert!((quarter.leg_l - 24_f32.to_radians()).abs() < 1e-5);
-        assert!((quarter.arm_l + 20_f32.to_radians()).abs() < 1e-5);
+        assert!((quarter.leg_l - 30_f32.to_radians()).abs() < 1e-5);
+        assert!((quarter.arm_l + 24_f32.to_radians()).abs() < 1e-5);
         // Feet on the ground: a straight leg at angle a reaches down hip * cos(a).
         let hip = 0.9;
-        assert!((quarter.drop(hip) - hip * (1.0 - 24_f32.to_radians().cos())).abs() < 1e-6);
+        assert!((quarter.drop(hip) - hip * (1.0 - 30_f32.to_radians().cos())).abs() < 1e-6);
         assert_eq!(WalkPose::STAND.drop(hip), 0.0);
     }
 

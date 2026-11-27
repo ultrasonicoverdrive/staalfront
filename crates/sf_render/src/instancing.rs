@@ -404,8 +404,10 @@ struct Drawn {
     /// first part).
     model_mesh: u16,
     model_index: u32,
-    /// The instances of the further parts (`extra_parts` of them).
-    extra: [(u16, u32); MAX_PARTS - 1],
+    /// The instances of the further parts: `extra_parts` of them in
+    /// [`Instancer::extras`] from `extra_start` (WP11.6i: kept out of the record, so a figure's six
+    /// parts do not widen the record of every unit and structure).
+    extra_start: u32,
     extra_parts: u8,
     /// Index in the icon list.
     icon_index: u32,
@@ -462,7 +464,9 @@ pub struct Instancer {
     lod_state: Vec<u8>,
     /// The walk cycle of each entity slot (WP11.6i), parallel to `lod_state`; only figures that
     /// walk ([`crate::model::ModelLods::walks`]) use theirs.
-    walk_state: Vec<WalkState>,
+    /// With the unit it belongs to: a slot that gets a new unit (another generation) starts
+    /// from the stand pose.
+    walk_state: Vec<(UnitId, WalkState)>,
     /// `assets/config/figure_motion.ron`.
     walk_cfg: WalkConfig,
     /// Entities per mesh kind, counted when the tick is bucketed.
@@ -470,6 +474,8 @@ pub struct Instancer {
     stats: InstanceStats,
     frame: Option<FrameState>,
     records: Vec<Drawn>,
+    /// The further-part instances of the records, `(mesh, index)` ([`Drawn::extra_start`]).
+    extras: Vec<(u16, u32)>,
     visible_tiles: Vec<VisibleTile>,
     /// Where the turrets aim (`x`, `z`), the WP1.10 demo; `None` = straight ahead.
     aim: Option<[f32; 2]>,
@@ -580,13 +586,15 @@ impl Instancer {
             stats: InstanceStats::default(),
             frame: None,
             records: Vec::new(),
+            extras: Vec::new(),
             visible_tiles: Vec::new(),
             aim: None,
             slots_ascending: true,
         }
     }
 
-    /// Use other walk settings (`figure_motion.ron`) from the next build on.
+    /// Use other walk settings from the next build on (tests). The game uses the compiled-in
+    /// `figure_motion.ron` ([`WalkConfig::embedded`]), like `terrain.ron`: a change needs a rebuild.
     pub fn set_walk_config(&mut self, cfg: WalkConfig) {
         self.walk_cfg = cfg;
     }
@@ -608,7 +616,8 @@ impl Instancer {
         // A figure with its nodes at the joints walks (WP11.6i): the pose of its walk state, which
         // `build_frame` advances once per frame before it draws.
         if self.models.model(m.shape).walks()
-            && let Some(state) = self.walk_state.get(m.id.index() as usize)
+            && let Some((owner, state)) = self.walk_state.get(m.id.index() as usize)
+            && *owner == m.id
         {
             angles.walk = state.pose(&self.walk_cfg);
         }
@@ -750,8 +759,9 @@ impl Instancer {
         self.lists = vec![Vec::new(); models.mesh_count()];
         self.icons.clear();
         self.lod_state.fill(NO_LEVEL);
-        self.walk_state.fill(WalkState::default());
+        self.walk_state.fill((UnitId::NONE, WalkState::default()));
         self.records.clear();
+        self.extras.clear();
         self.visible_tiles.clear();
         self.frame = None;
         self.models = models;
@@ -855,7 +865,7 @@ impl Instancer {
         }
         if self.walk_state.len() < self.lod_state.len() {
             self.walk_state
-                .resize(self.lod_state.len(), WalkState::default());
+                .resize(self.lod_state.len(), (UnitId::NONE, WalkState::default()));
         }
         self.rebucket();
     }
@@ -936,6 +946,7 @@ impl Instancer {
         }
         self.icons.clear();
         self.records.clear();
+        self.extras.clear();
         self.visible_tiles.clear();
         let blend = view.blend;
         let (models_on, icons_on) = (blend.models_drawn(), blend.icons_drawn());
@@ -981,7 +992,7 @@ impl Instancer {
                     structure: m.structure,
                     model_mesh: 0,
                     model_index: NO_INSTANCE,
-                    extra: [(0, NO_INSTANCE); MAX_PARTS - 1],
+                    extra_start: self.extras.len() as u32,
                     extra_parts: 0,
                     icon_index: NO_INSTANCE,
                 };
@@ -1018,8 +1029,13 @@ impl Instancer {
                     );
                     let parts = chain.parts(level);
                     if chain.walks()
-                        && let Some(state) = self.walk_state.get_mut(m.id.index() as usize)
+                        && let Some((owner, state)) = self.walk_state.get_mut(m.id.index() as usize)
                     {
+                        if *owner != m.id {
+                            // A new unit in this slot (the old one died): its own walk.
+                            *owner = m.id;
+                            *state = WalkState::default();
+                        }
                         let k = geom.scale[0] * view.scale_for(m.structure);
                         state.advance([x, z], k, view.dt, &self.walk_cfg);
                     }
@@ -1052,7 +1068,7 @@ impl Instancer {
                             if i == 0 {
                                 (drawn.model_mesh, drawn.model_index) = at;
                             } else {
-                                drawn.extra[usize::from(drawn.extra_parts)] = at;
+                                self.extras.push(at);
                                 drawn.extra_parts += 1;
                             }
                             stats.part_instances += 1;
@@ -1392,8 +1408,14 @@ impl Instancer {
         if rec.id != pick.id {
             return;
         }
-        let parts = std::iter::once((rec.model_mesh, rec.model_index))
-            .chain(rec.extra[..usize::from(rec.extra_parts)].iter().copied());
+        let parts = std::iter::once((rec.model_mesh, rec.model_index)).chain(
+            self.extras
+                .get(rec.extra_start as usize..)
+                .unwrap_or(&[])
+                .iter()
+                .take(usize::from(rec.extra_parts))
+                .copied(),
+        );
         for (mesh, index) in parts {
             if index == NO_INSTANCE {
                 continue;
@@ -1461,6 +1483,33 @@ mod tests {
     use crate::camera::{Camera, CameraConfig, DVec2};
     use crate::ground::{Ground, TerrainGround};
     use sf_math::Fx;
+
+    /// WP11.6i fix round: the further parts of a record live in `extras`, so the six parts of a
+    /// walking figure do not widen the record of every unit and structure. On main (four parts)
+    /// a record held three inline pairs; inline pairs for eight parts would hold seven. The two
+    /// mirrors below have the old fields, to measure what each layout costs.
+    #[test]
+    fn a_record_stays_small_with_eight_parts() {
+        #[allow(dead_code)]
+        struct Inline<const N: usize> {
+            id: UnitId,
+            pos: [f32; 3],
+            steps: f32,
+            shape: u8,
+            structure: bool,
+            model_mesh: u16,
+            model_index: u32,
+            extra: [(u16, u32); N],
+            extra_parts: u8,
+            icon_index: u32,
+        }
+        assert_eq!(MAX_PARTS, 8);
+        let size = std::mem::size_of::<Drawn>();
+        let main = std::mem::size_of::<Inline<3>>();
+        let wide = std::mem::size_of::<Inline<7>>();
+        println!("Drawn: {size} bytes (main {main}, inline for 8 parts {wide})");
+        assert!(size <= main, "{size} > {main}");
+    }
 
     /// A position given in metres, as the cells the sim would hold.
     fn v2(x: i32, y: i32) -> Vec2 {

@@ -83,12 +83,12 @@ fn the_legs_swing_with_the_distance_and_settle_when_the_unit_stops() {
     // Standing: the leg hangs straight.
     walk(&mut inst, 40.0, 40.0, 4);
     assert!(foot_ahead(&inst, &set, 40.0).abs() < 1e-3);
-    // A quarter of a stride (1.46 m per cycle): the left leg is at its most forward.
+    // A quarter of a stride (1.80 m per cycle): the left leg is at its most forward.
     let stride = sf_render::walk::WalkConfig::embedded().stride_m;
     walk(&mut inst, 40.0, 40.0 + stride * 0.25, 30);
     let ahead = foot_ahead(&inst, &set, 40.0 + stride * 0.25);
-    // 0.9 m * sin(24°) = 0.366 m, times the blend weight (fully in after 15 frames of 1/60 s).
-    assert!((ahead - 0.366).abs() < 0.01, "{ahead}");
+    // 0.9 m * sin(30°) = 0.45 m, times the blend weight (fully in after 15 frames of 1/60 s).
+    assert!((ahead - 0.45).abs() < 0.01, "{ahead}");
     // The same quarter stride in 4 frames or in 60: the same phase (distance, not time).
     let mut slow = Instancer::new(Style::embedded(), (128.0, 128.0));
     slow.set_models(set.clone());
@@ -160,4 +160,63 @@ fn a_figure_without_joint_origins_and_a_turret_are_drawn_as_before() {
             );
         }
     }
+}
+
+/// The near misses of the joint check among the shipped figures do not walk: the set v3
+/// demolition team (all six nodes at `[0, 0, -0.36]`), the set v5 heavy gun team (nodes at the
+/// origin, plus a gun) and the set v4 figures.
+#[test]
+fn the_shipped_near_misses_do_not_walk() {
+    for file in [
+        "set_v3/veyran_demolition_team.glb",
+        "set_v3/veyran_rifleman.glb",
+        "set_v5/veyran_heavy_gun_team.glb",
+        "set_v4/meridian_rifleman.glb",
+        "set_v4/veyran_rifleman.glb",
+        "set_v4/meridian_scout.glb",
+    ] {
+        let set = glb::model_set(&[load(file)], &[60.0, 30.0]).unwrap();
+        assert!(!set.model(0).walks(), "{file}");
+    }
+    let set = glb::model_set(&[load("set_v5/veyran_rifleman.glb")], &[60.0, 30.0]).unwrap();
+    assert!(set.model(0).walks());
+}
+
+/// A slot whose unit died and was given to a new unit (another generation) starts standing: the
+/// old unit's walk does not carry over.
+#[test]
+fn a_new_unit_in_a_slot_starts_from_the_stand_pose() {
+    let set = set();
+    let mut inst = Instancer::new(Style::embedded(), (128.0, 128.0));
+    inst.set_models(set.clone());
+    let f = frustum();
+    let stride = sf_render::walk::WalkConfig::embedded().stride_m;
+    let old = UnitId::from_parts(1, 0);
+    let x = 40.0 + stride * 0.25;
+    inst.update_tick([Motion::from_fixed(
+        0,
+        0,
+        cells(40.0),
+        cells(x),
+        Facing::new(0),
+        Facing::new(0),
+    )
+    .with_id(old)]);
+    for k in 0..=30 {
+        inst.build_frame(&FrameView::models_only(&f, k as f32 / 30.0), |_, _| 0.0);
+    }
+    assert!(foot_ahead(&inst, &set, x) > 0.3);
+    // Same slot, next generation, standing where the old one stopped: one frame, no swing.
+    let new = UnitId::from_parts(1, 1);
+    inst.update_tick([Motion::from_fixed(
+        0,
+        0,
+        cells(x),
+        cells(x),
+        Facing::new(0),
+        Facing::new(0),
+    )
+    .with_id(new)]);
+    inst.build_frame(&FrameView::models_only(&f, 1.0), |_, _| 0.0);
+    assert!(foot_ahead(&inst, &set, x).abs() < 1e-3);
 }
