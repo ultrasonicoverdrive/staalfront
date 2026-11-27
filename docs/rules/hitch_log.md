@@ -62,7 +62,7 @@ one for the acquire outcome and, on Windows, one `GetThreadTimes` call. Measured
 
 ## The command record
 
-The sim thread keeps, with `--record`, every command it was handed (`SimConfig::record_commands`): who sent it, the tick it runs at,
+The sim thread keeps, in every match (`SimConfig::saves`, since WP13.1e-2, for a save) and with `--record` (`SimConfig::record_commands`), every command it was handed: who sent it, the tick it runs at,
 and the number of ticks the world had run when it got it (`arrived`). `record::write` turns them into a scenario for `sf_headless`:
 
 ```

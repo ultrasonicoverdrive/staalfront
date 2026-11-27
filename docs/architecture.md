@@ -930,9 +930,11 @@ is scheduled for the next tick instead, counted (`late_commands`, F1), printed
 to stderr and always logged with the tick that was asked for and the tick it ran
 at (`SimHandle::moved_commands`, the last 1,000; an entry only for a moved
 command, so it is cheap and bounded, and the game keeps it). The run is then no
-longer "the commands as stamped". The full log (`SimConfig::record_commands`:
-every command, `LoggedCommand`) grows with the session, so it is off in the game
-and on in the tests.
+longer "the commands as stamped". The full log (every command, `LoggedCommand`)
+grows with the session; since WP13.1e-2 it is on in every match (`SimConfig::saves`:
+a save needs it, about 332 commands per hour in an AI match, `docs/rules/save.md`),
+with `--record` (`SimConfig::record_commands`) and in the tests, and off in the
+sandbox, the crowd and a `--replay`.
 
 **Open decision for phase 14 (lockstep), owner Tijmen, parked with phase 14 on
 22-10-2026: pending commands are in the world checksum.** The checksum hashes the commands that wait for their tick

@@ -4217,6 +4217,31 @@ mod tests {
         .expect("the runner starts")
     }
 
+    /// WP13.1e-2, through a `Runner`: the match it starts (with `--match`, and from the start menu over a
+    /// sandbox) keeps the full log and answers a save; the sandbox refuses.
+    #[test]
+    fn a_runner_match_keeps_its_log_and_saves_a_sandbox_refuses() {
+        use crate::sim_thread::SimSaveError;
+        let mut sandbox = runner("--sandbox");
+        assert_eq!(sandbox.sim.save(WAIT), Err(SimSaveError::NotAMatch));
+        let check = |r: &Runner| {
+            run_ticks(r, 3);
+            let at = r.sim.send(PlayerId(0), Command::Stop { ids: Vec::new() });
+            let parts = r.sim.save(WAIT).expect("a match saves");
+            assert!(
+                parts
+                    .log
+                    .iter()
+                    .any(|c| c.player == PlayerId(0) && c.effective == at),
+                "the command is in the log without --record"
+            );
+        };
+        check(&runner("--match"));
+        sandbox.begin(Some(Scene::Match), None);
+        assert_eq!(sandbox.options.scene, Scene::Match);
+        check(&sandbox);
+    }
+
     /// Steps the runner's sim `ticks` ticks and returns the checksum of the world after them.
     fn run_ticks(runner: &Runner, ticks: u64) -> (u64, Tick) {
         let target = Tick(runner.sim.latest().tick().0 + ticks);

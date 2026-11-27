@@ -305,7 +305,7 @@ impl LoggedCommand {
 /// What the sim thread hands over for a save (WP13.1e-2, [`SimHandle::save`]): the world and the AIs saved at
 /// the save point, and the command log since tick 0. The main thread adds the identity and builds the file with
 /// `sf_headless::savefile::write_bytes`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct SaveParts {
     /// The ticks the world had run at the save.
     pub tick: Tick,
@@ -323,6 +323,29 @@ pub struct SaveParts {
     /// pause the save puts between two ticks.
     pub took: Duration,
 }
+
+/// Two parts are equal when they are the same save: `took` (wall time) is left out.
+impl PartialEq for SaveParts {
+    fn eq(&self, other: &SaveParts) -> bool {
+        let SaveParts {
+            tick,
+            checksum,
+            rules_digest,
+            world,
+            ais,
+            log,
+            took: _,
+        } = self;
+        *tick == other.tick
+            && *checksum == other.checksum
+            && *rules_digest == other.rules_digest
+            && *world == other.world
+            && *ais == other.ais
+            && *log == other.log
+    }
+}
+
+impl Eq for SaveParts {}
 
 /// Why a save gave no [`SaveParts`].
 #[derive(Clone, Debug, PartialEq, Eq)]

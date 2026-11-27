@@ -180,13 +180,7 @@ fn an_ai_match_saved_and_loaded_plays_on_tick_for_tick() {
             wrong.first()
         );
         assert_eq!(saved_log(&exit), saved_log(&straight), "the full log");
-        assert_eq!(
-            after,
-            SaveParts {
-                took: after.took,
-                ..last_save.clone()
-            }
-        );
+        assert_eq!(after, last_save, "the same save at the end");
     }
 }
 
@@ -301,7 +295,7 @@ fn a_save_is_answered_held_and_on_the_clock() {
     let a = sim.save(WAIT).unwrap();
     let b = sim.save(WAIT).unwrap();
     assert_eq!(a.tick, Tick(40), "held: no tick ran");
-    assert_eq!(a, SaveParts { took: a.took, ..b });
+    assert_eq!(a, b);
 
     // The clock, held before its start (`start_paused`) and held by the pause menu.
     let (world, ais, _) = game(&file);
@@ -471,7 +465,7 @@ fn the_record_of_a_loaded_game_replays_and_resumes_by_count() {
     );
 
     // Resuming the record from the save: by count.
-    let rest = record::commands_after_save(&scenario.recorded, &parts.log).unwrap();
+    let rest = record::commands_after_save(&scenario.recorded, scenario.ticks, &parts.log).unwrap();
     assert_eq!(rest.len(), scenario.recorded.len() - parts.log.len());
     let by_tick = scenario.recorded.iter().filter(|c| c.arrived > at).count();
     assert_eq!(
@@ -495,7 +489,7 @@ fn the_record_of_a_loaded_game_replays_and_resumes_by_count() {
     // A record that does not begin with the save's log is refused.
     let mut other = scenario.recorded.clone();
     other.remove(0);
-    assert!(record::commands_after_save(&other, &parts.log).is_err());
+    assert!(record::commands_after_save(&other, scenario.ticks, &parts.log).is_err());
 }
 
 // --- What a new thread starts with --------------------------------------------------------------------------
@@ -589,11 +583,10 @@ fn base_ore(snap: &SimSnapshot) -> [Cell; 2] {
 /// What the first snapshot (and the handle) of a loaded game does not have until its first step: the reports of
 /// the last tick, which are not in a save (`docs/rules/save.md`, the "Host side, lost for one tick" paragraphs).
 /// Everything else the snapshot shows is the loaded game's.
-const LOST_UNTIL_THE_FIRST_STEP: [&str; 7] = [
+const LOST_UNTIL_THE_FIRST_STEP: [&str; 6] = [
     "checksum",
     "stalled",
     "deaths",
-    "sales",
     "repairs waiting for money",
     "rejected builds",
     "effects events",
@@ -619,6 +612,8 @@ fn kept(snap: &SimSnapshot) -> Vec<(&'static str, String)> {
         ("wrecks", format!("{:?}", snap.wrecks())),
         ("match result", format!("{:?}", snap.match_result())),
         ("stores", format!("{:?}", snap.stores())),
+        // The sales in progress are saved state (`sale_of`), not a report of the last tick: kept.
+        ("sales", format!("{:?}", snap.sales())),
     ]
 }
 
@@ -645,10 +640,6 @@ fn reports(sim: &SimHandle) -> Vec<(&'static str, Option<String>)> {
             some(snap.deaths().is_empty(), format!("{:?}", snap.deaths())),
         ),
         (
-            "sales",
-            some(snap.sales().is_empty(), format!("{:?}", snap.sales())),
-        ),
-        (
             "repairs waiting for money",
             some(waiting.is_empty(), format!("{waiting:?}")),
         ),
@@ -663,19 +654,102 @@ fn reports(sim: &SimHandle) -> Vec<(&'static str, Option<String>)> {
     ]
 }
 
+/// `m1` with player 1 (no credits) made busy so that every report of [`LOST_UNTIL_THE_FIRST_STEP`] has something
+/// at the save: a power plant placed without money (stalled), a rifleman queued at its barracks, its riflemen shooting its power plant and
+/// the plant on repair (waiting for money), its tank shooting its harvester (effects, then a death), its tower
+/// on sale `sell_at` (a sale in progress), a build on a cell outside the map (a rejected build). Returns the
+/// thread at `to`, and the tick the harvester died at (`None` before it).
+fn busy(sell_at: Option<u64>, to: u64) -> (SimHandle, Option<u64>) {
+    let p1 = PlayerId(1);
+    let id = |i: u32| sf_sim::EntityId::new(i, 0);
+    let (power_plant, barracks, tower, harvester, tank) = (id(1), id(3), id(4), id(5), id(10));
+    let sim = spawn(&match_file("m1"));
+    let rifleman = sim.latest().views()[6].kind;
+    sim.send_at(
+        Tick(2),
+        p1,
+        Command::QueueUnit {
+            factory: barracks,
+            kind: rifleman,
+        },
+    );
+    let attack = |ids: Vec<sf_sim::EntityId>, target| Command::Order {
+        ids,
+        order: sf_sim::Order::Attack(target),
+        queued: false,
+    };
+    sim.send_at(Tick(2), p1, attack((6..10).map(id).collect(), power_plant));
+    sim.send_at(Tick(2), p1, attack(vec![tank], harvester));
+    let off_map = Command::BuildStructure {
+        kind: sim.latest().views()[1].kind,
+        cell: Cell::new(5_000, 5_000),
+    };
+    sim.send_at(Tick(2), p1, off_map);
+    // A power plant on the first free one of a few cells near the base: built without money, it stalls.
+    for (x, y) in [(78, 24), (72, 20), (82, 20), (68, 18), (76, 9)] {
+        let plant = sim.latest().views()[1].kind;
+        sim.send_at(
+            Tick(2),
+            p1,
+            Command::BuildStructure {
+                kind: plant,
+                cell: Cell::new(x, y),
+            },
+        );
+    }
+    let mut died = None;
+    for t in 3..=to {
+        // Asked again now and then: refused until the plant is hit, and while it is already on repair.
+        if t % 100 == 0 {
+            sim.send_at(
+                Tick(t),
+                p1,
+                Command::Repair {
+                    structure: power_plant,
+                    on: true,
+                },
+            );
+        }
+        if Some(t) == sell_at {
+            sim.send_at(Tick(t), p1, Command::Sell { structure: tower });
+        }
+        step_to(&sim, t);
+        if died.is_none()
+            && sim
+                .latest()
+                .deaths()
+                .iter()
+                .any(|d| format!("{d:?}").contains("index: 5,"))
+        {
+            died = Some(t);
+        }
+    }
+    (sim, died)
+}
+
 /// The first snapshot of a loaded game against the last one of the game that was saved: everything is the
-/// same except the named list of reports of the last tick, which are empty until the first step and are back
-/// after it.
+/// same except the named list of reports of the last tick, each of which had something at the save and is empty
+/// until the first step; after it they are back. The split is exhaustive: every name of the snapshot's report
+/// accessors is in exactly one of the two lists (`kept` and [`LOST_UNTIL_THE_FIRST_STEP`]).
 #[test]
 fn the_reports_of_the_last_tick_are_the_named_list_lost_on_a_load() {
-    let file = match_file("m1_ai");
-    let script = human_script();
-    let at = 1_400;
-    let sim = spawn(&file);
-    play_script(&sim, &script, at);
+    let file = match_file("m1");
+    // First the tick the harvester dies at, then the same game with the sale a few ticks before it.
+    let (probe, died) = busy(None, 2_000);
+    drop(probe);
+    let at = died.expect("the tank kills the harvester");
+    let (sim, again) = busy(Some(at - 3), at);
+    assert_eq!(again, Some(at), "the sale does not move the death");
     let parts = sim.save(WAIT).unwrap();
     let before = sim.latest();
     let before_reports = reports(&sim);
+    assert!(!before.sales().is_empty(), "a sale in progress at the save");
+    for (name, report) in &before_reports {
+        assert!(
+            report.is_some(),
+            "{name} has something at the save (tick {at})"
+        );
+    }
     let back = restored(&file, &parts);
     let first = back.latest();
     assert_eq!(kept(&first), kept(&before), "what a load keeps");
@@ -684,20 +758,22 @@ fn the_reports_of_the_last_tick_are_the_named_list_lost_on_a_load() {
     for (name, report) in reports(&back) {
         assert_eq!(report, None, "{name} is empty after a load");
     }
-    let had: Vec<_> = before_reports
-        .iter()
-        .filter(|r| r.1.is_some())
-        .map(|r| r.0)
-        .collect();
-    println!("reports at the save that the load lost: {had:?}");
-    assert!(had.contains(&"checksum"));
-    // One step later the two games report alike again.
+    // Exhaustive: the two lists together are the snapshot's state, each name once.
+    let mut all: Vec<&str> = kept(&first).iter().map(|k| k.0).collect();
+    all.extend(LOST_UNTIL_THE_FIRST_STEP);
+    let mut sorted = all.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), all.len(), "a name in both lists");
+    // One step later the two games agree again (the sale, the repair and the stall are back; the death and the
+    // effects were of the tick before).
     step_to(&sim, at + 1);
     step_to(&back, at + 1);
     assert_eq!(kept(&back.latest()), kept(&sim.latest()));
     assert_eq!(back.latest().checksum(), sim.latest().checksum());
     assert_eq!(back.latest().stalled(), sim.latest().stalled());
     assert_eq!(back.latest().sales(), sim.latest().sales());
+    assert!(!back.latest().stalled().is_empty() && !back.latest().sales().is_empty());
 }
 
 // --- What a save costs --------------------------------------------------------------------------------------
@@ -759,4 +835,34 @@ fn save_cost_and_log_size() {
         with_log - without,
         per_hour(with_log - without)
     );
+}
+
+/// A game that ends at the save tick (the game is quit right after a save): its record leaves out the commands
+/// that arrived at that tick (`record::render`, they change no checksum of the record), the save holds the ones
+/// that arrived before the save. Resuming that record from the save is accepted, with nothing left to feed.
+#[test]
+fn a_record_that_ends_at_the_save_tick_resumes_with_nothing_left() {
+    let file = match_file("m1_ai");
+    let at = 300;
+    let mut sim = spawn(&file);
+    step_to(&sim, at);
+    sim.send_at(Tick(at + 2), PlayerId(0), Command::Stop { ids: Vec::new() });
+    let parts = sim.save(WAIT).unwrap();
+    let exit = sim.stop().clone();
+    assert_eq!(exit.ticks, at);
+    assert!(
+        parts.log.iter().any(|c| c.arrived == Tick(at)),
+        "a command of the save tick"
+    );
+    let (_, _, cells) = fresh(&file);
+    let (text, n) = record::render(&exit, cells, &assets(), &file).unwrap();
+    assert_eq!(n + 1, parts.log.len(), "the record leaves that command out");
+    let scratch = std::env::temp_dir().join(format!("sf_game_save_end_{}", std::process::id()));
+    std::fs::create_dir_all(&scratch).unwrap();
+    let path = scratch.join("ended.ron");
+    std::fs::write(&path, text).unwrap();
+    let scenario = Scenario::load(&path).unwrap();
+    std::fs::remove_dir_all(&scratch).ok();
+    let rest = record::commands_after_save(&scenario.recorded, scenario.ticks, &parts.log).unwrap();
+    assert!(rest.is_empty());
 }
