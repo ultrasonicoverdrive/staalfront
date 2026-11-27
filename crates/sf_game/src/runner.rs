@@ -2285,7 +2285,7 @@ impl Runner {
     /// Build this frame's models and icons (level of detail per unit, the
     /// icon band and the far-zoom scales by zoom), pick the unit under the cursor in what was built
     /// and highlight it. A click on it selects it ([`Runner::handle_selection`]).
-    fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>) {
+    fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>, dt: f32) {
         let view_proj = self.camera.view_proj();
         let (width, height) = self.viewport;
         let frustum = Frustum::from_view_proj(view_proj);
@@ -2317,7 +2317,9 @@ impl Runner {
         self.stats = self.instancer.build_frame(
             &FrameView::new(&frustum, alpha, eye, blend, scale)
                 .with_model_scale(model_scale)
-                .with_structure_scale(structure_scale),
+                .with_structure_scale(structure_scale)
+                // The walk of the figures blends in and out over wall time (WP11.6i).
+                .with_dt(dt),
             |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
         );
         self.build_ms.push(started.elapsed());
@@ -3041,7 +3043,7 @@ impl App for Runner {
                     .map(|(x, y)| (x as f32, y as f32))
             });
             let cursor = cursor.filter(|_| !menu_open);
-            self.build_units(alpha, cursor);
+            self.build_units(alpha, cursor, dt as f32);
             self.build_effects(alpha, dt as f32);
             self.mark_selection();
             self.draw_cargo();
