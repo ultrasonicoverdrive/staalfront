@@ -4028,3 +4028,23 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   29 of 29 checks passed (24-11-2026, fix round 0; again in fix round 1, 25-11-2026).
 * **Pins.** None moved: the `golden.rs` and `assets/scenarios/*.expected` checks pass in the workspace test run of fix round 1
   (25-11-2026, local and CI) and the release `--expect` run of the CI scenarios is in the PR.
+
+## WP11.6i: trial figure in style G that walks (27-11-2026)
+
+* **What.** One rifleman per faction generated in style G (`tools/sf_model_gen/src/units_infantry.rs`,
+  `assets/set_v5/{meridian,veyran}_rifleman.glb`), wired for the `rifleman` role only
+  (`unit_defs.ron`, `models.ron`); every other figure stays set v3. Triangles 1452/196/56 (Meridian) and
+  1046/196/56 (Veyran), team share 24.0/24.5/23.8 % and 25.7/24.5/23.8 %, 1.82 m high (set v3 1.785 m).
+* **Walk** (render only): the six figure nodes have their origins at the joints; the glb loader keeps
+  them as parts with `Joint::Figure` when its joint check passes (`glb::figure_joints`), `MAX_PARTS` 4 -> 8.
+  `crates/sf_render/src/walk.rs`: phase from the distance between interpolated positions (one cycle per
+  `stride_m`, scaled with the drawn model scale), weight blends over wall time (`FrameView::with_dt`, the
+  runner passes its frame time), legs opposite, arms against their leg, a lean and the bob that keeps the
+  forward foot on the ground. Settings in `assets/config/figure_motion.ron`. The set v3 figures fail the
+  joint check (every node at the origin) and are drawn exactly as before.
+* **Tests**: `tools/sf_model_gen/tests/infantry.rs`, `crates/sf_render/src/walk.rs` (unit tests),
+  `crates/sf_render/tests/walk_cycle.rs`, `figure_shots.rs`, the set v5 load test; pins in
+  `generator.rs` (`PINNED_UNITS` 16).
+* **Pictures** in `docs/screenshots/wp11.6i/`. The PR waits for Tijmen's style check.
+* **Not done**: firing or other poses, the other infantry, GIF (no encoder in the workspace), shadow and
+  team-colour shading (separate engine WP).
