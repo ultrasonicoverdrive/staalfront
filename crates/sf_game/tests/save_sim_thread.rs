@@ -501,7 +501,10 @@ fn the_record_of_a_loaded_game_replays_and_resumes_by_count() {
 // --- What a new thread starts with --------------------------------------------------------------------------
 
 /// The ore and fog of `snap`, as the renderer reads them.
-fn ore_and_fog(snap: &SimSnapshot) -> (Option<u64>, Vec<(u32, u32, u16)>, Option<u64>, Vec<u64>) {
+/// `(ore version, ore cells, fog version, fog words)`.
+type OreAndFog = (Option<u64>, Vec<(u32, u32, u16)>, Option<u64>, Vec<u64>);
+
+fn ore_and_fog(snap: &SimSnapshot) -> OreAndFog {
     let (visible, explored) = snap.fog_words();
     let mut fog = visible.to_vec();
     fog.extend_from_slice(explored);
