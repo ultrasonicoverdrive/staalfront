@@ -180,7 +180,8 @@ fn the_folder_holds_the_models_and_the_pack_lists_them() {
     // of WP11.6a, 24 mission objects and states, 6 heaps.
     // WP11.6d: 14 decor and wreck files (4 wrecks, 2 rocks, fence, cliff edge, 4 ore field
     // stages, 2 broadleaf trees).
-    assert_eq!(on_disk.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6 + 14);
+    // WP11.6i: the two trial riflemen.
+    assert_eq!(on_disk.len(), 6 + 14 + 22 * 5 - 3 + 24 + 6 + 14 + 2);
     let config = std::fs::read_to_string(assets().join(glb::MODELS_CONFIG)).unwrap();
     let file: PackFile = ron::from_str(&config).unwrap();
     let spec = file
@@ -231,6 +232,58 @@ fn every_model_loads_with_three_levels_parts_and_anchors() {
                 );
             }
         }
+    }
+}
+
+/// WP11.6i: the trial riflemen load as figures that walk (six parts with a figure joint each, in
+/// every level) and the walk moves their legs in the engine's pose; every other model of the set
+/// does not walk.
+#[test]
+fn the_trial_riflemen_load_as_figures_that_walk() {
+    use sf_render::model::{MAX_PARTS, PartAngles, RigPart, pose_parts};
+    use sf_render::walk::{WalkConfig, walk_pose};
+    for file in &files() {
+        let m = load(file);
+        let walks = m.levels[0]
+            .parts
+            .iter()
+            .any(|p| matches!(p.joint, Joint::Figure(_)));
+        assert_eq!(walks, file.ends_with("_rifleman.glb"), "{file}");
+        if !walks {
+            continue;
+        }
+        for level in &m.levels {
+            assert_eq!(level.parts.len(), 6, "{file}");
+            assert!(
+                level
+                    .parts
+                    .iter()
+                    .all(|p| matches!(p.joint, Joint::Figure(_))),
+                "{file}"
+            );
+        }
+        let rig: Vec<RigPart> = m.levels[0]
+            .parts
+            .iter()
+            .map(|p| RigPart {
+                mesh: sf_render::MeshId(0),
+                parent: None,
+                rest: p.rest,
+                joint: p.joint,
+            })
+            .collect();
+        let mut world = [Mat4::IDENTITY; MAX_PARTS];
+        let mut angles = PartAngles::default();
+        angles.walk = walk_pose(0.25, 1.0, &WalkConfig::embedded());
+        pose_parts(Mat4::IDENTITY, &rig, angles, &mut world);
+        // The left foot (0.9 m below the hip) is forward, the right one back, both on the ground.
+        let foot_l = world[0].transform_point3(Vec3::new(0.0, -0.9, 0.0));
+        let foot_r = world[1].transform_point3(Vec3::new(0.0, -0.9, 0.0));
+        assert!(
+            foot_l.x > 0.3 && foot_r.x < -0.3,
+            "{file}: {foot_l} {foot_r}"
+        );
+        assert!(foot_l.y.abs() < 1e-4 && foot_r.y.abs() < 1e-4, "{file}");
     }
 }
 

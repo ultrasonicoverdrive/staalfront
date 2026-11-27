@@ -721,11 +721,11 @@ fn a_role_can_have_a_model_per_faction() {
     let rifleman = get("rifleman");
     assert_eq!(
         rifleman.model_for(Some(Faction::Meridian)),
-        &glb("set_v3/meridian_rifleman.glb")
+        &glb("set_v5/meridian_rifleman.glb")
     );
     assert_eq!(
         rifleman.model_for(Some(Faction::Veyran)),
-        &glb("set_v3/veyran_rifleman.glb")
+        &glb("set_v5/veyran_rifleman.glb")
     );
     // No entry for Neutral, and an owner that is no known side: the generic model.
     assert_eq!(rifleman.model_for(Some(Faction::Neutral)), &rifleman.model);
@@ -774,8 +774,11 @@ fn every_role_is_wired_to_its_art_set() {
         ("veyran", "siege_artillery"),
         ("meridian", "repair_truck"),
         ("veyran", "repair_truck"),
+        // WP11.6i: the trial figure in style G (Tijmen 27-11-2026), the other infantry stays v3.
+        ("meridian", "rifleman"),
+        ("veyran", "rifleman"),
     ];
-    let infantry = ["rifleman", "rocket_trooper", "engineer", "scout"];
+    let infantry = ["rocket_trooper", "engineer", "scout"];
     // A role of both factions: a model each, the generic model stays behind.
     for id in [
         "construction_center",
@@ -903,7 +906,8 @@ fn every_role_is_wired_to_its_art_set() {
     // amphibious transport, gunboat, supply truck, ferry, heavy gun team); WP11.6c: the other 15
     // structure looks of both factions, the ore silo (2), the decoy, the bunker and nine mission
     // objects (11); WP11.6d: the ore field (1).
-    assert_eq!(counted[0], 8 + 6, "the set v3 infantry files");
+    // WP11.6i: the two riflemen moved to set v5 (in `v5_pairs`), so 6 + 6 set v3 files.
+    assert_eq!(counted[0], 6 + 6, "the set v3 infantry files");
     assert_eq!(
         counted[2],
         v5_pairs.len() + 7 + 15 + 2 + 11 + 1,
@@ -927,8 +931,8 @@ fn models_per_faction_are_checked_like_the_generic_model() {
 
     // A file that is not there.
     let e = replace_units(
-        "set_v3/veyran_rifleman.glb",
-        "set_v3/veyran_rifleman_v9.glb",
+        "set_v5/veyran_rifleman.glb",
+        "set_v5/veyran_rifleman_v9.glb",
     )
     .unwrap_err();
     assert!(
@@ -937,7 +941,7 @@ fn models_per_faction_are_checked_like_the_generic_model() {
     );
     assert!(e.line.is_some(), "{e}");
     // A path that leaves assets/.
-    let e = replace_units("set_v3/veyran_rifleman.glb", "../veyran_rifleman.glb").unwrap_err();
+    let e = replace_units("set_v5/veyran_rifleman.glb", "../veyran_rifleman.glb").unwrap_err();
     assert!(e.message.contains("not a plain relative path"), "{e}");
     // A faction that does not exist is a parse error with a line.
     let e = replace_units(

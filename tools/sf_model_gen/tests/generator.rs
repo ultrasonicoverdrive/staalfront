@@ -501,7 +501,8 @@ const PINNED: [(&str, usize, u64); 143] = [
 
 /// The units of WP11.6b (vehicles, vessels, the heavy gun team), pinned the same way; see
 // the first table for how to re-pin. Sorted by file name.
-const PINNED_UNITS: [(&str, usize, u64); 14] = [
+// WP11.6i: the two trial riflemen are in this table too.
+const PINNED_UNITS: [(&str, usize, u64); 16] = [
     (
         "meridian_amphibious_transport.glb",
         237668,
@@ -510,6 +511,7 @@ const PINNED_UNITS: [(&str, usize, u64); 14] = [
     ("meridian_heavy_tank.glb", 312276, 0x6571e3f651b02903),
     ("meridian_light_transport.glb", 217992, 0xe9090bdeca18f309),
     ("meridian_repair_truck.glb", 242876, 0x323b82afb27c6e92),
+    ("meridian_rifleman.glb", 226756, 0x9c13ca0dc33198c0),
     ("meridian_siege_artillery.glb", 308352, 0x456dd572a60a7d98),
     ("neutral_ferry.glb", 208584, 0xae63c9581a0b4ec6),
     ("neutral_supply_truck.glb", 287828, 0x9b6b7bb2c6c0de8e),
@@ -518,6 +520,7 @@ const PINNED_UNITS: [(&str, usize, u64); 14] = [
     ("veyran_heavy_gun_team.glb", 141028, 0xc2ab15873ad394ac),
     ("veyran_heavy_tank.glb", 325028, 0x14b055063773f3ce),
     ("veyran_repair_truck.glb", 240152, 0x1d7f23322dc1e450),
+    ("veyran_rifleman.glb", 181748, 0x4b454362820be176),
     ("veyran_siege_artillery.glb", 307420, 0x5c33861f4163d63d),
     ("veyran_transport_truck.glb", 224872, 0xb84a74fd741234e9),
 ];

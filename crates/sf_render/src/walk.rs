@@ -209,7 +209,7 @@ mod tests {
         // Standing still for a long time does not move the phase.
         let before = slow.phase;
         for _ in 0..100 {
-            slow.advance([c.stride_m * 0.5, 0.0], 1.0, 0.1, &c);
+            slow.advance([c.stride_m * 0.0125 * 40.0, 0.0], 1.0, 0.1, &c);
         }
         assert_eq!(slow.phase, before);
         // A model drawn twice as large takes twice the ground per cycle.

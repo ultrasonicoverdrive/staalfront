@@ -1485,10 +1485,11 @@ mod tests {
         }
 
         let dir = std::env::temp_dir().join(format!("sf_roster_faction_{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("set_v3")).unwrap();
+        // WP11.6i: the riflemen are set v5 files.
+        std::fs::create_dir_all(dir.join("set_v5")).unwrap();
         std::fs::copy(
-            assets().join("set_v3/veyran_rifleman.glb"),
-            dir.join("set_v3/veyran_rifleman.glb"),
+            assets().join("set_v5/veyran_rifleman.glb"),
+            dir.join("set_v5/veyran_rifleman.glb"),
         )
         .unwrap();
         let roster = Roster::build(&defs, &base(), &icons(), &dir, &models_ron(), true);
