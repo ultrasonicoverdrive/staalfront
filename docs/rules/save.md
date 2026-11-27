@@ -1125,6 +1125,14 @@ diagnostic and not stored.
 | a fresh world for a recorded game | `Scenario::build_fresh_world` (since WP13.1e-1: the game's world before its starting objects and its first tick) |
 | the reports of the last tick, the game's view caches (ore, fog, ghosts), selection, camera, announcer | not in the file: 13.1e-2/3 (the lists in the WP13.1c paragraphs "Host side" above) |
 
+**For 13.1e-2 (the game's sim thread).** `skip_to` by tick is right for the headless runner, where every
+arrival of tick T is scheduled before the save point. In the game, commands keep arriving at tick T after a
+`Msg::Save` is handled (between steps, the world still at T), so a game record (`--record`) must never be
+resumed from a save with `skip_to` by tick: it needs the number of logged commands the save holds (the count
+of section `L`). And `sf_game` has its own `LoggedCommand` (`sim_thread.rs`, with the sender's `requested`
+tick besides `arrived`, `effective`, player, command): 13.1e-2 converts it to `savefile::LoggedCommand`
+(dropping `requested`) when it builds the save, and back with `requested = effective` on a load.
+
 **Tests** (`tools/sf_headless/tests/save_game.rs`):
 
 * Every CI scenario (one test each, the list checked against `ci.yml` by

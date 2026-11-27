@@ -211,9 +211,11 @@ pub fn resume(
 
 /// Replays a command log (section `L` of a save file) on the start world of `scenario` (`Scenario::build_world`,
 /// which schedules what the scenario itself schedules) up to `tick`: each command is scheduled when the world has
-/// run its `arrived` ticks, as it was handed to the world the first time. The world is at the save point of `tick`
-/// (the commands that arrived at `tick` scheduled, none of that tick's AI commands), so its checksum is the one a
-/// save at `tick` stores. No AI runs: its commands are in the log.
+/// run its `arrived` ticks, as it was handed to the world the first time. It stops at `tick` with every command of
+/// the log that arrived by `tick` scheduled (and none that arrived later). For the log of a save at `tick` that is
+/// the save point (the arrivals of `tick`, none of that tick's AI commands, which the log does not hold yet), so the
+/// checksum is the one the save stores; a longer log also puts the commands sent at `tick` after the save in. No AI
+/// runs: its commands are in the log.
 pub fn replay_log(
     scenario: &Scenario,
     log: &[LoggedCommand],

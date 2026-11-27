@@ -231,7 +231,7 @@ fn every_ci_scenario_has_its_save_file_test() {
     assert_eq!(names, COVERED, "the CI scenarios and the save file tests");
 }
 
-/// `ai_raid` (two AIs that raid each other) saved and loaded at every save point of its first 200 ticks, then
+/// `ai_raid` (one AI raiding a passive opponent) saved and loaded at every save point of its first 200 ticks, then
 /// every 97, to its pin: every build.
 #[test]
 fn the_first_ticks_of_ai_raid_load_after_every_tick() {
@@ -332,7 +332,50 @@ fn ai_raid_resumed_from_a_save_file_ends_on_its_pin() {
     assert!(resumed.log == plain.log, "the log after resuming");
 }
 
-/// The command log of a save replays from the scenario's start world to the checksum the save holds.
+/// The replayed world's checksum after every tick it ran equals the live run's after the same tick (pending
+/// commands are in the checksum, so a command scheduled at another `arrived` shows up in some tick before it runs).
+fn assert_same_history(name: &str, replayed: &World, live: &World) {
+    let start = replayed.checksum_history_start().0;
+    let mut n = 0;
+    for (k, &c) in replayed.checksum_history().iter().enumerate() {
+        let tick = Tick(start + k as u64);
+        assert_eq!(
+            Some(c),
+            live.checksum_after(tick),
+            "{name}: the replay's checksum after tick {}",
+            tick.0
+        );
+        n += 1;
+    }
+    assert!(n > 100, "{name}: {n} ticks compared");
+}
+
+/// The log of a run with AIs and no record is exactly the AIs' commands, each with `arrived == effective ==` the
+/// tick the AI thought at.
+#[test]
+fn the_log_of_an_ai_run_is_its_ai_commands_at_their_tick() {
+    let scenario = load_scenario("ai_raid");
+    let options = RunOptions {
+        ticks: scenario.ticks,
+        every: 1000,
+    };
+    let f = run_full(&scenario, &options).unwrap();
+    assert!(f.ai_commands.len() > 10, "{} commands", f.ai_commands.len());
+    let want: Vec<LoggedCommand> = f
+        .ai_commands
+        .iter()
+        .map(|(t, p, c)| LoggedCommand {
+            arrived: Tick(*t),
+            effective: Tick(*t),
+            player: PlayerId(*p),
+            command: c.clone(),
+        })
+        .collect();
+    assert!(f.log == want, "the log is the AI commands at their tick");
+}
+
+/// The command log of a save replays from the scenario's start world to the checksum the save holds, with the
+/// checksum of every tick before it the live run's.
 #[test]
 fn the_log_of_an_ai_scenario_replays_to_the_saved_checksum() {
     for (name, at) in [("ai_raid", 970), ("ai_vs_passive", 1455)] {
@@ -342,6 +385,15 @@ fn the_log_of_an_ai_scenario_replays_to_the_saved_checksum() {
         let replayed = replay_log(&scenario, &loaded.log, loaded.header.tick).unwrap();
         assert_eq!(replayed.tick(), Tick(at));
         assert_eq!(replayed.checksum(), loaded.header.checksum, "{name}");
+        let live = run_full(
+            &scenario,
+            &RunOptions {
+                ticks: at,
+                every: 1000,
+            },
+        )
+        .unwrap();
+        assert_same_history(name, &replayed, &live.world);
         // Without the log the replay is another world.
         let bare = replay_log(&scenario, &[], loaded.header.tick).unwrap();
         assert_ne!(bare.checksum(), loaded.header.checksum, "{name}");
@@ -461,6 +513,7 @@ fn a_recorded_game_round_trips_through_its_saves() {
     );
     let replayed = replay_log(&scenario, &loaded.log, Tick(970)).unwrap();
     assert_eq!(replayed.checksum(), loaded.header.checksum);
+    assert_same_history("recorded", &replayed, &plain.world);
     let options = RunOptions::for_scenario(&scenario);
     let resumed = resume(&scenario, &options, loaded, |_| {}, |_, _| {}).unwrap();
     assert_eq!(resumed.outcome.final_checksum, end);
