@@ -1123,15 +1123,75 @@ diagnostic and not stored.
 | the arrivals cursor of a recorded game | `Arrivals::skip_to(T)` passes over every recorded command that arrived by T: they are in the world already (without it they run twice; `run::resume` does it) |
 | the AIs' think phase | none to keep: `due` is a function of tick, player, interval and stagger |
 | a fresh world for a recorded game | `Scenario::build_fresh_world` (since WP13.1e-1: the game's world before its starting objects and its first tick) |
-| the reports of the last tick, the game's view caches (ore, fog, ghosts), selection, camera, announcer | not in the file: 13.1e-2/3 (the lists in the WP13.1c paragraphs "Host side" above) |
+| the reports of the last tick, the game's view caches (ore, fog, ghosts), selection, camera, announcer | not in the file: the sim thread's part since 13.1e-2 ("A loaded game on the sim thread" below), the runner's view caches 13.1e-3 |
 
-**For 13.1e-2 (the game's sim thread).** `skip_to` by tick is right for the headless runner, where every
-arrival of tick T is scheduled before the save point. In the game, commands keep arriving at tick T after a
-`Msg::Save` is handled (between steps, the world still at T), so a game record (`--record`) must never be
-resumed from a save with `skip_to` by tick: it needs the number of logged commands the save holds (the count
-of section `L`). And `sf_game` has its own `LoggedCommand` (`sim_thread.rs`, with the sender's `requested`
-tick besides `arrived`, `effective`, player, command): 13.1e-2 converts it to `savefile::LoggedCommand`
-(dropping `requested`) when it builds the save, and back with `requested = effective` on a load.
+**The save point in the game (WP13.1e-2).** The game's sim thread (`crates/sf_game/src/sim_thread.rs`)
+saves on a message, `Msg::Save`, sent by `SimHandle::request_save` (answer read with `SaveRequest::wait`) or
+`SimHandle::save(timeout)` (both in one). The thread handles messages only between two steps, on every path
+(stepped by hand, held by the pause menu or by `start_paused`, waiting for the clock, the drain before a tick), so
+the save is the world after tick N and the AIs before their thinks of N + 1: the save point above, with the
+thinks of the next tick still to come. The answer is `Result<SaveParts, SimSaveError>`: `SaveParts { tick,
+checksum, rules_digest, world, ais, log, took }`, the bytes of `World::save` and of each `Ai::save` (ascending by
+player) and the log converted to `savefile::LoggedCommand` (the sender's `requested` dropped); `rules_digest` is
+there because section `I` needs it and the main thread has no world to ask, `took` is the time the saves took on
+the sim thread. The file is built from them with `savefile::write_bytes`, which writes the same bytes as
+`savefile::write` on the live world and AIs (the pinned file of `ai_raid` is unchanged). Commands sent before the
+request are in the save (world queue and log); commands sent after it are in neither, also for the same tick of
+arrival (`commands_before_the_save_are_in_it_commands_after_it_are_not`). `SimSaveError`: `NotAMatch` ("only a
+match can be saved"), `World`, `Ai(player)`, `Stopped` (the thread has ended), `Timeout`: a dead or busy thread is
+an error, never a hang.
+
+**The command log is on in every match.** `SimConfig::saves` marks a thread that holds a match that can be saved;
+it keeps the full log as `record_commands` does (`SimConfig::keeps_log`). The runner sets it for the match scene
+without `--replay` (`runner::scene_sim_config` in `Runner::with_sim`, so also for a scene begun from the menu;
+`a_runner_match_keeps_its_log_and_saves_a_sandbox_refuses` goes through a `Runner`); the sandbox, the crowd and
+a match fed by `--replay` keep their log as before and refuse a save. `--record` output is unchanged: the log was
+already complete with it, and `record_commands` still follows `--record` alone. Its size, measured on `m1_duel`
+(the computer against the computer, 36,000 ticks = 30 minutes of game time, release,
+`save_cost_and_log_size`): 166 commands, so 332 per hour; an entry is 96 bytes plus the heap of the ids it names,
+so about 32 KB per hour in memory, and 13.6 KB per hour in section `L`. Two AIs send few commands; a human sends
+more: at 100 commands a minute (a fast player) it would be 6,000 per hour, under 1 MB per hour in memory
+(an estimate, not measured). A save on the sim thread costs 118 us median and 626 us at worst over 144 saves of
+that game (world save 53-299 KB), against a tick budget of 50 ms.
+
+**A loaded game on the sim thread.** `SimHandle::spawn_restored(world, config, ais, log)` is `spawn_with_ais` with
+the loaded log in front of the thread's own (`requested = effective` for a loaded command), so the next save and
+`--record` hold the full log since tick 0. A new thread starts every cache blank: the snapshot buffers fill from
+the loaded world, so the first snapshot has the loaded ore and fog even where a game left behind had the same
+`ore_version`/`fog_version` with other contents (`the_first_snapshot_after_a_load_shows_the_loaded_ore_and_fog`).
+The checksum history of a restored thread begins at the save tick: `SimExit::checksums_start`
+(`World::checksum_history_start`), read through `SimExit::checksum_after(tick)`. Every reader of
+`SimExit::checksums` in the repository is a test of a thread that ran from tick 0; the ones that index it by tick
+(`record_replay.rs`, `ai_in_game.rs`) assert `checksums_start == 0`. Lost until the first step after a load, by
+name (`LOST_UNTIL_THE_FIRST_STEP` in `crates/sf_game/tests/save_sim_thread.rs`, each one shown to have something
+at the save in a scripted `m1` game): the snapshot's `checksum` (the last entry of the history, `None`),
+`stalled`, `deaths`, repairs waiting for money (they read `Repairing`), the handle's rejected builds and the
+effects events; everything else the first snapshot shows equals the last snapshot of the game that was saved
+(the test's `kept` list; no name is in both), and after one step the reports are back. The snapshot's sales in
+progress are **kept**: `SimSnapshot::sales` reads the saved sale state (`sale_of`), not the world's report of
+the last tick that the WP13.1c-3a paragraph above says starts empty. The split is not checked against every
+field of `SimSnapshot` (its fields are private and a test cannot list them); a new report must be added to one
+of the two lists by hand.
+
+**For 13.1e-3, two things the main thread must know.** With the realtime clock a save can be ahead of
+`SimHandle::latest()`: the thread publishes a snapshot after a whole pass of ticks, and a save handled in the
+drain between two ticks of that pass sees a world the published snapshot does not show yet. So
+`SaveParts.tick` must not be paired with the snapshot the main thread holds (for the camera, the ghosts or a
+message); take what the host section needs from the parts or from a snapshot of that tick. And a restored
+thread starts `SimHandle::checkpoints()` (and the tick times, slow ticks, moved commands and counters) empty:
+they are diagnostics of this thread, not of the game.
+
+**Resuming a game record.** `skip_to` by tick is right for the headless runner, where every arrival of tick T is
+scheduled before the save point. In the game, commands keep arriving at tick T after a save is handled (between
+steps, the world still at T), so a game record (`--record`) is resumed from a save by the **count** of the save's
+log: `record::commands_after_save(recorded, record_ticks, log)` checks that the record begins with the log, one
+for one, and returns the rest. A record leaves out the commands that arrived when its play had run its length or
+more (`record::render`: they change no checksum of it), so a record of a game that ended at the save tick lacks
+the commands of that tick that are in the save; only the part of the log that arrived before the record's end is
+looked for, and the answer is then empty
+(`a_record_that_ends_at_the_save_tick_resumes_with_nothing_left`) (`the_record_of_a_loaded_game_replays_and_resumes_by_count`: a command that arrived at the save
+tick after the save is in the rest; by tick it would be lost). The record of a game that was saved, loaded and
+played on replays in `sf_headless` to the game's checksum at every tick.
 
 **Tests** (`tools/sf_headless/tests/save_game.rs`):
 

@@ -121,6 +121,8 @@ impl Drop for Scratch {
 
 /// The headless checksum after world tick `t` is the sim thread's `checksums[t - 1]`; the ticks that differ.
 fn mismatches(scenario: &Scenario, exit: &SimExit) -> Vec<u64> {
+    // `checksums[t - 1]` holds only for a thread that ran from the start (WP13.1e-2: a restored one does not).
+    assert_eq!(exit.checksums_start, Tick(0));
     let finished = run_full(
         scenario,
         &RunOptions {

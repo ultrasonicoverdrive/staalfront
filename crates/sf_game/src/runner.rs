@@ -196,6 +196,16 @@ fn sim_config(options: &Options) -> SimConfig {
     }
 }
 
+/// The sim thread of the scene `options` describes, from the base `sim` (the game's [`sim_config`] or a test's
+/// manual one): a match that no `--replay` feeds can be saved, so it keeps the full command log
+/// (WP13.1e-2, [`SimConfig::saves`]); every other scene keeps what `sim` says and refuses a save.
+fn scene_sim_config(sim: &SimConfig, options: &Options) -> SimConfig {
+    SimConfig {
+        saves: options.scene == Scene::Match && options.replay.is_none(),
+        ..sim.clone()
+    }
+}
+
 /// The commands of a record that `--replay` feeds into the game (WP1.16a).
 struct Replay {
     commands: Vec<sf_headless::scenario::RecordedCommand>,
@@ -482,7 +492,7 @@ impl Runner {
         // From here on the world belongs to the sim thread. Its clock stays
         // held until the window and the renderer exist (`on_start`), so the
         // units do not wander off while the GPU starts.
-        let sim = SimHandle::spawn_with_ais(world, sim_config.clone(), ais)
+        let sim = SimHandle::spawn_with_ais(world, scene_sim_config(&sim_config, &options), ais)
             .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
         let snap = sim.latest();
 
@@ -3914,6 +3924,32 @@ mod tests {
         assert!(sim_config(&parse("--match")).start_paused);
     }
 
+    /// WP13.1e-2: the command log is on in every match (a save needs it), `--record` or not; the sandbox, the
+    /// crowd and a match fed by `--replay` keep their log as before and refuse a save.
+    #[test]
+    fn a_match_keeps_its_log_and_can_be_saved_other_scenes_cannot() {
+        let parse =
+            |line: &str| Options::parse(Preset::Game, line.split_whitespace().map(str::to_owned));
+        let scene = |line: &str| {
+            let options = parse(line);
+            scene_sim_config(&sim_config(&options), &options)
+        };
+        for line in ["--match", "--match --record play.ron", "--match m1_ai"] {
+            let c = scene(line);
+            assert!(c.saves && c.keeps_log(), "{line}");
+        }
+        assert!(
+            !scene("--match").record_commands,
+            "--record output unchanged"
+        );
+        for line in ["--sandbox", "--crowd", "--match --replay play.ron"] {
+            let c = scene(line);
+            assert!(!c.saves && !c.keeps_log(), "{line:?}");
+        }
+        let c = scene("--match --replay play.ron --record out.ron");
+        assert!(!c.saves && c.keeps_log());
+    }
+
     use super::*;
     use crate::args::Preset;
     use sf_data::map::generate::generate_cells;
@@ -4179,6 +4215,31 @@ mod tests {
             SimConfig::manual(),
         )
         .expect("the runner starts")
+    }
+
+    /// WP13.1e-2, through a `Runner`: the match it starts (with `--match`, and from the start menu over a
+    /// sandbox) keeps the full log and answers a save; the sandbox refuses.
+    #[test]
+    fn a_runner_match_keeps_its_log_and_saves_a_sandbox_refuses() {
+        use crate::sim_thread::SimSaveError;
+        let mut sandbox = runner("--sandbox");
+        assert_eq!(sandbox.sim.save(WAIT), Err(SimSaveError::NotAMatch));
+        let check = |r: &Runner| {
+            run_ticks(r, 3);
+            let at = r.sim.send(PlayerId(0), Command::Stop { ids: Vec::new() });
+            let parts = r.sim.save(WAIT).expect("a match saves");
+            assert!(
+                parts
+                    .log
+                    .iter()
+                    .any(|c| c.player == PlayerId(0) && c.effective == at),
+                "the command is in the log without --record"
+            );
+        };
+        check(&runner("--match"));
+        sandbox.begin(Some(Scene::Match), None);
+        assert_eq!(sandbox.options.scene, Scene::Match);
+        check(&sandbox);
     }
 
     /// Steps the runner's sim `ticks` ticks and returns the checksum of the world after them.

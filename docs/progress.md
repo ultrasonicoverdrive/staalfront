@@ -3945,6 +3945,25 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   factory finishing with `comes_with` and production with vision round trip at every tick in every
   build, and the footprint checks have edge cases that a check on the anchor alone fails.
 
+### WP13.1e-2 notes: the sim thread saves and restores (27-11-2026)
+
+* **Built** (`crates/sf_game/src/sim_thread.rs`): `Msg::Save`, answered in `Sim::handle` between two steps;
+  `SimHandle::request_save`/`save(timeout)` with `SaveParts` and `SimSaveError` (not a match, world, AI, stopped,
+  timeout); `SimConfig::saves` (the full log on in every match, `runner::scene_sim_config`); `spawn_restored`
+  with the loaded log; `SimExit::checksums_start` and `checksum_after`. `savefile::write_bytes` (the file from
+  saved bytes; `write` calls it). `record::commands_after_save` (resume a game record by count).
+* **Tests** (`crates/sf_game/tests/save_sim_thread.rs`, through the real `SimHandle`): `m1_duel` saved at four
+  ticks and each save loaded and played on to tick 3000 equal to the uninterrupted run at every tick, with the
+  same log; commands before and after a save on the right side; saves held, before the start and on the clock;
+  refused outside a match, `Stopped` and `Timeout` without a hang; the full log without `--record`; the record of
+  a loaded game replays in `sf_headless` at every tick and resumes by count; the first snapshot after a load has
+  the loaded ore and fog where the versions are equal; the reports lost until the first step as a named list.
+* Measured (release, the container at load 4-5 on 4 cores): a save 118 us median, 626 us worst; the log of
+  `m1_duel` 332 commands per hour (about 32 KB in memory, 13.6 KB in the file).
+* No pin moved; `sf_sim`, `sf_ai` and the save file format (version 1) are untouched.
+* **Left for 13.1e-3**: the runner's load, file writing, `--save-at`/`--load`, the view caches, the announcer,
+  ghosts and camera.
+
 ### WP13.1e-1 notes: the save file and the headless world + AI round trip (26-11-2026)
 
 * **Built** (`tools/sf_headless/src/savefile.rs`): the save file `SFSG` version 1: sections `I` (identity and

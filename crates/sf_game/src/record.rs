@@ -72,6 +72,47 @@ pub fn write(
     Ok(n)
 }
 
+/// The commands of a game record (`--record`) that come after a save of that game (WP13.1e-2,
+/// `docs/rules/save.md` "Resuming a game record"): the record's first commands must be the save's log (section
+/// `L`), one for one, and what follows them is still to be fed. A game record is resumed by this **count**, never
+/// by the save tick (`Arrivals::skip_to`): in the game a command can arrive at the save tick after the save was
+/// taken, and it is then in the record but not in the save.
+///
+/// `record_ticks` is the record's length (`Scenario::ticks`). [`render`] leaves out every command that arrived
+/// when the play had run `record_ticks` ticks or more (it changes no checksum of the record), so of the log only
+/// the commands that arrived before `record_ticks` are looked for; when the record ends at or before the save
+/// tick there is nothing left to feed and the answer is empty. Refused when the record does not begin with that
+/// part of the log, or holds commands beyond it although it ends before the last logged arrival.
+pub fn commands_after_save<'a>(
+    recorded: &'a [RecordedCommand],
+    record_ticks: u64,
+    saved: &[sf_headless::savefile::LoggedCommand],
+) -> Result<&'a [RecordedCommand], String> {
+    // The log is ascending by arrival (`savefile::load` checks it).
+    let in_record = saved
+        .iter()
+        .take_while(|s| s.arrived.0 < record_ticks)
+        .count();
+    if recorded.len() < in_record {
+        return Err(format!(
+            "the record holds {} commands, the save {in_record} that arrived within the record",
+            recorded.len()
+        ));
+    }
+    for (i, (r, s)) in recorded.iter().zip(&saved[..in_record]).enumerate() {
+        if *r != RecordedCommand::new(s.arrived, s.effective, s.player, &s.command) {
+            return Err(format!(
+                "command {i} of the record is not command {i} of the save"
+            ));
+        }
+    }
+    let rest = &recorded[in_record..];
+    if in_record < saved.len() && !rest.is_empty() {
+        return Err("the record ends before the save but holds commands after it".to_owned());
+    }
+    Ok(rest)
+}
+
 /// Where the record of a game that a restart ended goes: `FILE` with `.restartN` before the extension.
 pub fn restart_path(path: &Path, n: u32) -> PathBuf {
     let stem = path
