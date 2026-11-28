@@ -30,19 +30,19 @@
         // (the figure has no free slot for Veyran's crimson mark: six materials at most).
         // `paint_light` and `paint2_shade` are not used by the figures; they repeat paint/paint2.
         "meridian_figure": (
-            paint: (198, 182, 146),
-            paint_light: (198, 182, 146),
-            paint2: (126, 122, 78),
-            paint2_shade: (126, 122, 78),
+            paint: (216, 200, 162),
+            paint_light: (216, 200, 162),
+            paint2: (146, 142, 94),
+            paint2_shade: (146, 142, 94),
             metal: (66, 66, 68),
-            rubber: (62, 54, 44),
+            rubber: (76, 66, 54),
             accent: (196, 150, 118),
         ),
         "veyran_figure": (
-            paint: (150, 166, 184),
-            paint_light: (150, 166, 184),
-            paint2: (96, 106, 122),
-            paint2_shade: (96, 106, 122),
+            paint: (170, 186, 204),
+            paint_light: (170, 186, 204),
+            paint2: (118, 128, 146),
+            paint2_shade: (118, 128, 146),
             metal: (66, 66, 68),
             rubber: (50, 52, 56),
             accent: (192, 148, 118),
