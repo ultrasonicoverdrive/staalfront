@@ -59,8 +59,8 @@ use crate::style::{LodSpec, Style};
 /// Most levels a chain can have (the stats keep a counter per level).
 pub const MAX_LODS: usize = 4;
 
-/// Most parts a level can have: hull, turret, barrel and one spare, or the six nodes of a figure
-/// that walks (WP11.6i) and two spare.
+/// Most parts a level can have: hull, turret, barrel and one spare, or the eight nodes of a figure
+/// that walks (WP11.6i round 2: thighs, shins, torso, head and arms).
 pub const MAX_PARTS: usize = 8;
 
 /// How a part moves relative to its parent, driven per instance.
@@ -74,9 +74,10 @@ pub enum Joint {
     /// Tilts about its local `+Z` (a barrel). Positive angles lift the
     /// part's front (`+X`) towards `+Y`.
     Pitch,
-    /// A node of a figure that walks (WP11.6i, [`crate::walk`]): it turns about its local `+Z`
-    /// at its origin (the joint) by its limb's angle of [`PartAngles::walk`], and the whole
-    /// figure drops with the walk's bob.
+    /// A node of a figure that walks (WP11.6i, [`crate::walk`]): posed by the walk at its origin
+    /// (the joint). The legs come from a two-bone solve that keeps the stance foot planted, the
+    /// torso leans about the waist and the head and arms follow it, and the whole figure drops
+    /// with the walk's bob.
     Figure(Limb),
 }
 
@@ -87,35 +88,31 @@ pub enum Limb {
     Head,
     ArmL,
     ArmR,
+    /// The thighs (`leg_l`, `leg_r`: the names the checker requires), at the hips.
     LegL,
     LegR,
+    /// The shins with the boots, at the knees (WP11.6i round 2).
+    ShinL,
+    ShinR,
 }
 
 impl Limb {
-    /// The six figure nodes by their glTF names (`sf_asset_check`'s infantry nodes).
-    pub const NAMES: [(&'static str, Limb); 6] = [
+    /// The eight figure nodes by their glTF names: the checker's six infantry nodes and the
+    /// two shins.
+    pub const NAMES: [(&'static str, Limb); 8] = [
         ("torso", Limb::Torso),
         ("head", Limb::Head),
         ("arm_l", Limb::ArmL),
         ("arm_r", Limb::ArmR),
         ("leg_l", Limb::LegL),
         ("leg_r", Limb::LegR),
+        ("shin_l", Limb::ShinL),
+        ("shin_r", Limb::ShinR),
     ];
 
-    /// The limb of a node name, if it is one of the six.
+    /// The limb of a node name, if it is one of the eight.
     pub fn of(name: &str) -> Option<Limb> {
         Self::NAMES.iter().find(|n| n.0 == name).map(|n| n.1)
-    }
-
-    /// This limb's angle in `pose`, radians about its local `+Z`.
-    pub fn angle(self, pose: &crate::walk::WalkPose) -> f32 {
-        match self {
-            Limb::Torso | Limb::Head => -pose.lean,
-            Limb::ArmL => pose.arm_l,
-            Limb::ArmR => pose.arm_r,
-            Limb::LegL => pose.leg_l,
-            Limb::LegR => pose.leg_r,
-        }
     }
 }
 
@@ -224,35 +221,31 @@ impl PartAngles {
 /// matrix (position and facing), each part is `parent * rest * joint`.
 /// Writes `parts.len()` matrices into `out` (at most [`MAX_PARTS`]).
 ///
-/// A figure's parts ([`Joint::Figure`]) turn at their joint by their limb's angle, and every part
-/// of the figure drops by the walk's bob ([`crate::walk::WalkPose::drop`], for the hip height of
-/// the `leg_l` part), so the forward foot stays on the ground. In the stand pose this is exactly
-/// `parent * rest`.
+/// A figure's parts ([`Joint::Figure`]) are posed by [`crate::walk::solve`] from the rest
+/// positions of their joints (hips, knees, waist): each thigh turns at its hip, each shin hangs
+/// from its posed knee, the torso leans about the waist with the head and both shoulders carried
+/// along, the arms swing at their posed shoulders, and every figure part drops by the bob. In the
+/// stand pose this is exactly `parent * rest`.
 pub fn pose_parts(unit: Mat4, parts: &[RigPart], angles: PartAngles, out: &mut [Mat4; MAX_PARTS]) {
     let walking = angles.walk != crate::walk::WalkPose::STAND;
-    let bob = if walking {
-        parts
-            .iter()
-            .find(|p| p.joint == Joint::Figure(Limb::LegL))
-            .map_or(0.0, |p| angles.walk.drop(p.rest.w_axis.y))
+    let figure = if walking {
+        crate::walk::FigureRig::of(parts).map(|rig| (rig, crate::walk::solve(&angles.walk, &rig)))
     } else {
-        0.0
+        None
     };
     for (i, part) in parts.iter().enumerate().take(MAX_PARTS) {
         let joint = match part.joint {
-            Joint::Fixed => Mat4::IDENTITY,
+            Joint::Fixed | Joint::Figure(_) => Mat4::IDENTITY,
             // A positive yaw takes +X to +Z: a negative turn about +Y.
             Joint::Yaw => Mat4::from_rotation_y(-angles.yaw),
             Joint::Pitch => Mat4::from_rotation_z(angles.pitch),
-            Joint::Figure(_) if !walking => Mat4::IDENTITY,
-            Joint::Figure(limb) => Mat4::from_rotation_z(limb.angle(&angles.walk)),
         };
         let parent = part
             .parent
             .map_or(unit, |p| out[usize::from(p).min(i.saturating_sub(1))]);
-        out[i] = match part.joint {
-            Joint::Figure(_) if walking && part.parent.is_none() => {
-                parent * Mat4::from_translation(Vec3::new(0.0, -bob, 0.0)) * part.rest * joint
+        out[i] = match (part.joint, &figure) {
+            (Joint::Figure(limb), Some((rig, pose))) if part.parent.is_none() => {
+                parent * crate::walk::limb_matrix(limb, part.rest, rig, pose)
             }
             _ => parent * part.rest * joint,
         };

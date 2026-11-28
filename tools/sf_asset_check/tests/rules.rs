@@ -37,7 +37,7 @@ fn a_correct_infantry_model_has_no_findings() {
     );
     assert_clean(&r);
     assert_eq!(r.facts.triangles, [72, 72, 24]);
-    assert_eq!(r.facts.budget, Some([1500, 250, 60]));
+    assert_eq!(r.facts.budget, Some([3000, 750, 150]));
     assert_eq!(r.facts.materials, 2);
     for share in &r.facts.team_share {
         assert!((share.unwrap() - 0.30).abs() < 0.02, "{share:?}");
@@ -296,7 +296,7 @@ fn two_figures_get_twice_the_infantry_budget() {
     m.part_mut(0, "torso").reps = 130; // 1,692 triangles in LOD0
     let r = check("veyran_demolition_team.glb", &m);
     assert!(r.facts.pair);
-    assert_eq!(r.facts.budget, Some([3000, 500, 120]));
+    assert_eq!(r.facts.budget, Some([3000, 750, 150]));
     assert!(!r.has("budget"), "{:#?}", r.findings);
 
     // One figure with the same triangles is over.

@@ -39,13 +39,14 @@
 //! `barrel` tilts about its local `+Z` ([`Joint`]).
 //!
 //! # Figures that walk (WP11.6i)
-//! A level whose root carries the six figure nodes (`torso`, `head`, `arm_l`, `arm_r`, `leg_l`,
-//! `leg_r`) as childless mesh nodes **with their origins at the joints** keeps each of them as its
-//! own part with a [`Joint::Figure`], so the walk cycle ([`crate::walk`]) can turn a limb about its
-//! joint. The joint check ([`figure_joints`]): every one of the six has a translation, the legs'
-//! and arms' origins are above the ground and the arms' above the legs'. A figure whose nodes all
-//! sit at the model origin (the set v3 figures) fails it and is merged into one `body` as before:
-//! it does not walk.
+//! A level whose root carries the eight figure nodes (`torso`, `head`, `arm_l`, `arm_r`, the
+//! thighs `leg_l`, `leg_r` and the shins `shin_l`, `shin_r`) as childless mesh nodes **with their
+//! origins at the joints** keeps each of them as its own part with a [`Joint::Figure`], so the
+//! walk cycle ([`crate::walk`]) can pose them. The joint check ([`figure_joints`]): all eight are
+//! there with a non-zero translation, the knees above the ground, the hips above the knees and the
+//! shoulders above the hips. A figure without shins (the six-node figures of set v3 and set v4) or
+//! with its nodes at the model origin fails it and is merged into one `body` as before: it does
+//! not walk.
 //!
 //! # Not supported (a clear [`GlbError`], never a panic)
 //! External or embedded-URI buffers (only the GLB `BIN` chunk), textures (the
@@ -485,10 +486,11 @@ fn missing(prim: &gltf::Primitive<'_>, semantic: gltf::Semantic, name: &str) -> 
     }
 }
 
-/// Whether a level root is a figure whose six nodes have their origins at the joints (see the
-/// module text): all six are childless mesh nodes directly under `root`, each with a non-zero
-/// translation, the legs' and arms' origins above the ground and the arms' above the legs'. The
-/// heights are read along the source's own `+Y` (every pack with figures has `up: PlusY`).
+/// Whether a level root is a figure whose eight nodes have their origins at the joints (see the
+/// module text): all eight are childless mesh nodes directly under `root`, each with a non-zero
+/// translation, the knees above the ground, the hips above the knees and the shoulders above the
+/// hips. The heights are read along the source's own `+Y` (every pack with figures has
+/// `up: PlusY`).
 pub fn figure_joints(root: &gltf::Node<'_>) -> bool {
     let at = |name: &str| -> Option<[f32; 3]> {
         root.children()
@@ -496,17 +498,19 @@ pub fn figure_joints(root: &gltf::Node<'_>) -> bool {
             .filter(|c| c.mesh().is_some() && c.children().next().is_none())
             .map(|c| c.transform().decomposed().0)
     };
-    let mut origins = [[0.0_f32; 3]; 6];
+    let mut origins = [[0.0_f32; 3]; 8];
     for (i, (name, _)) in Limb::NAMES.iter().enumerate() {
         match at(name) {
             Some(t) if t.iter().any(|c| c.abs() > 1e-4) => origins[i] = t,
             _ => return false,
         }
     }
-    // NAMES order: torso, head, arm_l, arm_r, leg_l, leg_r.
-    let leg = origins[4][1].min(origins[5][1]);
+    // NAMES order: torso, head, arm_l, arm_r, leg_l, leg_r, shin_l, shin_r.
+    let knee = origins[6][1].min(origins[7][1]);
+    let hip_low = origins[4][1].min(origins[5][1]);
+    let knee_high = origins[6][1].max(origins[7][1]);
     let arm = origins[2][1].min(origins[3][1]);
-    leg > 0.0 && arm > leg
+    knee > 0.0 && hip_low > knee_high && arm > hip_low
 }
 
 fn node_matrix(node: &gltf::Node<'_>) -> Mat4 {

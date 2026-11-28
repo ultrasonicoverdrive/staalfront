@@ -28,7 +28,7 @@ exit code: 0 = no failures, 1 = a file broke a rule, 2 = bad arguments
 
 Per file: the LOD roots <id>_LOD0..2 and their identical node structure and
 origin; triangles per LOD against the budget of the file's class (infantry
-1500/250/60, two-figure 2x that, vehicle, decor and wreck 1500/500/150,
+3000/750/150, one figure or two, vehicle, decor and wreck 1500/500/150,
 building 5000/1500/300; the class comes from the role in unit_defs.ron);
 at most 6 materials, base colour only; `team` present for factions and
 absent for neutral objects, 20-40 % of the top-down view of LOD0; the lowest

@@ -111,7 +111,7 @@ fn markdown_is_a_table_and_a_list_of_findings() {
     let (_, out, _) = run(&["--format", "markdown", &s.dir()]);
     assert!(out.starts_with("| file | class |"), "{out}");
     assert!(
-        out.contains("| `meridian_rifleman.glb` | infantry | 72/72/24 | 1500/250/60 |"),
+        out.contains("| `meridian_rifleman.glb` | infantry | 72/72/24 | 3000/750/150 |"),
         "{out}"
     );
     assert!(

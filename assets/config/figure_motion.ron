@@ -1,26 +1,30 @@
 // The walk cycle of a figure (WP11.6i, crates/sf_render/src/walk.rs). Render only: nothing here
-// reaches the simulation. Applied only to figure models whose six nodes have their origins at the
-// joints (the glb loader checks it; the set v3 figures do not, and keep gliding).
+// reaches the simulation. Compiled into the game like terrain.ron (a change needs a rebuild).
+// Applied only to figure models whose eight nodes (thighs `leg_l`/`leg_r`, shins `shin_l`/`shin_r`,
+// torso, head, arms) have their origins at the joints; the glb loader checks it. The set v3 and v4
+// figures do not, and keep gliding.
 //
-// The phase of the cycle follows the distance a unit travels, one cycle per `stride_m` (two
-// steps), so the feet do not slide and a slower unit steps slower; `stride_m` belongs with
-// `leg_swing_deg`: 4 * hip * sin(swing) = 4 * 0.9 * sin(30°) = 1.80 m for the trial figure.
-// Wall time only blends between standing and walking (`blend_s`).
+// The phase follows the distance a unit travels, one cycle per `stride_m` (two steps), so a slower
+// unit steps slower. Each foot is planted for half the cycle (it moves back under the hip exactly
+// as fast as the body moves forward) and swings forward the other half, lifted by `lift_m`; the
+// hip sits where the stance leg reaches at `knee_reach` of its length (the bob) and a two-bone
+// solve sets thigh and shin. Wall time only blends between standing and walking (`blend_s`).
 //
-// Cadence (fix round 1): the rifleman moves 0.7 cells/s = 2.8 m/s, a jog. With 24° and 1.46 m it
-// took 3.8 steps/s and scurried; 30° and 1.80 m give 1.56 cycles/s = 3.1 steps/s, a jogging
-// cadence, at the cost of a deeper bob (0.9 * (1 - cos 30°) = 0.12 m). Drawn larger (far zoom) the
-// stride grows with the model, so the cadence drops with the drawn scale.
+// Cadence (round 2): the rifleman moves 0.7 cells/s = 2.8 m/s, a jog. A cycle of 1.60 m gives
+// 1.75 cycles/s = 3.5 steps/s. A longer stride would step slower but the planted foot would have to
+// reach 0.4 m or more ahead of the hip, which bends the 0.92 m leg so far that the hip sinks by more
+// than 0.1 m (measured in the walk tests); 1.60 m keeps the sink near 0.1 m.
 //
 // `max_step_m`: a unit that moves more than this between two frames (2 m at true size) keeps its
-// phase. At 2.8 m/s that needs under 1.4 frames per second of game time, e.g. 4x fast-forward
-// below about 6 fps; the figure then stops stepping for those frames.
+// phase. At 2.8 m/s that needs under 1.4 frames per second of game time (for example very low fps
+// with fast-forward); the figure then stops stepping for those frames.
 (
-    leg_swing_deg: 30.0,       // each leg either way of upright, about the hip
-    arm_swing_deg: 24.0,       // the free arm, opposite to the leg on its side
-    rifle_arm_swing_deg: 5.0,  // the arm that carries the rifle swings little
-    lean_deg: 4.0,             // forward lean of torso and head at full walk
-    stride_m: 1.80,            // metres per cycle at true model size
+    arm_swing_deg: 18.0,       // the free arm, against the foot on its side
+    rifle_arm_swing_deg: 4.0,  // the arm that carries the rifle holds it nearly steady
+    lean_deg: 5.0,             // forward lean of torso, head and shoulders at full walk
+    stride_m: 1.60,            // metres per cycle at true model size
+    lift_m: 0.14,              // swing foot height at mid swing
+    knee_reach: 0.97,          // the stance leg reaches this share of its length
     blend_s: 0.25,             // seconds from standing to walking and back
     max_step_m: 2.0,           // a longer jump per frame does not advance the phase
 )

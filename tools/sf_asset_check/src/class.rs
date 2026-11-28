@@ -124,8 +124,11 @@ impl Class {
 /// Triangle budget per LOD (LOD0, LOD1, LOD2). `pair` = two figures in one file.
 pub const fn budget(class: Class, pair: bool) -> [u32; 3] {
     match class {
-        Class::Infantry if pair => [3000, 500, 120],
-        Class::Infantry => [1500, 250, 60],
+        // WP11.6i round 2 (Tijmen 28-11-2026, "a real step towards realistic little soldiers"):
+        // a figure with tapered round sections, knees, hands and kit needs about 3,000 / 750 / 150
+        // (the trial riflemen: 2,956 / 748 / 140); it was 1,500 / 250 / 60, two figures 3,000 /
+        // 500 / 120. A pair now has the same room as one figure (its two are smaller).
+        Class::Infantry => [3000, 750, 150],
         // WP11.6r (Tijmen 15-11-2026, shape refinement): units and buildings got room for bevels
         // and round parts; decor and wrecks keep the old unit budget.
         Class::Vehicle => [4000, 1200, 300],
@@ -340,8 +343,8 @@ mod tests {
 
     #[test]
     fn budgets_per_class() {
-        assert_eq!(budget(Class::Infantry, false), [1500, 250, 60]);
-        assert_eq!(budget(Class::Infantry, true), [3000, 500, 120]);
+        assert_eq!(budget(Class::Infantry, false), [3000, 750, 150]);
+        assert_eq!(budget(Class::Infantry, true), [3000, 750, 150]);
         assert_eq!(budget(Class::Vehicle, false), [4000, 1200, 300]);
         assert_eq!(budget(Class::Decor, false), [1500, 500, 150]);
         assert_eq!(budget(Class::Wreck, false), budget(Class::Decor, false));

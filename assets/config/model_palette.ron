@@ -24,6 +24,29 @@
             rubber: (46, 44, 40),
             accent: (122, 30, 40),
         ),
+        // The figures of WP11.6i (round 2, Tijmen 28-11-2026: "the v5 riflemen read almost black"):
+        // their own entries, so the vehicles keep their colours. paint = uniform, paint2 = helmet,
+        // webbing and pack, metal = gunmetal of the rifle, rubber = boots and belt, accent = skin
+        // (the figure has no free slot for Veyran's crimson mark: six materials at most).
+        // `paint_light` and `paint2_shade` are not used by the figures; they repeat paint/paint2.
+        "meridian_figure": (
+            paint: (198, 182, 146),
+            paint_light: (198, 182, 146),
+            paint2: (126, 122, 78),
+            paint2_shade: (126, 122, 78),
+            metal: (66, 66, 68),
+            rubber: (62, 54, 44),
+            accent: (196, 150, 118),
+        ),
+        "veyran_figure": (
+            paint: (150, 166, 184),
+            paint_light: (150, 166, 184),
+            paint2: (96, 106, 122),
+            paint2_shade: (96, 106, 122),
+            metal: (66, 66, 68),
+            rubber: (50, 52, 56),
+            accent: (192, 148, 118),
+        ),
         // Neutral models (WP11.6b: the supply truck, the ferry) have no team material; the third
         // slot is a second light paint instead (`paint3`, the `paint_light` colour).
         "neutral": (

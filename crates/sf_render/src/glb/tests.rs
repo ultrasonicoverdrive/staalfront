@@ -1068,9 +1068,9 @@ fn only_clean_scene_per_lod_files_are_accepted() {
     }
 }
 
-/// A figure root with the six figure nodes at `at` (in `Limb::NAMES` order: torso, head, arm_l,
-/// arm_r, leg_l, leg_r), each a childless mesh node (WP11.6i).
-fn figure_scene(at: [[f32; 3]; 6]) -> Scene {
+/// A figure root with the first `at.len()` figure nodes at `at` (in `Limb::NAMES` order: torso,
+/// head, arm_l, arm_r, leg_l, leg_r, shin_l, shin_r), each a childless mesh node (WP11.6i).
+fn figure_scene(at: &[[f32; 3]]) -> Scene {
     let quad = || {
         writer::box_faces([0.0; 3], [0.1; 3], [0; 6])
             .into_iter()
@@ -1081,7 +1081,7 @@ fn figure_scene(at: [[f32; 3]; 6]) -> Scene {
         name: "man_LOD0".into(),
         ..writer::Node::default()
     }];
-    for (i, (name, _)) in Limb::NAMES.iter().enumerate() {
+    for (i, (name, _)) in Limb::NAMES.iter().enumerate().take(at.len()) {
         nodes.push(writer::Node {
             name: (*name).into(),
             translation: at[i],
@@ -1089,7 +1089,7 @@ fn figure_scene(at: [[f32; 3]; 6]) -> Scene {
             ..writer::Node::default()
         });
     }
-    nodes[0].children = (1..=6).collect();
+    nodes[0].children = (1..=at.len()).collect();
     Scene {
         materials: vec![("steel".into(), writer::STEEL)],
         nodes,
@@ -1112,32 +1112,47 @@ fn walks(scene: &Scene) -> bool {
 #[test]
 fn the_joint_check_takes_only_figures_with_their_nodes_at_the_joints() {
     let good = [
-        [0.0, 0.96, 0.0],
-        [0.0, 1.45, 0.0],
-        [0.0, 1.4, -0.22],
-        [0.0, 1.4, 0.22],
-        [0.0, 0.9, -0.1],
-        [0.0, 0.9, 0.1],
+        [0.0, 0.98, 0.0],
+        [0.0, 1.49, 0.0],
+        [0.0, 1.42, -0.215],
+        [0.0, 1.42, 0.215],
+        [0.0, 0.92, -0.1],
+        [0.0, 0.92, 0.1],
+        [0.0, 0.495, -0.1],
+        [0.0, 0.495, 0.1],
     ];
-    assert!(walks(&figure_scene(good)));
+    assert!(walks(&figure_scene(&good)));
     // Every node at the origin (the set v3 figures).
-    assert!(!walks(&figure_scene([[0.0; 3]; 6])));
+    assert!(!walks(&figure_scene(&[[0.0; 3]; 8])));
+    // The six nodes of set v3 and v4 at good joints, but no shins.
+    assert!(!walks(&figure_scene(&good[..6])));
     // One node at the origin.
     let mut one = good;
     one[1] = [0.0; 3];
-    assert!(!walks(&figure_scene(one)));
-    // All moved sideways, hips on the ground (set v3 demolition team: all at z = -0.36).
-    assert!(!walks(&figure_scene([[0.0, 0.0, -0.36]; 6])));
+    assert!(!walks(&figure_scene(&one)));
+    // All moved sideways, on the ground (set v3 demolition team: all at z = -0.36).
+    assert!(!walks(&figure_scene(&[[0.0, 0.0, -0.36]; 8])));
+    // Legs at or below the ground: a knee on or under it.
+    let mut ground = good;
+    ground[6] = [0.0, 0.0, -0.1];
+    assert!(!walks(&figure_scene(&ground)));
+    let mut under = good;
+    under[7] = [0.0, -0.2, 0.1];
+    assert!(!walks(&figure_scene(&under)));
+    // A knee at or above the hips.
+    let mut knee = good;
+    knee[6] = [0.0, 0.92, -0.1];
+    assert!(!walks(&figure_scene(&knee)));
     // Arms at or below the hips.
     let mut low = good;
-    low[2] = [0.0, 0.9, -0.22];
-    assert!(!walks(&figure_scene(low)));
+    low[2] = [0.0, 0.92, -0.215];
+    assert!(!walks(&figure_scene(&low)));
     let mut lower = good;
-    lower[3] = [0.0, 0.5, 0.22];
-    assert!(!walks(&figure_scene(lower)));
+    lower[3] = [0.0, 0.5, 0.215];
+    assert!(!walks(&figure_scene(&lower)));
 }
 
-/// `MAX_PARTS` is 8 (WP11.6i, six figure nodes and two spare): eight parts load, nine are refused.
+/// `MAX_PARTS` is 8 (WP11.6i, the eight figure nodes): eight parts load, nine are refused.
 #[test]
 fn a_level_takes_eight_parts_and_refuses_nine() {
     assert_eq!(MAX_PARTS, 8);

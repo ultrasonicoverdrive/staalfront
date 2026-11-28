@@ -160,7 +160,7 @@ fn budget(stem: &str) -> [usize; 3] {
     if is_building(stem) && !is_decor(stem) {
         [8000, 2400, 500]
     } else if is_infantry(stem) {
-        [1500, 250, 60]
+        [3000, 750, 150]
     } else if is_decor(stem) {
         [1500, 500, 150]
     } else {
