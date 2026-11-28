@@ -2285,7 +2285,7 @@ impl Runner {
     /// Build this frame's models and icons (level of detail per unit, the
     /// icon band and the far-zoom scales by zoom), pick the unit under the cursor in what was built
     /// and highlight it. A click on it selects it ([`Runner::handle_selection`]).
-    fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>) {
+    fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>, dt: f32) {
         let view_proj = self.camera.view_proj();
         let (width, height) = self.viewport;
         let frustum = Frustum::from_view_proj(view_proj);
@@ -2315,9 +2315,15 @@ impl Runner {
         let started = Instant::now();
         let ground = &self.ground;
         self.stats = self.instancer.build_frame(
-            &FrameView::new(&frustum, alpha, eye, blend, scale)
-                .with_model_scale(model_scale)
-                .with_structure_scale(structure_scale),
+            &unit_view(
+                &frustum,
+                alpha,
+                eye,
+                blend,
+                scale,
+                (model_scale, structure_scale),
+                dt,
+            ),
             |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
         );
         self.build_ms.push(started.elapsed());
@@ -3041,7 +3047,7 @@ impl App for Runner {
                     .map(|(x, y)| (x as f32, y as f32))
             });
             let cursor = cursor.filter(|_| !menu_open);
-            self.build_units(alpha, cursor);
+            self.build_units(alpha, cursor, dt as f32);
             self.build_effects(alpha, dt as f32);
             self.mark_selection();
             self.draw_cargo();
@@ -3901,8 +3907,37 @@ fn ai_level_line(level: &str, match_name: &str, ais: usize) -> Result<String, St
     }
 }
 
+/// The view the units are built with each frame: the camera, the blend, the scales and the frame
+/// time `dt`, which the walk of the figures blends in and out over (WP11.6i).
+fn unit_view<'a>(
+    frustum: &'a Frustum,
+    alpha: f32,
+    eye: EyeView,
+    blend: Blend,
+    ui_scale: f32,
+    (model_scale, structure_scale): (f32, f32),
+    dt: f32,
+) -> FrameView<'a> {
+    FrameView::new(frustum, alpha, eye, blend, ui_scale)
+        .with_model_scale(model_scale)
+        .with_structure_scale(structure_scale)
+        .with_dt(dt)
+}
+
 #[cfg(test)]
 mod tests {
+    /// WP11.6i: the units' view carries the runner's frame time, so the walk blends over real time.
+    #[test]
+    fn the_unit_view_carries_the_frame_time() {
+        let vp = sf_render::glam::Mat4::IDENTITY;
+        let frustum = Frustum::from_view_proj(vp);
+        let eye = EyeView::from_view_proj(vp, 720.0);
+        let v = unit_view(&frustum, 0.5, eye, Blend::MODELS, 1.0, (2.0, 1.5), 0.05);
+        assert_eq!(v.dt, 0.05);
+        assert_eq!((v.model_scale, v.structure_scale), (2.0, 1.5));
+        assert_ne!(v.dt, sf_render::instancing::DEFAULT_FRAME_DT);
+    }
+
     #[test]
     fn the_sim_thread_records_commands_only_with_record() {
         let parse =

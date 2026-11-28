@@ -322,10 +322,7 @@ fn the_turret_and_barrel_transforms_chain() {
     // Turret yaw a quarter turn: the barrel swings from +X to +Z (the same
     // sense as the unit facing), the hull does not move.
     let quarter = std::f32::consts::FRAC_PI_2;
-    let yaw = PartAngles {
-        yaw: quarter,
-        pitch: 0.0,
-    };
+    let yaw = PartAngles::new(quarter, 0.0);
     pose_parts(Mat4::IDENTITY, parts, yaw, &mut world);
     assert!(
         close(at(&world), Vec3::new(0.0, 1.2, 1.1)),
@@ -334,10 +331,7 @@ fn the_turret_and_barrel_transforms_chain() {
     );
     assert_eq!(world[0], Mat4::IDENTITY);
     // Barrel pitch lifts the muzzle about the barrel pivot, turret stays.
-    let pitch = PartAngles {
-        yaw: 0.0,
-        pitch: quarter,
-    };
+    let pitch = PartAngles::new(0.0, quarter);
     pose_parts(Mat4::IDENTITY, parts, pitch, &mut world);
     assert!(
         close(at(&world), Vec3::new(0.3, 2.0, 0.0)),
@@ -431,10 +425,7 @@ fn a_childless_mesh_turret_or_barrel_is_a_part_with_its_joint() {
     pose_parts(
         Mat4::IDENTITY,
         rig,
-        PartAngles {
-            yaw: 0.0,
-            pitch: quarter,
-        },
+        PartAngles::new(0.0, quarter),
         &mut world,
     );
     assert!(close(
@@ -444,10 +435,7 @@ fn a_childless_mesh_turret_or_barrel_is_a_part_with_its_joint() {
     pose_parts(
         Mat4::IDENTITY,
         rig,
-        PartAngles {
-            yaw: quarter,
-            pitch: 0.0,
-        },
+        PartAngles::new(quarter, 0.0),
         &mut world,
     );
     assert!(close(
@@ -480,10 +468,7 @@ fn bounds_cover_the_finest_level_and_the_reach_any_pose() {
     let mut world = [Mat4::IDENTITY; MAX_PARTS];
     for i in 0..64 {
         let a = i as f32 * 0.3;
-        let angles = PartAngles {
-            yaw: a,
-            pitch: a * 0.7,
-        };
+        let angles = PartAngles::new(a, a * 0.7);
         pose_parts(Mat4::IDENTITY, parts, angles, &mut world);
         for (p, part) in model.levels[0].parts.iter().enumerate() {
             for v in &part.mesh.vertices {
@@ -1081,4 +1066,112 @@ fn only_clean_scene_per_lod_files_are_accepted() {
         let model = load_glb(&with_scenes(&one, scenes), &axes).unwrap();
         assert_eq!(model.levels.len(), 1, "{scenes}");
     }
+}
+
+/// A figure root with the first `at.len()` figure nodes at `at` (in `Limb::NAMES` order: torso,
+/// head, arm_l, arm_r, leg_l, leg_r, shin_l, shin_r), each a childless mesh node (WP11.6i).
+fn figure_scene(at: &[[f32; 3]]) -> Scene {
+    let quad = || {
+        writer::box_faces([0.0; 3], [0.1; 3], [0; 6])
+            .into_iter()
+            .next()
+            .unwrap()
+    };
+    let mut nodes = vec![writer::Node {
+        name: "man_LOD0".into(),
+        ..writer::Node::default()
+    }];
+    for (i, (name, _)) in Limb::NAMES.iter().enumerate().take(at.len()) {
+        nodes.push(writer::Node {
+            name: (*name).into(),
+            translation: at[i],
+            prim: Some(quad()),
+            ..writer::Node::default()
+        });
+    }
+    nodes[0].children = (1..=at.len()).collect();
+    Scene {
+        materials: vec![("steel".into(), writer::STEEL)],
+        nodes,
+        roots: vec![0],
+        version: "2.0".into(),
+        extra_json: String::new(),
+    }
+}
+
+fn walks(scene: &Scene) -> bool {
+    let m = load_glb(&writer::write(scene), &AxisConvention::ENGINE).unwrap();
+    m.levels[0]
+        .parts
+        .iter()
+        .any(|p| matches!(p.joint, Joint::Figure(_)))
+}
+
+/// The joint check (WP11.6i): only a figure whose nodes sit at plausible joints walks. Each
+/// near miss is one clause of [`figure_joints`].
+#[test]
+fn the_joint_check_takes_only_figures_with_their_nodes_at_the_joints() {
+    let good = [
+        [0.0, 0.98, 0.0],
+        [0.0, 1.49, 0.0],
+        [0.0, 1.42, -0.215],
+        [0.0, 1.42, 0.215],
+        [0.0, 0.92, -0.1],
+        [0.0, 0.92, 0.1],
+        [0.0, 0.495, -0.1],
+        [0.0, 0.495, 0.1],
+    ];
+    assert!(walks(&figure_scene(&good)));
+    // Every node at the origin (the set v3 figures).
+    assert!(!walks(&figure_scene(&[[0.0; 3]; 8])));
+    // The six nodes of set v3 and v4 at good joints, but no shins.
+    assert!(!walks(&figure_scene(&good[..6])));
+    // One node at the origin.
+    let mut one = good;
+    one[1] = [0.0; 3];
+    assert!(!walks(&figure_scene(&one)));
+    // All moved sideways, on the ground (set v3 demolition team: all at z = -0.36).
+    assert!(!walks(&figure_scene(&[[0.0, 0.0, -0.36]; 8])));
+    // Legs at or below the ground: a knee on or under it.
+    let mut ground = good;
+    ground[6] = [0.0, 0.0, -0.1];
+    assert!(!walks(&figure_scene(&ground)));
+    let mut under = good;
+    under[7] = [0.0, -0.2, 0.1];
+    assert!(!walks(&figure_scene(&under)));
+    // A knee at or above the hips.
+    let mut knee = good;
+    knee[6] = [0.0, 0.92, -0.1];
+    assert!(!walks(&figure_scene(&knee)));
+    // Arms at or below the hips.
+    let mut low = good;
+    low[2] = [0.0, 0.92, -0.215];
+    assert!(!walks(&figure_scene(&low)));
+    let mut lower = good;
+    lower[3] = [0.0, 0.5, 0.215];
+    assert!(!walks(&figure_scene(&lower)));
+}
+
+/// `MAX_PARTS` is 8 (WP11.6i, the eight figure nodes): eight parts load, nine are refused.
+#[test]
+fn a_level_takes_eight_parts_and_refuses_nine() {
+    assert_eq!(MAX_PARTS, 8);
+    let scene = |parts: usize| {
+        let mut s = mesh_turret_scene(true);
+        // Extra childless "turret" nodes under the hull, each a part of its own.
+        for i in 0..parts - 3 {
+            let mut n = s.nodes[3].clone();
+            n.name = "turret_LOD0".into();
+            n.children.clear();
+            n.translation = [i as f32, 1.0, 0.0];
+            s.nodes.push(n);
+            let at = s.nodes.len() - 1;
+            s.nodes[1].children.push(at);
+        }
+        s
+    };
+    let eight = load_glb(&writer::write(&scene(8)), &AxisConvention::ENGINE).unwrap();
+    assert_eq!(eight.levels[0].parts.len(), 8);
+    let nine = load_glb(&writer::write(&scene(9)), &AxisConvention::ENGINE).unwrap_err();
+    assert!(nine.to_string().contains("at most 8"), "{nine}");
 }

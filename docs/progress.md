@@ -4050,6 +4050,46 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
 * **Pins.** None moved: the `golden.rs` and `assets/scenarios/*.expected` checks pass in the workspace test run of fix round 1
   (25-11-2026, local and CI) and the release `--expect` run of the CI scenarios is in the PR.
 
+## WP11.6i: trial figure in style G that walks (27-11-2026)
+
+* **What.** One rifleman per faction generated in style G (`tools/sf_model_gen/src/units_infantry.rs`,
+  `assets/set_v5/{meridian,veyran}_rifleman.glb`), wired for the `rifleman` role only
+  (`unit_defs.ron`, `models.ron`); every other figure stays set v3. Triangles 1452/196/56 (Meridian) and
+  1046/196/56 (Veyran), team share 24.0/24.5/23.8 % and 25.7/24.5/23.8 %, 1.82 m high (set v3 1.785 m).
+* **Walk** (render only): the six figure nodes have their origins at the joints; the glb loader keeps
+  them as parts with `Joint::Figure` when its joint check passes (`glb::figure_joints`), `MAX_PARTS` 4 -> 8.
+  `crates/sf_render/src/walk.rs`: phase from the distance between interpolated positions (one cycle per
+  `stride_m`, scaled with the drawn model scale), weight blends over wall time (`FrameView::with_dt`, the
+  runner passes its frame time), legs opposite, arms against their leg, a lean and the bob that keeps the
+  forward foot on the ground. Settings in `assets/config/figure_motion.ron`. The set v3 figures fail the
+  joint check (every node at the origin) and are drawn exactly as before.
+* **Tests**: `tools/sf_model_gen/tests/infantry.rs`, `crates/sf_render/src/walk.rs` (unit tests),
+  `crates/sf_render/tests/walk_cycle.rs`, `figure_shots.rs`, the set v5 load test; pins in
+  `generator.rs` (`PINNED_UNITS` 16).
+* **Pictures** in `docs/screenshots/wp11.6i/`. The PR waits for Tijmen's style check.
+* **Not done**: firing or other poses, the other infantry, GIF (no encoder in the workspace), shadow and
+  team-colour shading (separate engine WP).
+* **Fix round 1** (before the first review): the further parts of a draw record moved to a side list
+  (record 48 bytes, main 64, inline for 8 parts would be 96); the walk state is reset when a slot gets a new
+  unit; the runner's frame time goes through `runner::unit_view` (pinned); joint-check near misses and
+  `MAX_PARTS` = 8 pinned; cadence 30° / 1.80 m (3.1 steps/s at 2.8 m/s, was 3.8); a release measurement
+  (`crates/sf_render/tests/walk_bench.rs`, ignored) of 200 moving units: 32.8 µs per frame build for v5
+  riflemen (1200 part instances) against 9.0 µs for v3 riflemen (200) and 15.1 µs for light tanks (600),
+  load average 6-9; in-game walk strips and labelled in-game shots, the far shot at zoom 0.94.
+* **Round 2, shape** (Tijmen 28-11-2026: "a shape round, and visually a real step towards realistic
+  little soldiers"): both riflemen remodelled with tapered round (Meridian) or faceted (Veyran)
+  sections in LOD0 and LOD1, knees (eight nodes: thighs `leg_l`/`leg_r`, shins `shin_l`/`shin_r`),
+  hands, a head with jaw and nose, boots with sole and toe, hem, belt, pockets, pouches and pack;
+  their own lighter palette entries (`meridian_figure`, `veyran_figure`); team colour as helmet
+  cover and band, armbands, shoulder pads or plates and a chest panel. Triangles 2956/748/140 and
+  1676/550/138; the infantry budget is raised to 3000/750/150 (`sf_asset_check::class::budget`).
+  The walk plants the stance foot (foot path plus a two-bone solve, within 3 mm in the test), lifts
+  the swing foot, carries head and shoulders with the lean, stride 1.60 m. In M1 at zoom 0.30 the
+  Meridian rifleman measures luma 82 (v3 rocket trooper 59, Meridian light tank 94), the Veyran
+  rifleman 79 (Veyran light tank 72). `walk_bench`: 83.5 µs per frame for 200 walking v5 riflemen
+  (1600 part instances), against 32.8 µs in round 1; v3 rifleman 7.9 µs, light tank 12.8 µs; load
+  about 1.2. New pictures: `lod_strip.png`, `ingame_both_default.png`, `ingame_both_close.png`.
+
 ### WP9.6a notes: direction-free AI rules, built off, measured per rule (26-11-2026)
 
 * **What was built.** `sf_ai` and AI profile data only (`crates/sf_ai/src/facing.rs` new, `placement.rs`, `army.rs`, `profile.rs`, `crates/sf_data/src/ai_profile.rs`); nothing in `crates/sf_sim`, no unit or weapon number, `exit_side` and the shipped profile values untouched. Three profile switches, **off by default** (every shipped and frozen profile reads as off, every digest and `.expected` unchanged): `economy.placement_facing` (equal placement scores go toward the enemy start site, not north-west), `army.gather_facing` (the gather point rounds toward the anchor and the ring cells are tried facing the enemy), `army.scout_facing` (the scout's quarters, toward the enemy first, not north-west first). Shared form: `Facing` = direction to the enemy site with the **middle of the map** as origin, rank `(-dot, |cross|, cross)`; integer, doubled coordinates, one-to-one so no `(y, x)` tail. Rules and the measurement: `docs/rules/ai.md` "Direction-free rules (WP9.6a)"; decision note: PLAN.md under WP9.6.

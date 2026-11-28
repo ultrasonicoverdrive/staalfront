@@ -249,8 +249,10 @@
             weapons: ["rifle"],
             model: Shape(Cone), strategic_icon: Circle,
             models: {
-                Meridian: Glb("set_v3/meridian_rifleman.glb"),
-                Veyran: Glb("set_v3/veyran_rifleman.glb"),
+                // WP11.6i: the trial figure in style G (Tijmen 27-11-2026); the rest of the
+                // infantry stays set v3 until his style check.
+                Meridian: Glb("set_v5/meridian_rifleman.glb"),
+                Veyran: Glb("set_v5/veyran_rifleman.glb"),
             },
             icon: "rifleman",
             build_picture: (color: (90, 170, 100), label: "RIFLE", order: 10),

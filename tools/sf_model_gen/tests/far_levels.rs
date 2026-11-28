@@ -170,9 +170,13 @@ const FAR: [(&str, usize, usize); 157] = [
 #[test]
 fn the_far_levels_are_what_they_were_before_the_shape_round() {
     // WP11.6d added 14 decor and wreck files that were not in the set before the shape round; the
-    // 157 older ones are what the table says.
+    // 157 older ones are what the table says. WP11.6i added the two trial riflemen (their levels
+    // are pinned in tests/infantry.rs).
     let all = set::all();
-    assert_eq!(all.len(), FAR.len() + sf_model_gen::decor::recipes().len());
+    assert_eq!(
+        all.len(),
+        FAR.len() + sf_model_gen::decor::recipes().len() + 2
+    );
     let models: Vec<_> = all
         .into_iter()
         .filter(|m| FAR.iter().any(|f| f.0 == m.stem))

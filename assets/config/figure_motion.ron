@@ -1,0 +1,30 @@
+// The walk cycle of a figure (WP11.6i, crates/sf_render/src/walk.rs). Render only: nothing here
+// reaches the simulation. Compiled into the game like terrain.ron (a change needs a rebuild).
+// Applied only to figure models whose eight nodes (thighs `leg_l`/`leg_r`, shins `shin_l`/`shin_r`,
+// torso, head, arms) have their origins at the joints; the glb loader checks it. The set v3 and v4
+// figures do not, and keep gliding.
+//
+// The phase follows the distance a unit travels, one cycle per `stride_m` (two steps), so a slower
+// unit steps slower. Each foot is planted for half the cycle (it moves back under the hip exactly
+// as fast as the body moves forward) and swings forward the other half, lifted by `lift_m`; the
+// hip sits where the stance leg reaches at `knee_reach` of its length (the bob) and a two-bone
+// solve sets thigh and shin. Wall time only blends between standing and walking (`blend_s`).
+//
+// Cadence (round 2): the rifleman moves 0.7 cells/s = 2.8 m/s, a jog. A cycle of 1.60 m gives
+// 1.75 cycles/s = 3.5 steps/s. The planted foot lands a quarter stride (0.40 m) ahead of the hip;
+// with the 0.92 m leg at 97 % reach the hip then sinks 0.92 - sqrt(0.892^2 - 0.40^2) = 0.12 m.
+// A longer stride steps slower but sinks more (2.0 m: 0.18 m), which reads as a crouch.
+//
+// `max_step_m`: a unit that moves more than this between two frames (2 m at true size) keeps its
+// phase. At 2.8 m/s that needs under 1.4 frames per second of game time (for example very low fps
+// with fast-forward); the figure then stops stepping for those frames.
+(
+    arm_swing_deg: 18.0,       // the free arm, against the foot on its side
+    rifle_arm_swing_deg: 4.0,  // the arm that carries the rifle holds it nearly steady
+    lean_deg: 5.0,             // forward lean of torso, head and shoulders at full walk
+    stride_m: 1.60,            // metres per cycle at true model size
+    lift_m: 0.14,              // swing foot height at mid swing
+    knee_reach: 0.97,          // the stance leg reaches this share of its length
+    blend_s: 0.25,             // seconds from standing to walking and back
+    max_step_m: 2.0,           // a longer jump per frame does not advance the phase
+)

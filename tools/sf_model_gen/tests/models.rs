@@ -126,9 +126,10 @@ fn is_neutral(stem: &str) -> bool {
 }
 
 /// A person (or a team of people): the figure nodes instead of hull and turret, the infantry
-/// budget. Only the heavy gun team is generated; the other figures are Tijmen's set v3 (WP11.6b).
+/// budget. The heavy gun team and the trial riflemen (WP11.6i) are generated; the other figures
+/// are Tijmen's set v3 (WP11.6b).
 fn is_infantry(stem: &str) -> bool {
-    stem.ends_with("heavy_gun_team")
+    stem.ends_with("heavy_gun_team") || stem.ends_with("_rifleman")
 }
 
 /// A vessel floats: the waterline `Y = 0` lies inside the hull (WP11.6b).
@@ -159,7 +160,7 @@ fn budget(stem: &str) -> [usize; 3] {
     if is_building(stem) && !is_decor(stem) {
         [8000, 2400, 500]
     } else if is_infantry(stem) {
-        [1500, 250, 60]
+        [3000, 750, 150]
     } else if is_decor(stem) {
         [1500, 500, 150]
     } else {
@@ -294,8 +295,9 @@ fn buildings_use_their_detail_budget() {
             let least = if state { 200 } else { 1000 };
             assert!((least..=6000).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else if is_infantry(&m.stem) {
-            // A figure is small: 400 triangles in LOD0 keep LOD2 (60 at most) under 15 %.
-            assert!((400..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+            // A figure is small: 400 triangles in LOD0 keep LOD2 under 15 %; WP11.6i round 2 raised
+            // the infantry budget to 3,000 for the trial riflemen.
+            assert!((400..=3000).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else {
             // WP11.6r: bevels and rounder parts on top of the 1,200 of the tuning round, well
             // under the 4,000 ceiling (the budget is not a target).
@@ -617,6 +619,10 @@ const UNIT_FOOTPRINTS: &[(&str, f32, f32)] = &[
     ("veyran_gunboat", 18.00, 5.00),
     ("veyran_harvester", 6.54, 3.60),
     ("veyran_heavy_gun_team", 1.70, 1.20),
+    // WP11.6i: the trial riflemen stay inside the longer side of the set v3 rifleman (1.16 m,
+    // its rifle held across) both ways.
+    ("meridian_rifleman", 1.16, 1.16),
+    ("veyran_rifleman", 1.16, 1.16),
     ("veyran_heavy_tank", 7.25, 3.80),
     ("veyran_repair_truck", 4.94, 2.50),
     ("veyran_siege_artillery", 8.60, 3.10),
@@ -720,8 +726,8 @@ fn every_structure_has_all_its_states() {
     // WP11.6a 6, WP11.6b 14 units, WP11.6c the rest.
     assert_eq!(
         stems.len(),
-        6 + 14 + 22 * 5 - 3 + 24 + 6 + 14,
-        "WP11.6d: 14 decor and wreck files"
+        6 + 14 + 22 * 5 - 3 + 24 + 6 + 14 + 2,
+        "WP11.6d: 14 decor and wreck files; WP11.6i: the two trial riflemen"
     );
     let mut sorted = stems.clone();
     sorted.sort_unstable();

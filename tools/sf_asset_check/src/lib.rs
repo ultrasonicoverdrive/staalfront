@@ -28,8 +28,8 @@
 //! share rasterises the LOD0 triangles on the ground plane and takes the
 //! topmost triangle per pixel ([`raster`]).
 //!
-//! Budgets (LOD0/LOD1/LOD2): infantry 1500/250/60 (raised from 800 by the
-//! orchestrator, see `assets/set_v3/README.md`), two-figure units twice that,
+//! Budgets (LOD0/LOD1/LOD2): infantry 3000/750/150, one figure or two (WP11.6i round 2; was
+//! 1500/250/60 and 3000/500/120 for two, see `assets/set_v3/README.md`),
 //! vehicle, decor and wreck 1500/500/150, building 5000/1500/300.
 
 pub mod check;

@@ -28,6 +28,7 @@ pub const MODELS: &[fn() -> Model] = &[
     meridian_light_tank,
     crate::units_transport::meridian_light_transport,
     crate::units_wheeled::meridian_repair_truck,
+    crate::units_infantry::meridian_rifleman,
     crate::units_artillery::meridian_siege_artillery,
     crate::units_vessels::neutral_ferry,
     crate::units_wheeled::neutral_supply_truck,
@@ -39,6 +40,7 @@ pub const MODELS: &[fn() -> Model] = &[
     veyran_light_tank,
     veyran_power_plant,
     crate::units_wheeled::veyran_repair_truck,
+    crate::units_infantry::veyran_rifleman,
     crate::units_artillery::veyran_siege_artillery,
     crate::units_wheeled::veyran_transport_truck,
 ];
