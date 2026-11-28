@@ -96,6 +96,7 @@ fn glyph(c: char) -> [u8; 5] {
         'U' => [5, 5, 5, 5, 7],
         'V' => [5, 5, 5, 5, 2],
         'W' => [5, 5, 7, 7, 5],
+        'X' => [5, 5, 2, 5, 5],
         'Y' => [5, 5, 2, 2, 2],
         '0' => [7, 5, 5, 5, 7],
         '1' => [2, 6, 2, 2, 7],
@@ -300,9 +301,51 @@ fn the_trial_figure_pictures_are_rendered_and_written_on_request() {
         );
     }
 
+    // lod_strip (round 2): each new figure at LOD0, LOD1 and LOD2, each level once large (to see
+    // its shape) and once at a size the game draws it at: a projected bounding diameter of 75, 45
+    // and 24 px (LOD0 is drawn from 60 px up, LOD1 from 30, LOD2 below 30; DEFAULT_SWITCH_PX).
+    let mut lods = Vec::new();
+    let focal = H as f32 / (2.0 * 15_f32.to_radians().tan());
+    for (fi, faction) in factions.iter().enumerate() {
+        let full = &models[fi * 2 + 1];
+        let diameter = glb::bounds_of(full).diameter();
+        for (n, px) in [(0usize, 75.0_f32), (1, 45.0), (2, 24.0)] {
+            let one = LoadedModel {
+                name: full.name.clone(),
+                levels: vec![full.levels[n].clone()],
+            };
+            let lset = glb::model_set(&[one], &[60.0]).unwrap();
+            let mut inst = Instancer::new(style(), (128.0, 128.0));
+            inst.set_models(lset);
+            let p = cells(at.0, at.1);
+            inst.update_tick([
+                Motion::from_fixed(0, 1, p, p, Facing::new(0), Facing::new(0))
+                    .with_id(UnitId::from_parts(1, 0)),
+            ]);
+            for (size, d) in [("LARGE", 4.6), ("GAME", diameter * focal / px)] {
+                let vp = view(Vec3::new(at.0 + 0.2, 0.9, at.1), d, 45.0, 35.0);
+                inst.build_frame(
+                    &FrameView::models_only(&Frustum::from_view_proj(vp), 1.0),
+                    |_, _| 0.0,
+                );
+                r.set_view_proj(vp);
+                r.upload_units(&inst);
+                let mut img = r.render_to_image().expect("render");
+                let what = if size == "GAME" {
+                    format!("{} LOD{n} {px:.0} PX", faction.to_uppercase())
+                } else {
+                    format!("{} LOD{n}", faction.to_uppercase())
+                };
+                label(&mut img, &what, 6, 6);
+                lods.push(img);
+            }
+        }
+    }
+
     if let Some(dir) = std::env::var_os("SF_SAVE_SHOTS") {
         let dir = PathBuf::from(dir);
         image::write_png(&dir.join("compare_close.png"), &sheet(&close, 4)).unwrap();
         image::write_png(&dir.join("walk_cycle.png"), &sheet(&walk, 8)).unwrap();
+        image::write_png(&dir.join("lod_strip.png"), &sheet(&lods, 6)).unwrap();
     }
 }

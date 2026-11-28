@@ -295,8 +295,9 @@ fn buildings_use_their_detail_budget() {
             let least = if state { 200 } else { 1000 };
             assert!((least..=6000).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else if is_infantry(&m.stem) {
-            // A figure is small: 400 triangles in LOD0 keep LOD2 (60 at most) under 15 %.
-            assert!((400..1500).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
+            // A figure is small: 400 triangles in LOD0 keep LOD2 under 15 %; WP11.6i round 2 raised
+            // the infantry budget to 3,000 for the trial riflemen.
+            assert!((400..=3000).contains(&t[0]), "{}: LOD0 {}", m.stem, t[0]);
         } else {
             // WP11.6r: bevels and rounder parts on top of the 1,200 of the tuning round, well
             // under the 4,000 ceiling (the budget is not a target).

@@ -176,3 +176,32 @@ fn the_engine_walks_the_new_figures_and_not_the_set_v3_ones() {
         assert!(!set.model(0).walks(), "set v3 {file}");
     }
 }
+
+/// Round 2: no limb is a square post. A horizontal cut through the thigh, the shin and the free
+/// forearm (in the node's own frame, away from pockets and pads) crosses at least 8 sides in LOD0
+/// and 6 in LOD1 (two triangles per side), for both factions.
+#[test]
+fn the_limbs_have_round_or_faceted_sections_not_square_posts() {
+    let sides = |n: &Node, y: i32| -> usize {
+        n.mesh
+            .tris
+            .iter()
+            .filter(|t| {
+                let lo = t.v.iter().map(|p| p[1]).min().unwrap();
+                let hi = t.v.iter().map(|p| p[1]).max().unwrap();
+                lo < y && hi > y
+            })
+            .count()
+            / 2
+    };
+    for (m, _) in figures() {
+        for (level, least) in [(0, 8), (1, 6)] {
+            let root = &m.lods[level];
+            for (node, y) in [("leg_l", -350), ("shin_l", -250), ("arm_l", -420)] {
+                let n = sides(root.find(node).unwrap(), y);
+                println!("{} LOD{level} {node}: {n} sides", m.stem);
+                assert!(n >= least, "{} LOD{level} {node}: {n} sides", m.stem);
+            }
+        }
+    }
+}
