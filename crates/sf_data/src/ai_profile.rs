@@ -92,6 +92,11 @@ pub struct EconomyRules {
     /// [`MAX_QUEUE`]. Left out: [`DEFAULT_MAX_QUEUE`].
     #[serde(default = "default_max_queue")]
     pub max_queue: u8,
+    /// WP9.6a, direction-free placement: candidates with the same score are ordered by how far they lie toward the
+    /// enemy start site (then by their distance from the line to it, then by side), not by `(y, x)`, which puts them
+    /// north and west on every map. Left out: false, off (the order `(score, y, x)` as before).
+    #[serde(default)]
+    pub placement_facing: bool,
 }
 
 /// The longest queue the AI may keep in one factory (the simulation's queue limit as shipped is 5).
@@ -281,6 +286,18 @@ pub struct ArmyRules {
     /// above 0 (checked).
     #[serde(default)]
     pub stage_search: bool,
+    /// WP9.6a, the gather cell relative to the enemy: the cell nearest the staging point is searched ring by ring as
+    /// before, but the cells of one ring are taken from the side facing the enemy start site instead of `(y, x)`
+    /// (north and west first), and the point itself is rounded toward the anchor in both directions. Left out: false,
+    /// off (the old order).
+    #[serde(default)]
+    pub gather_facing: bool,
+    /// WP9.6a, the scout's quarters relative to the enemy: after the start sites the four quarter centres are visited
+    /// in the order of their rank toward the enemy (the quarter toward the enemy first, then the two beside it by their
+    /// side of the line between the bases, the AI's own last), instead of north-west, north-east, south-west,
+    /// south-east. Left out: false, off (the old order).
+    #[serde(default)]
+    pub scout_facing: bool,
 }
 
 impl ArmyRules {
@@ -303,6 +320,12 @@ impl ArmyRules {
     /// Whether a number of WP9.3e-1 (the formation march or the staging search) is set. Off, the digest keeps its layout.
     pub fn cohesion_on(&self) -> bool {
         self.march_break_radius != 0 || self.stage_search
+    }
+
+    /// Whether a direction-free switch of WP9.6a that lives in the army rules is on. (The placement switch is in
+    /// [`EconomyRules`]; the digest asks both.)
+    pub fn facing_on(&self) -> bool {
+        self.gather_facing || self.scout_facing
     }
 
     /// Whether the counter mix of WP9.2b-1 is on. Off, nothing is tallied and the digest keeps its layout.

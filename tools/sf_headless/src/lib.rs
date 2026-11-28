@@ -139,6 +139,7 @@
 pub mod cli;
 pub mod log;
 pub mod run;
+pub mod savefile;
 pub mod scenario;
 pub mod tournament;
 

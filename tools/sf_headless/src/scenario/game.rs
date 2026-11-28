@@ -204,9 +204,39 @@ pub fn build_game_world(
     build_world_at_speed(seed, cells, Fx::from_raw(game.speed_raw), loaded)
 }
 
+/// The world of [`build_game_world`] before its starting objects are scheduled and its first tick is run: tick 0,
+/// no entity, no command. What a save of the game is restored onto (WP13.1e-1).
+pub fn build_fresh_game_world(
+    seed: u64,
+    cells: (u32, u32),
+    game: &GameSpec,
+    loaded: &LoadedGame,
+) -> Result<World, ScenarioError> {
+    configure(seed, cells, Fx::from_raw(game.speed_raw), loaded)
+}
+
 /// [`build_game_world`] with the walking speed given directly: the world of a match played without a scenario
 /// file (`sf_headless tournament`).
 pub(crate) fn build_world_at_speed(
+    seed: u64,
+    cells: (u32, u32),
+    speed: Fx,
+    loaded: &LoadedGame,
+) -> Result<World, ScenarioError> {
+    let mut world = configure(seed, cells, speed, loaded)?;
+    // `matchplay::schedule`, then the tick `match_scene` runs before the thread starts.
+    for (player, command) in &loaded.commands {
+        world
+            .schedule(Tick(0), *player, command.clone())
+            .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+    }
+    world.step();
+    Ok(world)
+}
+
+/// The world of a match with every rule of the game (`playfield` and `matchplay::configure`), at tick 0, nothing
+/// scheduled.
+fn configure(
     seed: u64,
     cells: (u32, u32),
     speed: Fx,
@@ -281,7 +311,7 @@ pub(crate) fn build_world_at_speed(
         .with_formation(sf_bridge::formation_config(&settings))
         .map_err(|e| sim(e.to_string()))?;
     // `playfield::with_combat`.
-    let mut world = world
+    world
         .with_weapons(sf_bridge::weapon_table(defs).map_err(sim)?)
         .map_err(|e| sim(e.to_string()))?
         .with_targeting(sf_bridge::targeting_config(&settings))
@@ -289,13 +319,5 @@ pub(crate) fn build_world_at_speed(
         .with_destruction(sf_bridge::destruction_config(&settings))
         .map_err(|e| sim(e.to_string()))?
         .with_match(sf_bridge::match_rules(def).map_err(sim)?)
-        .map_err(|e| sim(e.to_string()))?;
-    // `matchplay::schedule`, then the tick `match_scene` runs before the thread starts.
-    for (player, command) in &loaded.commands {
-        world
-            .schedule(Tick(0), *player, command.clone())
-            .map_err(|e| sim(e.to_string()))?;
-    }
-    world.step();
-    Ok(world)
+        .map_err(|e| sim(e.to_string()))
 }

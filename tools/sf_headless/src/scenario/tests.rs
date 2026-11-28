@@ -1030,3 +1030,33 @@ mod record {
         assert!(has(&p, "`ai` must be left out"), "{p:?}");
     }
 }
+
+/// `Arrivals::skip_to(T)` passes over exactly the commands that arrived at or before T (WP13.1e-1): the ones a
+/// save at the save point of T already holds.
+#[test]
+fn skip_to_passes_over_the_arrivals_up_to_and_including_its_tick() {
+    let stop = Command::Stop { ids: Vec::new() };
+    let list: Vec<RecordedCommand> = [3, 5, 5, 6, 9]
+        .iter()
+        .map(|&t| RecordedCommand::new(Tick(t), Tick(t + 1), PlayerId(0), &stop))
+        .collect();
+    let at = |tick: u64| {
+        let mut a = Arrivals {
+            list: &list,
+            next: 0,
+        };
+        (a.skip_to(Tick(tick)), a.remaining())
+    };
+    assert_eq!(at(2), (0, 5));
+    assert_eq!(at(4), (1, 4));
+    // The boundary: both commands that arrived at 5 are passed over at 5, none at 4.
+    assert_eq!(at(5), (3, 2));
+    assert_eq!(at(6), (4, 1));
+    assert_eq!(at(100), (5, 0));
+    // From a cursor already past some, it counts only what it passes now.
+    let mut a = Arrivals {
+        list: &list,
+        next: 1,
+    };
+    assert_eq!(a.skip_to(Tick(5)), 2);
+}

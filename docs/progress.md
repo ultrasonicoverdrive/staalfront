@@ -3945,6 +3945,27 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   factory finishing with `comes_with` and production with vision round trip at every tick in every
   build, and the footprint checks have edge cases that a check on the anchor alone fails.
 
+### WP13.1e-1 notes: the save file and the headless world + AI round trip (26-11-2026)
+
+* **Built** (`tools/sf_headless/src/savefile.rs`): the save file `SFSG` version 1: sections `I` (identity and
+  copies of the formats, rules digest, tick, checksum), `W` (`World::save`), `A` (each `Ai::save`, ascending by
+  player), `L` (the command log), `H` (host, empty), FNV-1a 64 trailer; `write`, `read_header`, `load`
+  (all-or-nothing, one `SaveFileError`). Layout, read order and refusals: `docs/rules/save.md`, "The save file".
+* **Headless plumbing** (`run.rs`, `scenario.rs`): `run_saving` with a `SavePoint` (`&mut` world, AIs, log) at
+  the one save point (after the arrivals of the tick, before the thinks); `Finished::log`; `resume` from a
+  loaded save; `replay_log`; `Arrivals::schedule_due_logged` and `skip_to`; `build_fresh_world` for a recorded
+  game (the game's world before its starting objects and first tick).
+* **Tests** (`tests/save_game.rs`): all 49 CI scenarios through save files every 97 ticks, world and AIs
+  continuing to the pin (the 15 `ai_*` with their AI in every save, AI digests, commands and log equal to the
+  run without saves); a two-AI variant of `ai_raid`; `ai_raid` at every tick in release (5599 saves, 243 s on
+  the container, load 6-7) and its first 200 ticks in every build; a recorded `m1_duel` game through saves,
+  replayed and resumed; the log replayed to the saved checksum; the pinned file (`ai_raid` at 970: 55,296
+  bytes, hash `0xfac0_fae0_a97b_7248`); every truncation and bit flip refused; every refusal with its message.
+* No pin moved; `sf_sim`, `sf_game`, the AI profiles and the tournament are untouched.
+* **Left for 13.1e-2/3**: the sim thread's save message and restored spawn, the command log always on in a
+  match, the runner, file I/O and the view caches. **For 13.1h**: the hash is not security; a hand-made file
+  with a right hash reaches the world and AI checks.
+
 ### WP13.1c-3a notes: saving repair, sale and the match outcome (23-11-2026)
 
 * The entity columns `repairing` and `sell_left` join section `E`, and a new section `G` holds the
@@ -4055,3 +4076,11 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   (`crates/sf_render/tests/walk_bench.rs`, ignored) of 200 moving units: 32.8 µs per frame build for v5
   riflemen (1200 part instances) against 9.0 µs for v3 riflemen (200) and 15.1 µs for light tanks (600),
   load average 6-9; in-game walk strips and labelled in-game shots, the far shot at zoom 0.94.
+
+### WP9.6a notes: direction-free AI rules, built off, measured per rule (26-11-2026)
+
+* **What was built.** `sf_ai` and AI profile data only (`crates/sf_ai/src/facing.rs` new, `placement.rs`, `army.rs`, `profile.rs`, `crates/sf_data/src/ai_profile.rs`); nothing in `crates/sf_sim`, no unit or weapon number, `exit_side` and the shipped profile values untouched. Three profile switches, **off by default** (every shipped and frozen profile reads as off, every digest and `.expected` unchanged): `economy.placement_facing` (equal placement scores go toward the enemy start site, not north-west), `army.gather_facing` (the gather point rounds toward the anchor and the ring cells are tried facing the enemy), `army.scout_facing` (the scout's quarters, toward the enemy first, not north-west first). Shared form: `Facing` = direction to the enemy site with the **middle of the map** as origin, rank `(-dot, |cross|, cross)`; integer, doubled coordinates, one-to-one so no `(y, x)` tail. Rules and the measurement: `docs/rules/ai.md` "Direction-free rules (WP9.6a)"; decision note: PLAN.md under WP9.6.
+* **Tests.** `facing/tests.rs` (9, the rank of all 9,216 cells equals the half-turned cell for the other seat), `tools/sf_headless/tests/ai_facing.rs` (6, the production `placement::search`, `army::ensure_gather` and `army::waypoints` on a half-turn-symmetric world: the switch on gives player 1 the half turn of player 0's answer, the switch off shows the compass bias), a profile format test and a digest test with four literals. Mutations (switch ignored, rank without its cross terms, digest flag dropped) each fail their test; the table is in `ai.md`.
+* **Measured (1,600 mirror games per row, `m1_duel`, release, seed 458,758; `ai.md` has all tables).** Each switch alone swings the site balance on the symmetric map by 5 to 55 points (NE share of normal 30.7 % -> 25.4 % placement, 75.2 % gather, 85.0 % scout); **all three give normal NE 50.5 % [48.0, 53.0] on the symmetric map** (SW 787 : NE 803, undecided 10 against 87). On the real `m1` they do **not** fix it (normal NE 52.8 % -> 63.3 %, hard 59.4 % -> 95.9 %, easy 62.4 % -> 91.9 %), and on the symmetric map hard stays unfair (NE 75.2 %, seat 0 62.8 %). A scratch copy of `unit_defs.ron` with west exits moves hard (all off) from NE 45.7 % to 0.1 % and normal (all off) from 30.7 % to 50.3 %: `exit_side` is the largest direction rule left. **No switch is turned on; nothing shipped moved.** **Decision (Tijmen 27-11-2026, "accepteren de scheefheid"):** the bias on `m1` is accepted, `exit_side` and the seat order stay, 9.6b is cancelled, the switches stay off as a measuring instrument; the level tuning and 9.4b resume (measured in pairs, seats swapped). `exit_side` and the seat order are the largest direction rules left (measured).
+* **Not done / gaps.** The mirror tests place the power plant only (other kinds cannot be placed in that world); more than two players untested; the symmetric map and the west-exit definitions are scratch copies (not committed); pairs on hard and easy, other seeds and other maps not measured. Details in `ai.md`.
+* **Pins.** None moved: `crates/sf_sim/tests/golden.rs`, every `assets/scenarios/*.expected` (release `--expect` on the 48 CI scenarios of the headless job) and every `sf_ai` digest pin pass with the switches off.
