@@ -4076,6 +4076,19 @@ Branch `wp/11.6d-decor`, built on `wp/11.6p-palette` (the realistic palette and 
   (`crates/sf_render/tests/walk_bench.rs`, ignored) of 200 moving units: 32.8 µs per frame build for v5
   riflemen (1200 part instances) against 9.0 µs for v3 riflemen (200) and 15.1 µs for light tanks (600),
   load average 6-9; in-game walk strips and labelled in-game shots, the far shot at zoom 0.94.
+* **Round 2, shape** (Tijmen 28-11-2026: "a shape round, and visually a real step towards realistic
+  little soldiers"): both riflemen remodelled with tapered round (Meridian) or faceted (Veyran)
+  sections in LOD0 and LOD1, knees (eight nodes: thighs `leg_l`/`leg_r`, shins `shin_l`/`shin_r`),
+  hands, a head with jaw and nose, boots with sole and toe, hem, belt, pockets, pouches and pack;
+  their own lighter palette entries (`meridian_figure`, `veyran_figure`); team colour as helmet
+  cover and band, armbands, shoulder pads or plates and a chest panel. Triangles 2956/748/140 and
+  1676/550/138; the infantry budget is raised to 3000/750/150 (`sf_asset_check::class::budget`).
+  The walk plants the stance foot (foot path plus a two-bone solve, within 3 mm in the test), lifts
+  the swing foot, carries head and shoulders with the lean, stride 1.60 m. In M1 at zoom 0.30 the
+  Meridian rifleman measures luma 82 (v3 rocket trooper 59, Meridian light tank 94), the Veyran
+  rifleman 79 (Veyran light tank 72). `walk_bench`: 83.5 µs per frame for 200 walking v5 riflemen
+  (1600 part instances), against 32.8 µs in round 1; v3 rifleman 7.9 µs, light tank 12.8 µs; load
+  about 1.2. New pictures: `lod_strip.png`, `ingame_both_default.png`, `ingame_both_close.png`.
 
 ### WP9.6a notes: direction-free AI rules, built off, measured per rule (26-11-2026)
 

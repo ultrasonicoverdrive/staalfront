@@ -434,35 +434,62 @@ budget (1500 / 500 / 150), the usual LOD, ground and checker rules.
   edge and fence; ore stage 1 and 2; ore stage 3 and 4; rock large and small; broadleaf and fallen
   broadleaf; wreck heavy and light vehicle; wreck medium vehicle and vessel.
 
-## 13. Figures (WP11.6i trial, Tijmen 27-11-2026)
+## 13. Figures (WP11.6i trial, Tijmen 27-11-2026; shape round 28-11-2026)
 
 One rifleman per faction in style G (`tools/sf_model_gen/src/units_infantry.rs`,
 `assets/set_v5/{meridian,veyran}_rifleman.glb`) before the rest of the infantry, for Tijmen's style
-check; only the `rifleman` role points at them, every other figure stays set v3.
+check; only the `rifleman` role points at them, every other figure stays set v3. Round 2 (Tijmen
+28-11-2026: "a shape round, and visually a real step towards realistic little soldiers") reshaped
+both.
 
-- **Proportions**: about 7.5 heads, 1.82 m to the top of the helmet (set v3 rifleman 1.785 m, +2 %).
-  Hip 0.90 m, waist 0.96 m, shoulders 1.40 m, neck 1.45 m. Helmet and rifle about 20 % oversized
-  (helmet radius 156-162 mm, rifle 1.13 m), like the vehicle turrets, so they read at the far view.
-- **Detail as geometry**: helmet (Meridian round with goggles; Veyran angular with a visor slit),
-  belt, three pouches, Y-straps front and back, backpack with flap and rolled mat, boots with sole
-  and toe, knee pads (Veyran also a shin and chest plate), a rifle of stock, receiver, magazine,
-  handguard, barrel and sight. Carried in the right hand along +X (trail carry).
-- **Shape language**: only in LOD0. There Meridian's limbs, torso, belt, head and helmet are
-  turned (16 segments, smooth normals) and Veyran's are chamfered rings (faceted); boots, pouches,
-  straps, backpack and rifle are boxes in both. LOD1 and LOD2 are plain boxes (LOD1 with a 4-sided
-  helmet) and the same shapes for both factions; only colours and the helmet's place differ. Which
-  level the game draws (measured in M1, `docs/screenshots/wp11.6i/`): LOD0 at zoom 0.12, LOD1 at the
-  default zoom 0.30 (the 7 figures at LOD1, the tank and the centre at LOD0), LOD2 at zoom 0.94. So
-  the rounded Meridian shape shows only zoomed in; at the default zoom both factions are boxes. Colours: Meridian olive jacket and helmet, sand
-  trousers and face, dark webbing; Veyran grey-blue uniform, gunmetal kit and helmet, metal face
-  guard, the crimson accent as a small chest and helmet mark.
-- **Team colour**: the helmet's top patch and band, a pad on each shoulder, a chest panel. Top-down
-  share 24.0 / 24.5 / 23.8 % (Meridian) and 25.7 / 24.5 / 23.8 % (Veyran).
-- **Budget**: 1452 / 196 / 56 (Meridian), 1046 / 196 / 56 (Veyran) of 1500 / 250 / 60. LOD2 folds
-  the arms into the torso block; the arm nodes keep only their shoulder pad (the rifle in `arm_r`).
-- **Nodes at the joints**: the six figure nodes are the root's children like set v3, but each has
-  its origin at its joint (legs at the hip, arms at the shoulder, head at the neck, torso at the
-  waist; `units_infantry::JOINTS`), so the renderer can walk them (`crates/sf_render/src/walk.rs`,
-  `assets/config/figure_motion.ron`). The set v3 figures have every node at the model origin; the
-  loader's joint check (`glb::figure_joints`) leaves them as one body that does not walk.
-
+- **Proportions**: about 7.5 heads, 1.86 m to the top of the helmet (set v3 rifleman 1.785 m, +4 %).
+  Knee 0.495 m, hip 0.92 m, waist 0.98 m, shoulders 1.42 m (0.43 m apart, the hips 0.20 m), neck
+  1.49 m. Helmet and rifle about 20 % oversized (helmet radius 150-178 mm with the brim, rifle
+  1.13 m), like the vehicle turrets.
+- **Real cross-sections**: thighs, shins, upper arms and forearms are lofted rings that taper
+  (thigh 96 → 60 mm, calf 64 → ankle 44, upper arm 62 → 48, forearm 47 → 36), 16-sided ovals
+  (Meridian) or chamfered octagons (Veyran) in LOD0, 8-sided ovals or hexagons in LOD1; LOD2 is
+  boxes. Pinned by `the_limbs_have_round_or_faceted_sections_not_square_posts` (a cut through
+  thigh, shin and forearm crosses at least 8 sides in LOD0 and 6 in LOD1). The torso is a loft of
+  six rings (hips, waist, chest, shoulders, neck base), the head a loft of five (chin, jaw, cheeks,
+  crown) with a nose, under the helmet.
+- **Detail as geometry** (LOD0): jacket hem, belt, two chest pockets with flaps, three belt
+  pouches, straps front and back, a pack with a flap and a rolled mat, a cargo pocket, boots with a
+  sole and a toe cap, knee pads (Veyran also shin guards), hands, the rifle (stock, receiver,
+  magazine, handguard, barrel, sight).
+- **Faction shape language in every level**: Meridian rounded (oval rings, a round helmet with a
+  brim, soft round shoulder caps, rolled sleeves with skin forearms, a rounded pack); Veyran
+  angular (faceted rings, a faceted helmet with a visor line, hard shoulder plates, full sleeves
+  and gloves, a boxy pack). LOD1 keeps the helmet shapes, the shoulders and the pack; LOD2 keeps
+  the helmet shape (a brimmed cone or a box). See `docs/screenshots/wp11.6i/lod_strip.png`.
+- **Colour**: the figures have their own palette entries (`meridian_figure`, `veyran_figure` in
+  `model_palette.ron`), lighter than the vehicles' paint, because in round 1 they read almost black
+  in the game: Meridian sand uniform (216, 200, 162) with olive helmet, webbing and pack (146, 142,
+  94); Veyran cool grey-blue (170, 186, 204) with blue-grey gear (118, 128, 146); a skin tone in the
+  accent slot, dark boots, a gunmetal rifle. The six-material limit leaves no slot for Veyran's
+  crimson mark on the figure. Measured in M1 at zoom 0.30 (mean of the unit pixels without the
+  team colour): Meridian rifleman luma 82 (74 with a first, smaller lift; the v3 rocket trooper
+  59), the Meridian light tank 94; Veyran rifleman 79, the Veyran light tank 72.
+- **Team colour**: the helmet's top cover and band, an armband on each upper arm, a pad (Meridian)
+  or plate (Veyran) on each shoulder and a chest panel. Top-down share 22.3 / 22.6 / 23.2 %
+  (Meridian) and 23.1 / 29.2 / 23.5 % (Veyran).
+- **Budget**: 2956 / 748 / 140 (Meridian), 1676 / 550 / 138 (Veyran). The infantry budget was
+  1500 / 250 / 60; a figure with tapered round sections, knees, hands and kit does not fit, so round
+  2 raised the class to 3000 / 750 / 150 (`sf_asset_check::class::budget`; a two-figure file has the
+  same budget now).
+- **Nodes at the joints**: eight figure nodes directly under the root, each with its origin at its
+  joint (`units_infantry::JOINTS`): the thighs `leg_l`/`leg_r` at the hips (the names the checker
+  requires), the shins `shin_l`/`shin_r` with the boots at the knees, the torso at the waist, the
+  head at the neck, the arms at the shoulders. The shins are not children of the thighs: the
+  renderer poses a shin from its thigh's angle (`walk::limb_matrix`), so the figure tree stays flat
+  as the checker and the loader read it. The set v3 and v4 figures have six nodes at the model
+  origin; the loader's joint check (`glb::figure_joints`) needs all eight at plausible joints, so
+  they stay one body that does not walk.
+- **Walk** (`crates/sf_render/src/walk.rs`, `assets/config/figure_motion.ron`): each foot is
+  planted for half the cycle and swings the other half, lifted 0.14 m; a two-bone solve sets thigh
+  and shin so the ankle follows the foot's path (the planted foot stays within 3 mm, pinned); the
+  hip sinks to where the stance leg reaches at 97 % of its length (up to 0.12 m); the torso leans 5°
+  and carries the head and the shoulders; the free arm swings 18°, the rifle arm 4°. The boot is
+  part of the shin and tilts with it (no ankle node: eight parts is `MAX_PARTS`).
+- **Which level the game draws** (measured in M1): LOD0 at zoom 0.12, LOD1 at the default zoom 0.30,
+  LOD2 at zoom 0.94.

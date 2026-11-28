@@ -11,9 +11,9 @@
 // solve sets thigh and shin. Wall time only blends between standing and walking (`blend_s`).
 //
 // Cadence (round 2): the rifleman moves 0.7 cells/s = 2.8 m/s, a jog. A cycle of 1.60 m gives
-// 1.75 cycles/s = 3.5 steps/s. A longer stride would step slower but the planted foot would have to
-// reach 0.4 m or more ahead of the hip, which bends the 0.92 m leg so far that the hip sinks by more
-// than 0.1 m (measured in the walk tests); 1.60 m keeps the sink near 0.1 m.
+// 1.75 cycles/s = 3.5 steps/s. The planted foot lands a quarter stride (0.40 m) ahead of the hip;
+// with the 0.92 m leg at 97 % reach the hip then sinks 0.92 - sqrt(0.892^2 - 0.40^2) = 0.12 m.
+// A longer stride steps slower but sinks more (2.0 m: 0.18 m), which reads as a crouch.
 //
 // `max_step_m`: a unit that moves more than this between two frames (2 m at true size) keeps its
 // phase. At 2.8 m/s that needs under 1.4 frames per second of game time (for example very low fps
