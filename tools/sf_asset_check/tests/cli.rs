@@ -55,7 +55,8 @@ fn mixed_folder(tag: &str) -> Scratch {
     );
     s.put("neutral_tree_pine.glb", &decor("neutral_tree_pine").bytes());
     let mut over = infantry("meridian_scout", 0.30);
-    over.part_mut(0, "torso").reps = 130;
+    // WP11.6i round 2: the infantry budget is 3,000 in LOD0; 250 boxes are 3,060 triangles.
+    over.part_mut(0, "torso").reps = 250;
     s.put("meridian_scout.glb", &over.bytes());
     s.put("notes.txt", b"not a model, ignored");
     s
@@ -75,7 +76,7 @@ fn a_folder_is_checked_in_name_order_and_a_failure_sets_the_exit_code() {
         .collect();
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{out}");
     assert!(out.contains("FAIL  meridian_scout.glb"), "{out}");
-    assert!(out.contains("budget: LOD0 has 1620 triangles"), "{out}");
+    assert!(out.contains("budget: LOD0 has 3060 triangles"), "{out}");
     assert!(!out.contains("notes.txt"));
     assert!(
         out.contains("3 files: 2 pass, 0 with warnings only, 1 fail"),

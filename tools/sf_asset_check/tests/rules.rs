@@ -247,18 +247,18 @@ fn a_lod_of_another_size_is_a_warning_only() {
 #[test]
 fn infantry_over_the_budget_fails_on_the_level_that_is_over() {
     let mut m = infantry("meridian_rifleman", 0.30);
-    m.part_mut(0, "torso").reps = 130; // 1,560 + 60 triangles
+    m.part_mut(0, "torso").reps = 250; // 3,000 + 60 triangles (budget 3,000 since WP11.6i round 2)
     let r = check("meridian_rifleman.glb", &m);
     assert!(r.failed("budget"));
     let said = messages(&r, "budget");
     assert!(
-        said.contains("LOD0 has 1620") && !said.contains("LOD1"),
+        said.contains("LOD0 has 3060") && !said.contains("LOD1"),
         "{said}"
     );
 }
 
 #[test]
-fn the_decor_budget_is_150_for_lod2_and_the_infantry_budget_60() {
+fn the_decor_budget_is_150_for_lod2_and_the_infantry_budget_too() {
     // 12 triangles a box: 12 boxes = 144, 13 = 156.
     let mut d = decor("neutral_tree_pine");
     for lod in 0..3 {
@@ -272,12 +272,15 @@ fn the_decor_budget_is_150_for_lod2_and_the_infantry_budget_60() {
     assert!(r.failed("budget"));
     assert!(messages(&r, "budget").contains("LOD2 has 156"));
 
-    // The same 72 triangles in LOD2 of a figure are over 60.
+    // A figure's LOD2 is 150 too since WP11.6i round 2 (was 60): 72 triangles pass, a LOD2 of
+    // more than 150 is over.
     let mut m = infantry("meridian_rifleman", 0.30);
     m.lods[2] = m.lods[1].clone();
+    assert!(!check("meridian_rifleman.glb", &m).has("budget"));
+    m.part_mut(2, "torso").reps = 13;
     let r = check("meridian_rifleman.glb", &m);
     assert!(
-        messages(&r, "budget").contains("LOD2 has 72"),
+        messages(&r, "budget").contains("LOD2 has") && r.failed("budget"),
         "{:#?}",
         r.findings
     );
@@ -290,7 +293,8 @@ fn the_decor_budget_is_150_for_lod2_and_the_infantry_budget_60() {
 }
 
 #[test]
-fn two_figures_get_twice_the_infantry_budget() {
+fn two_figures_get_the_infantry_budget_of_one() {
+    // WP11.6i round 2: one figure and two have the same budget, 3,000 / 750 / 150.
     let mut m = infantry("veyran_demolition_team", 0.30);
     add_second_figure(&mut m);
     m.part_mut(0, "torso").reps = 130; // 1,692 triangles in LOD0
@@ -298,11 +302,8 @@ fn two_figures_get_twice_the_infantry_budget() {
     assert!(r.facts.pair);
     assert_eq!(r.facts.budget, Some([3000, 750, 150]));
     assert!(!r.has("budget"), "{:#?}", r.findings);
-
-    // One figure with the same triangles is over.
-    let mut single = infantry("meridian_rifleman", 0.30);
-    single.part_mut(0, "torso").reps = 135;
-    assert!(check("meridian_rifleman.glb", &single).failed("budget"));
+    m.part_mut(0, "torso").reps = 250;
+    assert!(check("veyran_demolition_team.glb", &m).failed("budget"));
 }
 
 #[test]
