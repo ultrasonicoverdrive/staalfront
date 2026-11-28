@@ -235,7 +235,7 @@ fn every_model_loads_with_three_levels_parts_and_anchors() {
     }
 }
 
-/// WP11.6i: the trial riflemen load as figures that walk (six parts with a figure joint each, in
+/// WP11.6i: the trial riflemen load as figures that walk (eight parts with a figure joint each, in
 /// every level) and the walk moves their legs in the engine's pose; every other model of the set
 /// does not walk.
 #[test]
@@ -252,8 +252,10 @@ fn the_trial_riflemen_load_as_figures_that_walk() {
         if !walks {
             continue;
         }
-        for level in &m.levels {
-            assert_eq!(level.parts.len(), 6, "{file}");
+        // Every level walks the same way (round-1 review: a pose test at LOD1 too): the left foot
+        // forward and the right one back at phase 0, both ankles on the ground.
+        for (n, level) in m.levels.iter().enumerate() {
+            assert_eq!(level.parts.len(), 8, "{file} LOD{n}");
             assert!(
                 level
                     .parts
@@ -261,28 +263,30 @@ fn the_trial_riflemen_load_as_figures_that_walk() {
                     .all(|p| matches!(p.joint, Joint::Figure(_))),
                 "{file}"
             );
+            let rig: Vec<RigPart> = level
+                .parts
+                .iter()
+                .map(|p| RigPart {
+                    mesh: sf_render::MeshId(0),
+                    parent: None,
+                    rest: p.rest,
+                    joint: p.joint,
+                })
+                .collect();
+            let mut world = [Mat4::IDENTITY; MAX_PARTS];
+            let angles =
+                PartAngles::default().with_walk(walk_pose(0.0, 1.0, &WalkConfig::embedded()));
+            pose_parts(Mat4::IDENTITY, &rig, angles, &mut world);
+            // The shins are parts 2 and 3; the ankle is the shin's end at the ground (0.495 m below
+            // the knee).
+            let ankle = |i: usize| world[i].transform_point3(Vec3::new(0.0, -0.495, 0.0));
+            let (l, r) = (ankle(2), ankle(3));
+            assert!(l.x > 0.3 && r.x < -0.3, "{file} LOD{n}: {l} {r}");
+            assert!(
+                l.y.abs() < 2e-3 && r.y.abs() < 2e-3,
+                "{file} LOD{n}: {l} {r}"
+            );
         }
-        let rig: Vec<RigPart> = m.levels[0]
-            .parts
-            .iter()
-            .map(|p| RigPart {
-                mesh: sf_render::MeshId(0),
-                parent: None,
-                rest: p.rest,
-                joint: p.joint,
-            })
-            .collect();
-        let mut world = [Mat4::IDENTITY; MAX_PARTS];
-        let angles = PartAngles::default().with_walk(walk_pose(0.25, 1.0, &WalkConfig::embedded()));
-        pose_parts(Mat4::IDENTITY, &rig, angles, &mut world);
-        // The left foot (0.9 m below the hip) is forward, the right one back, both on the ground.
-        let foot_l = world[0].transform_point3(Vec3::new(0.0, -0.9, 0.0));
-        let foot_r = world[1].transform_point3(Vec3::new(0.0, -0.9, 0.0));
-        assert!(
-            foot_l.x > 0.3 && foot_r.x < -0.3,
-            "{file}: {foot_l} {foot_r}"
-        );
-        assert!(foot_l.y.abs() < 1e-4 && foot_r.y.abs() < 1e-4, "{file}");
     }
 }
 

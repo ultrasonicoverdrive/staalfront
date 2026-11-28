@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use sf_asset_check::Checker;
 use sf_model_gen::kit::{Model, Node};
 use sf_model_gen::units_infantry::{
-    HIP_Y, JOINTS, NECK_Y, SHOULDER_Y, WAIST_Y, meridian_rifleman, veyran_rifleman,
+    HIP_Y, JOINTS, KNEE_Y, NECK_Y, SHOULDER_Y, WAIST_Y, meridian_rifleman, veyran_rifleman,
 };
 use sf_render::glb::{self, AxisConvention};
 use sf_render::model::{Joint, Limb};
@@ -18,10 +18,10 @@ fn assets() -> PathBuf {
 }
 
 fn figures() -> [(Model, [usize; 3]); 2] {
-    // Pinned triangle counts per level (the infantry budget is 1500 / 250 / 60, LOD0 >= 400).
+    // Pinned triangle counts per level (the infantry budget is 3000 / 750 / 150 since round 2).
     [
-        (meridian_rifleman(), [1452, 196, 56]),
-        (veyran_rifleman(), [1046, 196, 56]),
+        (meridian_rifleman(), [2956, 748, 140]),
+        (veyran_rifleman(), [1676, 550, 138]),
     ]
 }
 
@@ -31,7 +31,7 @@ fn the_triangles_per_level_are_pinned_and_inside_the_infantry_budget() {
         let t = m.triangles();
         assert_eq!(t, want, "{}", m.stem);
         assert!(
-            t[0] >= 400 && t[0] <= 1500 && t[1] <= 250 && t[2] <= 60,
+            t[0] >= 400 && t[0] <= 3000 && t[1] <= 750 && t[2] <= 150,
             "{t:?}"
         );
         assert!(t[0] > t[1] && t[1] > t[2], "{}: not reduced {t:?}", m.stem);
@@ -63,22 +63,26 @@ fn the_figure_nodes_sit_at_their_joints_and_the_rifle_is_in_the_right_arm() {
     assert_eq!(
         JOINTS,
         [
-            ("leg_l", [0, 900, -105]),
-            ("leg_r", [0, 900, 105]),
-            ("torso", [0, 960, 0]),
-            ("head", [0, 1450, 0]),
-            ("arm_l", [0, 1400, -220]),
-            ("arm_r", [0, 1400, 220]),
+            ("leg_l", [0, 920, -100]),
+            ("leg_r", [0, 920, 100]),
+            ("shin_l", [0, 495, -100]),
+            ("shin_r", [0, 495, 100]),
+            ("torso", [0, 980, 0]),
+            ("head", [0, 1490, 0]),
+            ("arm_l", [0, 1420, -215]),
+            ("arm_r", [0, 1420, 215]),
         ]
     );
-    const { assert!(HIP_Y < WAIST_Y && WAIST_Y < SHOULDER_Y && SHOULDER_Y < NECK_Y) };
+    const { assert!(KNEE_Y < HIP_Y && HIP_Y < WAIST_Y && WAIST_Y < SHOULDER_Y && SHOULDER_Y < NECK_Y) };
     for (m, _) in figures() {
         let metal = sf_model_gen::palette::slot::METAL;
         for root in &m.lods {
             let names: Vec<&str> = root.children.iter().map(|c| c.name.as_str()).collect();
             assert_eq!(
                 names,
-                ["leg_l", "leg_r", "torso", "head", "arm_l", "arm_r"],
+                [
+                    "leg_l", "leg_r", "shin_l", "shin_r", "torso", "head", "arm_l", "arm_r"
+                ],
                 "{}",
                 root.name
             );
@@ -138,6 +142,8 @@ fn the_engine_walks_the_new_figures_and_not_the_set_v3_ones() {
                 [
                     Limb::LegL,
                     Limb::LegR,
+                    Limb::ShinL,
+                    Limb::ShinR,
                     Limb::Torso,
                     Limb::Head,
                     Limb::ArmL,
@@ -149,7 +155,7 @@ fn the_engine_walks_the_new_figures_and_not_the_set_v3_ones() {
             );
             let hip = level.parts[0].rest.w_axis;
             assert!(
-                (hip.y - 0.9).abs() < 1e-6 && (hip.z + 0.105).abs() < 1e-6,
+                (hip.y - 0.92).abs() < 1e-6 && (hip.z + 0.1).abs() < 1e-6,
                 "{hip}"
             );
         }

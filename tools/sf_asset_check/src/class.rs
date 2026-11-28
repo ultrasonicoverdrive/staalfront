@@ -121,8 +121,9 @@ impl Class {
     }
 }
 
-/// Triangle budget per LOD (LOD0, LOD1, LOD2). `pair` = two figures in one file.
-pub const fn budget(class: Class, pair: bool) -> [u32; 3] {
+/// Triangle budget per LOD (LOD0, LOD1, LOD2). `_pair` = two figures in one file (since WP11.6i
+/// round 2 the same budget as one figure).
+pub const fn budget(class: Class, _pair: bool) -> [u32; 3] {
     match class {
         // WP11.6i round 2 (Tijmen 28-11-2026, "a real step towards realistic little soldiers"):
         // a figure with tapered round sections, knees, hands and kit needs about 3,000 / 750 / 150

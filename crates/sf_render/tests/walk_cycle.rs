@@ -50,10 +50,11 @@ fn part_matrix(inst: &Instancer, set: &ModelSet, shape: u8, part: usize) -> Mat4
     Mat4::from_cols_array_2d(&inst.mesh_instances(mesh)[0].model)
 }
 
-/// The left foot of the trial rifleman along `+X` relative to the unit (0.9 m below the hip).
+/// The left ankle of the trial rifleman along `+X` relative to the unit: the end of the left
+/// shin (part 2), 0.495 m below the knee.
 fn foot_ahead(inst: &Instancer, set: &ModelSet, unit_x: f32) -> f32 {
-    part_matrix(inst, set, 0, 0)
-        .transform_point3(Vec3::new(0.0, -0.9, 0.0))
+    part_matrix(inst, set, 0, 2)
+        .transform_point3(Vec3::new(0.0, -0.495, 0.0))
         .x
         - unit_x
 }
@@ -83,21 +84,21 @@ fn the_legs_swing_with_the_distance_and_settle_when_the_unit_stops() {
     // Standing: the leg hangs straight.
     walk(&mut inst, 40.0, 40.0, 4);
     assert!(foot_ahead(&inst, &set, 40.0).abs() < 1e-3);
-    // A quarter of a stride (1.80 m per cycle): the left leg is at its most forward.
+    // Half a stride (1.60 m per cycle): the left foot ends its stance a quarter stride behind
+    // the hip (0.4 m), with the walk fully blended in (15 frames of 1/60 s).
     let stride = sf_render::walk::WalkConfig::embedded().stride_m;
-    walk(&mut inst, 40.0, 40.0 + stride * 0.25, 30);
-    let ahead = foot_ahead(&inst, &set, 40.0 + stride * 0.25);
-    // 0.9 m * sin(30°) = 0.45 m, times the blend weight (fully in after 15 frames of 1/60 s).
-    assert!((ahead - 0.45).abs() < 0.01, "{ahead}");
-    // The same quarter stride in 4 frames or in 60: the same phase (distance, not time).
+    walk(&mut inst, 40.0, 40.0 + stride * 0.5, 30);
+    let ahead = foot_ahead(&inst, &set, 40.0 + stride * 0.5);
+    assert!((ahead + 0.25 * stride).abs() < 0.01, "{ahead}");
+    // The same half stride in 4 frames or in 60: the same phase (distance, not time).
     let mut slow = Instancer::new(Style::embedded(), (128.0, 128.0));
     slow.set_models(set.clone());
     walk(&mut slow, 40.0, 40.0, 4);
-    walk(&mut slow, 40.0, 40.0 + stride * 0.25, 60);
-    let ahead_slow = foot_ahead(&slow, &set, 40.0 + stride * 0.25);
+    walk(&mut slow, 40.0, 40.0 + stride * 0.5, 60);
+    let ahead_slow = foot_ahead(&slow, &set, 40.0 + stride * 0.5);
     assert!((ahead_slow - ahead).abs() < 1e-3, "{ahead_slow} {ahead}");
     // Stopped: back in the stand pose after the blend time.
-    let x = 40.0 + stride * 0.25;
+    let x = 40.0 + stride * 0.5;
     walk(&mut inst, x, x, 30);
     assert!(foot_ahead(&inst, &set, x).abs() < 1e-3);
 }
@@ -192,7 +193,7 @@ fn a_new_unit_in_a_slot_starts_from_the_stand_pose() {
     let f = frustum();
     let stride = sf_render::walk::WalkConfig::embedded().stride_m;
     let old = UnitId::from_parts(1, 0);
-    let x = 40.0 + stride * 0.25;
+    let x = 40.0 + stride * 0.5;
     inst.update_tick([Motion::from_fixed(
         0,
         0,
@@ -205,7 +206,7 @@ fn a_new_unit_in_a_slot_starts_from_the_stand_pose() {
     for k in 0..=30 {
         inst.build_frame(&FrameView::models_only(&f, k as f32 / 30.0), |_, _| 0.0);
     }
-    assert!(foot_ahead(&inst, &set, x) > 0.3);
+    assert!(foot_ahead(&inst, &set, x) < -0.3);
     // Same slot, next generation, standing where the old one stopped: one frame, no swing.
     let new = UnitId::from_parts(1, 1);
     inst.update_tick([Motion::from_fixed(
@@ -219,4 +220,33 @@ fn a_new_unit_in_a_slot_starts_from_the_stand_pose() {
     .with_id(new)]);
     inst.build_frame(&FrameView::models_only(&f, 1.0), |_, _| 0.0);
     assert!(foot_ahead(&inst, &set, x).abs() < 1e-3);
+}
+
+/// Round-1 review: every shipped GLB that the game can load, in every set folder, and only the two
+/// trial riflemen walk.
+#[test]
+fn of_every_shipped_model_only_the_two_riflemen_walk() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+    let mut walking = Vec::new();
+    let mut seen = 0;
+    for dir in ["set_v3", "set_v4", "set_v5", "testpack_v1/models"] {
+        let mut files: Vec<_> = std::fs::read_dir(root.join(dir))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|x| x == "glb"))
+            .collect();
+        files.sort();
+        for path in files {
+            let Ok(m) = glb::load_glb_file(&path, &AxisConvention::ENGINE) else {
+                continue;
+            };
+            seen += 1;
+            let set = glb::model_set(&[m], &[60.0, 30.0, 15.0]).unwrap();
+            if set.model(0).walks() {
+                walking.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            }
+        }
+    }
+    assert!(seen > 150, "{seen}");
+    assert_eq!(walking, ["meridian_rifleman.glb", "veyran_rifleman.glb"]);
 }

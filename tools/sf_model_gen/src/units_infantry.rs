@@ -308,7 +308,7 @@ fn head(f: F, lod: Lod) -> Mesh {
             ));
             m.add(body(f, lod, &[(169, 157, 226), (169, 157, 262)], TEAM));
             m.add(loft(
-                &[(ring(f, lod, 96, 92), 356), (ring(f, lod, 82, 78), 368)],
+                &[(ring(f, lod, 70, 66), 356), (ring(f, lod, 60, 56), 368)],
                 &[TEAM],
                 Some(TEAM),
                 None,
@@ -361,7 +361,11 @@ fn arm(f: F, lod: Lod, rifle: bool) -> Mesh {
             }
             F::V => {
                 m.add(closed_box([-80, 40, -66], [80, 84, 78], PAINT2));
-                m.add(team_strip([-74, 84, -60], [74, 96, 72], lod));
+                if lod.has(0) {
+                    m.add(team_strip([-68, 84, -54], [68, 96, 66], lod));
+                } else {
+                    m.add(team_strip([-50, 84, -36], [50, 96, 48], lod));
+                }
             }
         }
         if rifle {
